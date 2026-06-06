@@ -15,8 +15,11 @@ enum DatabaseKeyKind {
   /// A human-readable passphrase; SQLite derives the raw key via the cipher KDF.
   passphrase,
 
-  /// A raw key supplied as hex; bound with the `x'...'` syntax so SQLite treats
-  /// it as raw bytes and skips key derivation.
+  /// A key supplied as hex, bound with the `x'...'` syntax. SQLite3MultipleCiphers
+  /// only bypasses key derivation when the hex decodes to the cipher's exact raw
+  /// key length (32 bytes / 64 hex chars for chacha20); any other length is still
+  /// run through the KDF. [_assertHex] validates hex shape only — enforce the raw
+  /// key length here when a raw-key path is actually wired up.
   hex,
 }
 
@@ -112,7 +115,8 @@ void _applyKey(
   rawDb.execute('PRAGMA kdf_iter = $_kdfIterations;');
 
   final keyLiteral = switch (keyKind) {
-    // Bind raw bytes: x'..' skips key derivation and is treated verbatim.
+    // Bind hex bytes via x'..'; the KDF is bypassed only for an exact-length
+    // raw key (see [DatabaseKeyKind.hex]), otherwise it still applies.
     DatabaseKeyKind.hex => "x'${_assertHex(key)}'",
     // Passphrase: single-quote-escaped string literal; SQLite runs the KDF.
     DatabaseKeyKind.passphrase => "'${key.replaceAll("'", "''")}'",
