@@ -123,21 +123,23 @@ class DatabaseService extends _$DatabaseService {
   /// Returns `null` when the code is unknown, and the first match (by id) in the
   /// pathological case of a code shared by several entries.
   Future<ManualEntryRow?> manualEntryByCode(String code) {
-    final normalized = normalizeFaultCode(code);
-    if (normalized.isEmpty) return Future.value();
-    return manualEntryByCodeQuery(normalized).getSingleOrNull();
+    if (normalizeFaultCode(code).isEmpty) return Future.value();
+    return manualEntryByCodeQuery(code).getSingleOrNull();
   }
 
-  /// The statement [manualEntryByCode] runs, for an already-canonicalised
-  /// [normalizedCode].
+  /// The statement [manualEntryByCode] runs.
   ///
-  /// Exposed so a test can inspect the SQL drift actually emits — asserting the
+  /// Canonicalises [code] itself rather than trusting the caller, so it is
+  /// correct for any caller — the `NOCASE` collation covers case but not the
+  /// surrounding whitespace a dictated code can carry.
+  ///
+  /// Exposed so a test can inspect the SQL drift actually emits: asserting the
   /// query plan of a hand-written equivalent would keep passing if this method
   /// regressed to wrapping the column in `upper(...)`, which is exactly the
   /// regression worth guarding.
   SimpleSelectStatement<$ManualEntriesTable, ManualEntryRow>
-  manualEntryByCodeQuery(String normalizedCode) => select(manualEntries)
-    ..where((t) => t.code.equals(normalizedCode))
+  manualEntryByCodeQuery(String code) => select(manualEntries)
+    ..where((t) => t.code.equals(normalizeFaultCode(code)))
     ..orderBy([(t) => OrderingTerm.asc(t.id)])
     ..limit(1);
 
