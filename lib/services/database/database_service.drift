@@ -20,6 +20,9 @@ import 'tables/manual_fts_table.dart';
 -- The fault `code` column is deliberately absent: codes tokenize badly (`E-102`
 -- becomes the junk token `e` plus `102`) and are matched exactly on
 -- `manual_entries.code` instead.
+--
+-- Do not add `columnsize=0` here: it removes the `manual_fts_docsize` shadow
+-- table that `DatabaseService.manualFtsIndexedDocumentCount` reads.
 CREATE VIRTUAL TABLE manual_fts USING fts5 (
     title,
     symptoms,

@@ -245,6 +245,11 @@ class ManualEntryRow extends DataClass implements Insertable<ManualEntryRow> {
   /// unusable and forces a table scan, whereas the collation gives
   /// case-insensitive equality *through* the index — and still matches rows
   /// written by a path that skipped [normalizeFaultCode].
+  ///
+  /// Note that `customConstraint` **replaces** drift's whole generated constraint
+  /// string rather than adding to it, which is why `NOT NULL` is restated by
+  /// hand. Anything added here later (a default, a check) has to go in this one
+  /// string or it silently vanishes from the DDL.
   final String code;
 
   /// Entry heading, e.g. `Traction Brake Pad Wear & Vibration`.
