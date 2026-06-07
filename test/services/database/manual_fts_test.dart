@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:drift/drift.dart' show Variable;
 import 'package:field_ops_copilot/services/database/database_service.dart';
 import 'package:field_ops_copilot/services/database/fts_query_sanitizer.dart';
 import 'package:field_ops_copilot/services/database/tables/manual_fts_table.dart';
@@ -40,18 +41,48 @@ void main() {
 
   group('seeding', () {
     // TC-FTS-SEED-01: bulk insert of the seed manual populates the FTS index.
+    //
+    // Both halves matter. The document count reads `manual_fts_docsize`, the
+    // shadow table holding one row per *indexed* document — an unconstrained
+    // COUNT over `manual_fts` itself would be answered from the content table
+    // and would pass with the triggers dropped. The per-entry searches then
+    // prove each document is individually reachable through the index.
     test('bulk insert indexes every seed entry', () async {
       await seed();
 
-      expect(await db.manualFtsRowCount(), 3);
+      expect(await db.manualFtsIndexedDocumentCount(), 3);
       expect(await db.select(db.manualEntries).get(), hasLength(3));
+
+      // A term unique to each entry, so all three index entries are exercised.
+      expect(await search('traction'), ['apex_9_err_102']);
+      expect(await search('proportional'), ['apex_9_err_204']);
+      expect(await search('clutches'), ['apex_9_err_305']);
+    });
+
+    test('the document count reads the index, not the content table', () async {
+      // Pins the distinction the count exists for: with the insert trigger gone,
+      // the content table fills but the index stays empty.
+      await db.customStatement('DROP TRIGGER manual_entries_after_insert');
+      await seed();
+
+      expect(await db.select(db.manualEntries).get(), hasLength(3));
+      expect(await db.manualFtsIndexedDocumentCount(), 0);
+      expect(await search('traction'), isEmpty);
+
+      // ...and the documented recovery repopulates it from the content table.
+      await db.rebuildManualFtsIndex();
+
+      expect(await db.manualFtsIndexedDocumentCount(), 3);
+      expect(await search('traction'), ['apex_9_err_102']);
     });
 
     test('re-inserting the same ids does not duplicate index rows', () async {
       await seed();
       await seed();
 
-      expect(await db.manualFtsRowCount(), 3);
+      expect(await db.manualFtsIndexedDocumentCount(), 3);
+      // A duplicated document would return the same id twice.
+      expect(await search('traction'), ['apex_9_err_102']);
     });
 
     test('the update trigger keeps the index in sync', () async {
@@ -70,7 +101,7 @@ void main() {
       await db.upsertManualEntries([entry]);
 
       expect(await search('ledger'), isEmpty);
-      expect(await db.manualFtsRowCount(), 3);
+      expect(await db.manualFtsIndexedDocumentCount(), 3);
     });
 
     test('deleting an entry removes it from the index', () async {
@@ -80,7 +111,7 @@ void main() {
         db.manualEntries,
       )..where((t) => t.id.equals('apex_9_err_204'))).go();
 
-      expect(await db.manualFtsRowCount(), 2);
+      expect(await db.manualFtsIndexedDocumentCount(), 2);
       expect(await search('hydraulic'), isEmpty);
     });
   });
@@ -113,27 +144,42 @@ void main() {
       );
       addTearDown(v2.close);
 
-      // Upgrading recreates the table, the index and the triggers: a fresh
+      // Upgrading recreates the table, the FTS index and the triggers: a fresh
       // insert must be searchable immediately.
       await v2.upsertManualEntries(_seedEntries);
 
-      expect(await v2.manualFtsRowCount(), 3);
+      expect(await v2.manualFtsIndexedDocumentCount(), 3);
       final ids = await v2.searchManualEntries('squeal');
       expect(ids.map((r) => r.id), hasLength(2));
+
+      // The b-tree index is a *separate* schema entity from the table, so
+      // `createTable` alone would leave upgraded installs without it.
+      final indexes = await v2
+          .customSelect(
+            "SELECT name FROM sqlite_master WHERE type = 'index' "
+            "AND name = 'idx_manual_entries_code'",
+          )
+          .get();
+      expect(indexes, hasLength(1));
     });
   });
 
   group('full-text matching', () {
     setUp(seed);
 
-    // TC-FTS-MATCH-01: symptom search across the porter-stemmed, title-indexed
-    // columns. "vibrating" only reaches E-102 through the stemmer (the manual
-    // says "vibration"), and "brake" only through the indexed title/procedure.
+    // TC-FTS-MATCH-01: the AC's input, plus the assertion that actually depends
+    // on the stemmer. "vibrating brake" alone would pass without porter, because
+    // "brake" is a literal hit in E-102's title, section and procedure — with an
+    // OR-join one matching term is enough. "vibrating" on its own has no literal
+    // occurrence anywhere: the manual says "vibration", so it can only match
+    // through the porter stem `vibrat`.
     test('vibrating brake finds the brake-wear entry', () async {
       expect(await search('vibrating brake'), ['apex_9_err_102']);
+      expect(await search('vibrating'), ['apex_9_err_102']);
     });
 
-    // TC-FTS-MATCH-03: a stem shared by two entries returns both.
+    // TC-FTS-MATCH-03: a stem shared by two entries returns both. Also
+    // porter-only — the manual says "squealing", never "squeal".
     test('squeal matches squealing in two entries', () async {
       expect(
         await search('squeal'),
@@ -142,17 +188,25 @@ void main() {
       expect(await search('squeal'), hasLength(2));
     });
 
-    test('title-only terms are searchable (title is indexed)', () async {
-      expect(await search('clutches'), ['apex_9_err_305']);
+    test('title is indexed', () async {
+      // "traction" occurs *only* in E-102's title — not in its section, symptoms
+      // or procedure — so this fails if `title` leaves the FTS column list.
+      // (A term like "clutches" would not prove it: E-305's procedure says
+      // "door clutch alignment", which porter stems to the same token.)
+      expect(await search('traction'), ['apex_9_err_102']);
     });
 
-    test('section is searchable', () async {
-      expect(await search('valving'), ['apex_9_err_204']);
+    test('section is indexed', () async {
+      // Likewise "systems" occurs only in E-102's section, "Brake Systems".
+      // ("valving" would not prove it — the title and procedure both say
+      // "valve", which stems to `valv` just as "valving" does.)
+      expect(await search('systems'), ['apex_9_err_102']);
     });
 
     test('ranking puts the title match first', () async {
-      // "belt" appears in E-305's title *and* prose; "brake" only in E-102.
-      // Both entries match, and the stronger, title-weighted hit leads.
+      // Both terms are literal hits in their entry's title, section and
+      // procedure, so both entries match; E-305 leads because "belt" is also
+      // repeated in its symptom prose, which bm25 weights above the procedure.
       final ids = await search('belt brake');
       expect(ids.first, 'apex_9_err_305');
       expect(ids, containsAll(<String>['apex_9_err_102', 'apex_9_err_305']));
@@ -193,12 +247,38 @@ void main() {
       expect(await db.manualEntryByCode('   '), isNull);
     });
 
-    test('codes are not reachable through FTS', () async {
-      // The code column is deliberately outside the index: searching for the
-      // code as text must not be how a caller finds the entry. ("204" does
-      // appear in E-204's symptom prose, which is fine — the point is that the
-      // structured column is the lookup path.)
-      expect(await search('E-102'), isNot(contains('apex_9_err_204')));
+    test('the code column is not part of the FTS index', () async {
+      // The invariant the plan asks for: `code` is a structured column, so it is
+      // not an fts5 column at all. A column-filtered MATCH against it is a
+      // hard error, which is the only way to assert its absence — note that the
+      // code *text* is still findable through prose (the symptom paragraphs
+      // repeat "fault code E-102"), so a plain search proves nothing here.
+      await expectLater(
+        db
+            .customSelect(
+              'SELECT * FROM manual_fts WHERE manual_fts MATCH ?1',
+              variables: [Variable<String>('code:"E-102"')],
+            )
+            .get(),
+        throwsA(isA<SqliteException>()),
+      );
+    });
+
+    test('the lookup uses the code index rather than scanning', () async {
+      // Guards the reason `code` is COLLATE NOCASE instead of upper(code): a
+      // function around the column would silently drop back to a full scan.
+      final plan = await db
+          .customSelect(
+            'EXPLAIN QUERY PLAN SELECT * FROM manual_entries '
+            'WHERE code = ?1 ORDER BY id LIMIT 1',
+            variables: [Variable<String>('E-204')],
+          )
+          .get();
+
+      expect(
+        plan.map((r) => r.read<String>('detail')).join('\n'),
+        contains('idx_manual_entries_code'),
+      );
     });
 
     test('stored codes are canonicalised on write', () async {
@@ -245,6 +325,29 @@ void main() {
         FtsQuerySanitizer.sanitize(operators),
         '"belt" OR "AND" OR "door" OR "OR" OR "NEAR"',
       );
+    });
+
+    test('term-list search is guarded for a router that consumes the code', () async {
+      // The Task 1.4 shape: extract "E-102", handle it structurally, search on
+      // what is left. When the input is *only* a code there is nothing left, and
+      // an empty MATCH expression is an FTS5 syntax error — so the guard has to
+      // live on this path too, not only on the raw-text one.
+      final terms = FtsQuerySanitizer.terms('E-102');
+      expect(terms, ['E-102']);
+
+      expect(await db.searchManualEntriesByTerms(const []), isEmpty);
+      expect(await db.searchManualEntriesByTerms(const ['   ']), isEmpty);
+
+      // The generated query is the path that has no guard — proving the guard is
+      // load-bearing rather than defensive decoration.
+      await expectLater(
+        db.searchManualEntriesRanked('', 10).get(),
+        throwsA(isA<SqliteException>()),
+      );
+
+      // With residual terms it behaves like the raw-text entry point.
+      final ids = await db.searchManualEntriesByTerms(['squealing', 'belt']);
+      expect(ids.map((r) => r.id), contains('apex_9_err_305'));
     });
 
     test('sanitizes syntax characters out of terms', () async {
@@ -325,7 +428,8 @@ void main() {
       }
 
       // The injection attempt above must not have destroyed anything.
-      expect(await db.manualFtsRowCount(), 3);
+      expect(await db.manualFtsIndexedDocumentCount(), 3);
+      expect(await db.select(db.manualEntries).get(), hasLength(3));
     });
   });
 

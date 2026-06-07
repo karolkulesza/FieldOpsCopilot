@@ -31,7 +31,13 @@ class ManualEntries extends Table {
 
   /// Controller fault code, e.g. `E-102`. Stored canonically (trimmed,
   /// upper-cased) and queried by exact match — never through FTS.
-  TextColumn get code => text()();
+  ///
+  /// `COLLATE NOCASE` rather than an `upper(code)` comparison at query time:
+  /// wrapping the column in a function makes `idx_manual_entries_code`
+  /// unusable and forces a table scan, whereas the collation gives
+  /// case-insensitive equality *through* the index — and still matches rows
+  /// written by a path that skipped [normalizeFaultCode].
+  TextColumn get code => text().customConstraint('NOT NULL COLLATE NOCASE')();
 
   /// Entry heading, e.g. `Traction Brake Pad Wear & Vibration`.
   TextColumn get title => text()();

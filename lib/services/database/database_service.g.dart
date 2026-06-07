@@ -37,6 +37,7 @@ class $ManualEntriesTable extends ManualEntries
     false,
     type: DriftSqlType.string,
     requiredDuringInsert: true,
+    $customConstraints: 'NOT NULL COLLATE NOCASE',
   );
   static const VerificationMeta _titleMeta = const VerificationMeta('title');
   @override
@@ -238,6 +239,12 @@ class ManualEntryRow extends DataClass implements Insertable<ManualEntryRow> {
 
   /// Controller fault code, e.g. `E-102`. Stored canonically (trimmed,
   /// upper-cased) and queried by exact match — never through FTS.
+  ///
+  /// `COLLATE NOCASE` rather than an `upper(code)` comparison at query time:
+  /// wrapping the column in a function makes `idx_manual_entries_code`
+  /// unusable and forces a table scan, whereas the collation gives
+  /// case-insensitive equality *through* the index — and still matches rows
+  /// written by a path that skipped [normalizeFaultCode].
   final String code;
 
   /// Entry heading, e.g. `Traction Brake Pad Wear & Vibration`.
@@ -254,7 +261,7 @@ class ManualEntryRow extends DataClass implements Insertable<ManualEntryRow> {
   /// Kept as raw JSON text rather than a drift type converter so that the
   /// generated row class keeps value equality (a converted `List<String>` field
   /// compares by identity, which silently breaks row-equality assertions).
-  /// Decode through [ManualEntryLists.requiredToolsList].
+  /// Decode through the `ManualEntryLists` extension in `database_service.dart`.
   final String requiredTools;
 
   /// JSON array of part SKUs, e.g. `["BRK-990-XP"]`.
@@ -2017,14 +2024,6 @@ abstract class _$DatabaseService extends GeneratedDatabase {
       variables: [Variable<String>(match), Variable<int>(limit)],
       readsFrom: {manualFts, manualEntries},
     ).asyncMap(manualEntries.mapFromRow);
-  }
-
-  Selectable<int> countManualFtsRows() {
-    return customSelect(
-      'SELECT COUNT(*) AS c FROM manual_fts',
-      variables: [],
-      readsFrom: {manualFts},
-    ).map((QueryRow row) => row.read<int>('c'));
   }
 
   @override
