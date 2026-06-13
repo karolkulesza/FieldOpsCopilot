@@ -7,7 +7,7 @@ import 'package:integration_test/integration_test.dart';
 
 /// TC-PROV-E2E-01 — real download, verify and install, on a device.
 ///
-/// Run manually, once, against the real license-gated artifact:
+/// Run manually, once, against the real artifact:
 ///
 /// ```sh
 /// flutter test integration_test/model_provisioning_test.dart \
@@ -16,10 +16,11 @@ import 'package:integration_test/integration_test.dart';
 ///   --dart-define=FIELDOPS_MODEL_TOKEN=<access token>
 /// ```
 ///
-/// It **skips** without those defines rather than failing, because the weights
-/// are license-gated: a checkout cannot obtain them and CI must never try. That
-/// is also why this lives in `integration_test/`, which `flutter test` does not
-/// pick up.
+/// It **skips** without those defines rather than failing, because a checkout has
+/// no artifact to fetch and CI must not try: the transfer is gigabytes over the
+/// network, and some sources additionally gate downloads behind a token. That is
+/// also why this lives in `integration_test/`, which `flutter test` does not pick
+/// up.
 ///
 /// Scope note, stated plainly: the AC's wording is "engine can load the installed
 /// model", and the engine does not exist yet — it is Task 1.8. What this asserts

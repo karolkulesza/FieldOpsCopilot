@@ -20,12 +20,16 @@ final activeModelDescriptorProvider = Provider<ModelDescriptor>(
 
 /// Access token for the model host, or `null` when none was supplied.
 ///
-/// A token passed with `--dart-define` is baked into the binary, which is fine
-/// for a development or demo build and **not** a shipping pattern: anyone with
-/// the app has the credential. The fleet answer is in the README's OTA
-/// section — a short-lived signed URL issued per device by an enterprise
-/// backend — and it slots in behind this provider without touching the
-/// provisioner.
+/// Many sources need none: a repository that does not gate downloads (the primary
+/// LiteRT-LM build does not) is fetched anonymously, and provisioning sends no
+/// `Authorization` header at all. A token is only required by a gated source — the
+/// Gemma 3 1B fallback repository is one.
+///
+/// Where a token *is* needed, note that `--dart-define` bakes it into the binary,
+/// which is fine for a development or demo build and **not** a shipping pattern:
+/// anyone with the app has the credential. The fleet answer is in the README's OTA
+/// section — a short-lived signed URL issued per device by an enterprise backend —
+/// and it slots in behind this provider without touching the provisioner.
 final modelAccessTokenProvider = Provider<String?>(
   (ref) => _configuredToken.isEmpty ? null : _configuredToken,
 );

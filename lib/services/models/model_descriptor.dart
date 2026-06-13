@@ -1,11 +1,20 @@
 /// Identity, provenance and integrity fingerprint of an on-device model
 /// artifact.
 ///
-/// Gemma weights cannot live in the repository: they are license-gated (the
-/// download requires accepting Google's Gemma terms on HuggingFace or Kaggle and
-/// authenticating with a personal token) and 0.5–2.4GB in size. So the app ships
-/// a *description* of the artifact it expects — file name, source URL and a
-/// pinned SHA-256 — and provisions the bytes at runtime.
+/// Gemma weights cannot live in the repository: they are 0.6–2.6GB, well past what
+/// belongs in git or an app-store binary, and their use is governed by Google's
+/// Gemma terms. So the app ships a *description* of the artifact it expects — file
+/// name, source URL and a pinned SHA-256 — and provisions the bytes at runtime.
+///
+/// **Download gating is a per-repository fact, not a property of Gemma.** The task
+/// this came from assumed every source needs an access token; measured against the
+/// live hosts, the LiteRT-LM rebuilds differ from the base models. As of
+/// 2026-07-30: `litert-community/gemma-4-E2B-it-litert-lm` reports
+/// `gated: false` and its `resolve` URL answers an anonymous request with a 302 to
+/// the CDN, while `litert-community/Gemma3-1B-IT` reports `gated: auto` and does
+/// need a token. Accepting the licence still applies to *using* the model either
+/// way; a token is only about *downloading*. Hence [ModelDescriptor.downloadUri]
+/// and the token are independent build inputs, and neither is assumed.
 ///
 /// The source URL and the hash are deliberately **not** hard-coded in this file.
 /// A URL is revision-specific and a hash is bytes-specific: writing either one
@@ -37,6 +46,9 @@ class ModelDescriptor {
   });
 
   /// Stable identifier used for catalog lookup and receipt bookkeeping.
+  ///
+  /// An opaque key, not a description: `…-int4` in an id is historical and asserts
+  /// nothing about the artifact a given URL actually serves.
   final String id;
 
   /// Human-readable name for the "model ready" UI and log lines.
@@ -47,15 +59,24 @@ class ModelDescriptor {
   /// runtime: LiteRT-LM loads `.litertlm`, MediaPipe loads `.task`/`.bin`.
   final String fileName;
 
-  /// Where the model's license is accepted.
+  /// Where the model's licence is accepted.
+  ///
+  /// Distinct from whether a *download* needs a token: the licence governs use of
+  /// the model and applies however the bytes were obtained.
   ///
   /// Shown to the operator as an instruction when provisioning is unconfigured, so
   /// it must be a URL that actually resolves — a 404 in the one place the app says
-  /// what to do next is worse than saying nothing. It therefore points at the Gemma
-  /// terms rather than at a guessed repository path: the exact repository and file
-  /// are a deployment input (`FIELDOPS_MODEL_URI`), and hosts reply `401` to gated
-  /// *and* non-existent repositories alike, so a repository URL written here could
-  /// not be checked even in principle.
+  /// what to do next is worse than saying nothing. It points at the Gemma terms
+  /// rather than at a repository, because the repository and file are a deployment
+  /// input (`FIELDOPS_MODEL_URI`) while the licence is the same wherever the bytes
+  /// come from.
+  ///
+  /// A correction to an earlier version of this comment, since it was wrong in a way
+  /// worth not repeating: it claimed a repository URL "could not be checked even in
+  /// principle" because hosts answer `401` for gated *and* non-existent repositories
+  /// alike. That is true of the **web** URL only. HuggingFace's API does distinguish
+  /// them — `GET /api/models/<repo>` returns the repo with a `gated` field, or 404 —
+  /// which is how the catalog's sizes and gating status below were established.
   final String licensePage;
 
   /// Resolved download URL, or `null` when none has been configured.
@@ -132,15 +153,23 @@ class ModelDescriptor {
 /// ```sh
 /// flutter run \
 ///   --dart-define=FIELDOPS_MODEL_ID=gemma-4-e2b-it-int4 \
-///   --dart-define=FIELDOPS_MODEL_URI=https://…/gemma-4-e2b-it-int4.litertlm \
+///   --dart-define=FIELDOPS_MODEL_URI=https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm \
 ///   --dart-define=FIELDOPS_MODEL_SHA256=<64 hex chars>
 /// ```
+///
+/// A source that gates downloads also needs `FIELDOPS_MODEL_TOKEN`; the URL above
+/// does not (see the library doc). The hash is not written here on purpose — see
+/// [ModelDescriptor.sha256Hex] — but it can be read from the host without
+/// downloading the artifact: HuggingFace's `paths-info` API returns the LFS object
+/// id, which is the content SHA-256.
 ///
 /// The URI and hash apply to the **active** model only. Provisioning two models
 /// in one build is not a scenario the demo has: the device holds one set of
 /// weights, chosen by how much RAM it has.
 abstract final class ModelCatalog {
-  /// Primary target: Gemma 4 E2B, INT4, LiteRT-LM container.
+  /// Primary target: Gemma 4 E2B in a LiteRT-LM container. The quantisation is
+  /// whatever the configured URL serves — the shipped `litert-community` build does
+  /// not state one in its file name, so this does not claim INT4.
   static const gemma4E2bId = 'gemma-4-e2b-it-int4';
 
   /// Low-RAM alternative for mid-range devices — same [ModelDescriptor] shape,
@@ -155,17 +184,21 @@ abstract final class ModelCatalog {
   static const _catalog = <String, ModelDescriptor>{
     gemma4E2bId: ModelDescriptor(
       id: gemma4E2bId,
-      displayName: 'Gemma 4 E2B (INT4, LiteRT-LM)',
+      displayName: 'Gemma 4 E2B (LiteRT-LM)',
       fileName: 'gemma-4-e2b-it-int4.litertlm',
       licensePage: gemmaTermsUrl,
-      approximateSizeBytes: 2400 * 1000 * 1000,
+      // litert-community/gemma-4-E2B-it-litert-lm → gemma-4-E2B-it.litertlm,
+      // measured 2026-07-30. Progress display only; never an integrity check.
+      approximateSizeBytes: 2588147712,
     ),
     gemma31bId: ModelDescriptor(
       id: gemma31bId,
       displayName: 'Gemma 3 1B (INT4, LiteRT-LM)',
       fileName: 'gemma-3-1b-it-int4.litertlm',
       licensePage: gemmaTermsUrl,
-      approximateSizeBytes: 550 * 1000 * 1000,
+      // litert-community/Gemma3-1B-IT → gemma3-1b-it-int4.litertlm, measured
+      // 2026-07-30. That repo is `gated: auto`, so this one does need a token.
+      approximateSizeBytes: 584417280,
     ),
   };
 

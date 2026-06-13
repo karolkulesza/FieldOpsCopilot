@@ -160,7 +160,7 @@ final class ModelAbsent extends ModelProvisionResult {
 ///
 /// 1. bytes stream to a per-transfer `.part.<nonce>` staging file, never to the
 ///    final path;
-/// 2. the SHA-256 is computed **during** that stream, so a 2.4GB artifact is
+/// 2. the SHA-256 is computed **during** that stream, so a 2.6GB artifact is
 ///    neither buffered in memory nor read twice;
 /// 3. only a digest matching the pinned hash earns the atomic rename into place;
 /// 4. fetched bytes that fail are deleted, and operations on one model are
@@ -265,7 +265,7 @@ class ModelProvisioner {
 
       case ModelInstallStatus.unverified:
         // Hash what is already there first — a side-loaded artifact must not
-        // trigger a 2.4GB download just because it arrived without a receipt.
+        // trigger a 2.6GB download just because it arrived without a receipt.
         final local = await _verifyExisting(
           descriptor,
           excludedFromBackup: excludedFromBackup,
@@ -436,7 +436,7 @@ class ModelProvisioner {
     // a sink or delete each other's bytes — see [ModelStorage.stagingFile].
     final staging = _storage.stagingFile(descriptor, nonce: stagingNonce());
     // Leftovers from an interrupted run carry no resumable state, so they are
-    // swept rather than accumulated (a half-written 2.4GB file is real disk
+    // swept rather than accumulated (a half-written 2.6GB file is real disk
     // pressure). Ours is spared by name. Note this unlinks a staging file another
     // writer may still be filling — POSIX allows that — which kills their transfer
     // at rename time rather than sparing it; see
@@ -563,7 +563,7 @@ class ModelProvisioner {
   /// The unconditional version of this was too broad: a failed transfer would
   /// invalidate the receipt of an artifact it never touched — say a bad mirror
   /// serving junk while a good copy is already installed — forcing a needless
-  /// re-hash of 2.4GB on the next launch. So the check is "does a valid receipt
+  /// re-hash of 2.6GB on the next launch. So the check is "does a valid receipt
   /// describe the installed file right now?", which keeps the guarantee that
   /// mattered (a receipt must never outlive the bytes it describes, or it would
   /// bless the next same-sized file to appear at that path) without punishing an
