@@ -57,6 +57,14 @@ class ModelDescriptor {
   /// File name the artifact is installed under **locally**. It need not match the
   /// remote file name — nothing fetches this — but the extension matters to the
   /// runtime: LiteRT-LM loads `.litertlm`, MediaPipe loads `.task`/`.bin`.
+  ///
+  /// Like [id], a `…-int4` in the value is historical and asserts nothing about what
+  /// the configured URL serves. It is worth saying here rather than only on [id],
+  /// because this string is the more visible of the two: it is the literal file on
+  /// the device, the target of the README's side-load instructions, and what shows
+  /// up in a device container browser. The value is kept anyway — renaming it would
+  /// point `ModelStorage.installedFile` at a path that does not exist, turning every
+  /// current install into `absent` and costing a full re-download.
   final String fileName;
 
   /// Where the model's licence is accepted.

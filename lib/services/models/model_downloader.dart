@@ -52,10 +52,12 @@ abstract interface class ModelDownloader {
 /// explicit hop loop) so that credential scoping is this repository's behaviour
 /// rather than an inherited one. It matters here because a model host that *does*
 /// gate downloads authenticates the first request and then redirects to a
-/// pre-signed URL on a separate download host — HuggingFace redirects to
-/// `*.cdn.hf.co` whether or not the repository is gated — and forwarding the bearer
-/// token to that host would leak a credential covering the operator's whole
-/// account.
+/// pre-signed URL on a separate download host, and forwarding the bearer token to
+/// that host would leak a credential covering the operator's whole account.
+/// HuggingFace redirects to `*.cdn.hf.co` for a public repository — verified — so
+/// the cross-origin hop happens even where no credential is involved; the gated
+/// case cannot be observed without a token, since the request is refused before any
+/// redirect.
 ///
 /// To be precise about what this is and is not: `HttpClient` on Dart 3 already
 /// strips `Authorization` on a cross-origin redirect and keeps it on a
