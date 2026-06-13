@@ -136,12 +136,22 @@ class ModelStorage {
   /// Suffix marking a file as an in-progress or abandoned transfer.
   static const String stagingSuffix = '.part';
 
-  /// Deletes every staging file for [descriptor], whatever its nonce.
+  /// Deletes every staging file for [descriptor], whatever its nonce, except
+  /// [keep].
   ///
   /// A process killed mid-transfer leaves its `.part.<nonce>` behind with nothing
   /// to resume it, so those bytes are swept rather than accumulated — a
   /// half-downloaded 2.4GB artifact is real disk pressure on a rugged device.
-  /// [keep] spares the caller's own in-flight file.
+  ///
+  /// Be clear about what this does to a *concurrent* writer, because it is not
+  /// gentle: on POSIX the unlink **succeeds** even while another writer holds the
+  /// file open. That writer keeps filling an unlinked inode and only discovers the
+  /// problem when its rename finds nothing to move — which the provisioner catches
+  /// and reports as a failed install. So the sweep reliably kills a competing
+  /// transfer rather than sparing it. Nothing is corrupted (the killed transfer
+  /// installs nothing), and within one provisioner the queue means it cannot
+  /// happen; a second isolate or process is where it can, and it loses its
+  /// download.
   Future<void> deleteStagingFiles(
     ModelDescriptor descriptor, {
     File? keep,
@@ -155,8 +165,10 @@ class ModelStorage {
       try {
         await entry.delete();
       } on FileSystemException {
-        // Another process may own it and be mid-transfer; leaving it is safe —
-        // nothing installs from a staging path.
+        // Reached where an open file cannot be unlinked (Windows), not on the
+        // platforms this app ships to — POSIX unlinks it regardless, see the doc
+        // comment. Either way a staging file left behind is harmless: nothing is
+        // ever installed from a staging path.
         continue;
       }
     }

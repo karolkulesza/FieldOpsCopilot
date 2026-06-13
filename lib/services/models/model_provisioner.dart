@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
@@ -183,9 +184,32 @@ class ModelProvisioner {
   /// Tail of the queue of operations per model id — see [_serialized].
   final Map<String, Future<void>> _queues = {};
 
-  /// Feeds unique staging names. A counter plus the process id, rather than a
-  /// random value, so a staging path is reproducible in a log.
-  static int _stagingSequence = 0;
+  /// Source of the random component of a staging name.
+  ///
+  /// Being per-isolate is fine *because* it is seeded from OS entropy — unlike a
+  /// counter, two isolates do not both start at zero. See [stagingNonce].
+  static final Random _stagingRandom = Random.secure();
+
+  /// A staging-name component unique across every writer that could share the
+  /// models directory.
+  ///
+  /// The first version of this was `pid` plus a static counter, which was wrong in
+  /// a way worth recording: **static state is per-isolate while `pid` is
+  /// process-wide**, so two isolates in one process both produce
+  /// `<pid>-0` — the shared staging path whose consequences this whole design
+  /// exists to prevent (inode-preserving `rename` lets the loser's open sink write
+  /// into the installed artifact). Nothing in `lib/` runs on an isolate today, but
+  /// Task 1.8 puts inference on one and is also the task that will call
+  /// `provision()`.
+  ///
+  /// Dart has no `O_EXCL` file creation, so uniqueness cannot be *enforced* by the
+  /// filesystem; it is made overwhelmingly likely instead. The pid and timestamp
+  /// are kept for log readability, and the 32 random bits are what actually carry
+  /// the guarantee.
+  @visibleForTesting
+  static String stagingNonce() =>
+      '$pid-${DateTime.now().microsecondsSinceEpoch}-'
+      '${_stagingRandom.nextInt(1 << 32)}';
 
   /// The current install state of [descriptor], answered from the receipt
   /// without hashing — cheap enough for a startup path and for the UI's
@@ -280,13 +304,16 @@ class ModelProvisioner {
   /// queue additionally stops the redundant work, so the second caller simply sees
   /// the first one's verified install.
   ///
-  /// Scope, stated honestly: this serialises callers of *this instance*. The app
-  /// has exactly one, from `modelProvisionerProvider`. Two provisioners in two
-  /// processes writing the same directory with *different* pins remain a
-  /// theoretical interleaving — no longer a corrupting one (each transfer hashes
-  /// and renames its own complete file), but the surviving receipt could describe
-  /// the other run's artifact if both bodies happened to be the same length. A
-  /// cross-process lock file is the fix if that ever becomes real.
+  /// Scope, stated honestly: this serialises callers of *this instance*, and an
+  /// instance cannot span isolates or processes. The app has exactly one, from
+  /// `modelProvisionerProvider`. Any two provisioners that do **not** share this
+  /// queue — a second isolate as much as a second process — still interleave. That
+  /// is no longer a *corrupting* interleave, because [stagingNonce] makes their
+  /// staging paths disjoint and each transfer hashes and renames its own complete
+  /// file; what remains is that the surviving receipt could describe the other
+  /// run's artifact, if the two runs pinned different hashes and their bodies
+  /// happened to be the same length. A lock file shared through the filesystem is
+  /// the fix if that ever becomes real.
   Future<ModelProvisionResult> _serialized(
     ModelDescriptor descriptor,
     Future<ModelProvisionResult> Function() body,
@@ -407,14 +434,14 @@ class ModelProvisioner {
   }) async {
     // A staging path unique to this transfer, so no two transfers can ever share
     // a sink or delete each other's bytes — see [ModelStorage.stagingFile].
-    final staging = _storage.stagingFile(
-      descriptor,
-      nonce: '$pid-${_stagingSequence++}',
-    );
+    final staging = _storage.stagingFile(descriptor, nonce: stagingNonce());
     // Leftovers from an interrupted run carry no resumable state, so they are
     // swept rather than accumulated (a half-written 2.4GB file is real disk
-    // pressure). Our own file is spared, and a `.part` another process is still
-    // writing is left alone — nothing installs from a staging path.
+    // pressure). Ours is spared by name. Note this unlinks a staging file another
+    // writer may still be filling — POSIX allows that — which kills their transfer
+    // at rename time rather than sparing it; see
+    // [ModelStorage.deleteStagingFiles]. Harmless but not polite, and it cannot
+    // happen between two callers of this instance, which the queue serialises.
     await _storage.deleteStagingFiles(descriptor, keep: staging);
 
     final ModelByteStream source;
