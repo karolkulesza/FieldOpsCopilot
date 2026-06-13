@@ -1,0 +1,144 @@
+import 'dart:io';
+
+/// A remote artifact opened for streaming, plus whatever the server said about
+/// its size.
+class ModelByteStream {
+  const ModelByteStream({required this.bytes, this.contentLength});
+
+  /// The body, chunk by chunk. Never buffered whole: a 2.4GB artifact must not
+  /// pass through memory on its way to disk.
+  final Stream<List<int>> bytes;
+
+  /// Body length in bytes, or `null` when the server did not declare one
+  /// (chunked transfer encoding). A `null` here is why progress reporting has to
+  /// tolerate an unknown total.
+  final int? contentLength;
+}
+
+/// A source that could not be opened for download.
+class ModelDownloadException implements Exception {
+  const ModelDownloadException(this.message, {this.statusCode});
+
+  final String message;
+
+  /// HTTP status, when the failure was an HTTP response rather than a transport
+  /// error.
+  final int? statusCode;
+
+  @override
+  String toString() => statusCode == null
+      ? 'ModelDownloadException: $message'
+      : 'ModelDownloadException($statusCode): $message';
+}
+
+/// Opens a model artifact for streaming.
+///
+/// A seam, not an abstraction for its own sake: unit tests provision from a
+/// scripted byte stream, so the whole verify/install path is covered without a
+/// network or a 2.4GB fixture.
+abstract interface class ModelDownloader {
+  /// Opens [uri] for reading, sending [authToken] as a bearer credential.
+  ///
+  /// Throws [ModelDownloadException] when the source cannot be opened.
+  Future<ModelByteStream> open(Uri uri, {String? authToken});
+
+  /// Releases any transport resources.
+  void close();
+}
+
+/// `dart:io` implementation over [HttpClient].
+///
+/// Redirects are followed **manually** (`followRedirects = false` plus an
+/// explicit hop loop) for one specific reason: license-gated model hosts
+/// authenticate the first request and then redirect to a pre-signed CDN URL on a
+/// different host. `HttpClient`'s automatic redirect handling replays the request
+/// headers, which would forward the bearer token to that third-party host —
+/// leaking a credential that grants access to the operator's whole account, and
+/// often getting the request rejected as over-authenticated on top. The loop
+/// below drops the token the moment the host changes.
+class HttpModelDownloader implements ModelDownloader {
+  HttpModelDownloader({HttpClient? client, this.maxRedirects = 5})
+    : _client = client ?? HttpClient();
+
+  final HttpClient _client;
+
+  /// Redirect hops allowed before giving up, guarding against a redirect loop.
+  final int maxRedirects;
+
+  static const _redirectCodes = {
+    HttpStatus.movedPermanently,
+    HttpStatus.found,
+    HttpStatus.seeOther,
+    HttpStatus.temporaryRedirect,
+    HttpStatus.permanentRedirect,
+  };
+
+  @override
+  Future<ModelByteStream> open(Uri uri, {String? authToken}) async {
+    var target = uri;
+    var token = authToken;
+
+    for (var hop = 0; hop <= maxRedirects; hop++) {
+      final request = await _client.getUrl(target);
+      request.followRedirects = false;
+      if (token != null && token.isNotEmpty) {
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      }
+      final response = await request.close();
+
+      if (_redirectCodes.contains(response.statusCode)) {
+        final location = response.headers.value(HttpHeaders.locationHeader);
+        await response.drain<void>();
+        if (location == null) {
+          throw ModelDownloadException(
+            'redirect from $target carried no Location header',
+            statusCode: response.statusCode,
+          );
+        }
+        final next = target.resolve(location);
+        // Cross-host hop: the credential was for the origin, not the CDN.
+        if (next.host != target.host) token = null;
+        target = next;
+        continue;
+      }
+
+      if (response.statusCode != HttpStatus.ok) {
+        await response.drain<void>();
+        throw ModelDownloadException(
+          _explain(response.statusCode, target),
+          statusCode: response.statusCode,
+        );
+      }
+
+      final declared = response.headers.contentLength;
+      return ModelByteStream(
+        bytes: response,
+        contentLength: declared >= 0 ? declared : null,
+      );
+    }
+
+    throw ModelDownloadException(
+      'gave up after $maxRedirects redirects starting at $uri',
+    );
+  }
+
+  @override
+  void close() => _client.close(force: true);
+
+  /// Turns a status code into something an operator can act on.
+  ///
+  /// The failures that actually happen here are license and revision mistakes,
+  /// not generic HTTP errors, so they are named as such.
+  static String _explain(int statusCode, Uri uri) => switch (statusCode) {
+    HttpStatus.unauthorized =>
+      'the model host rejected the credential (401) for $uri — supply a valid '
+          'access token via FIELDOPS_MODEL_TOKEN',
+    HttpStatus.forbidden =>
+      'access to $uri is forbidden (403) — accept the model license with the '
+          'account that issued the token, then retry',
+    HttpStatus.notFound =>
+      '$uri was not found (404) — check the file name and revision in '
+          'FIELDOPS_MODEL_URI',
+    _ => 'the model host returned HTTP $statusCode for $uri',
+  };
+}
