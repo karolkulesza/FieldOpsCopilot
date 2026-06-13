@@ -49,13 +49,19 @@ abstract interface class ModelDownloader {
 /// `dart:io` implementation over [HttpClient].
 ///
 /// Redirects are followed **manually** (`followRedirects = false` plus an
-/// explicit hop loop) for one specific reason: license-gated model hosts
-/// authenticate the first request and then redirect to a pre-signed CDN URL on a
-/// different host. `HttpClient`'s automatic redirect handling replays the request
-/// headers, which would forward the bearer token to that third-party host —
-/// leaking a credential that grants access to the operator's whole account, and
-/// often getting the request rejected as over-authenticated on top. The loop
-/// below drops the token the moment the host changes.
+/// explicit hop loop) so that credential scoping is this repository's behaviour
+/// rather than an inherited one. It matters here because license-gated model
+/// hosts authenticate the first request and then redirect to a pre-signed URL on
+/// a separate download host: forwarding the bearer token to that host would leak
+/// a credential covering the operator's whole account.
+///
+/// To be precise about what this is and is not: `HttpClient` on Dart 3 already
+/// strips `Authorization` on a cross-origin redirect and keeps it on a
+/// same-origin one — the same policy implemented below, verified on Dart 3.12.2.
+/// So this loop is not a fix for a live SDK bug. It is here because the
+/// guarantee is then asserted by this repo's own tests, holds identically if the
+/// transport is ever swapped (`package:http`, a plugin's installer), and gives
+/// the hop bound and the operator-facing error messages somewhere to live.
 class HttpModelDownloader implements ModelDownloader {
   HttpModelDownloader({HttpClient? client, this.maxRedirects = 5})
     : _client = client ?? HttpClient();
@@ -96,8 +102,9 @@ class HttpModelDownloader implements ModelDownloader {
           );
         }
         final next = target.resolve(location);
-        // Cross-host hop: the credential was for the origin, not the CDN.
-        if (next.host != target.host) token = null;
+        // Cross-origin hop: the credential was issued for the origin, not for
+        // whatever it delegates to.
+        if (!_sameOrigin(next, target)) token = null;
         target = next;
         continue;
       }
@@ -124,6 +131,14 @@ class HttpModelDownloader implements ModelDownloader {
 
   @override
   void close() => _client.close(force: true);
+
+  /// Whether two URLs share scheme, host **and** port.
+  ///
+  /// Scheme and port are part of the comparison deliberately: a redirect from
+  /// `https` down to `http`, or to a different service on the same host, is a
+  /// different trust boundary than the one the credential was issued for.
+  static bool _sameOrigin(Uri a, Uri b) =>
+      a.scheme == b.scheme && a.host == b.host && a.port == b.port;
 
   /// Turns a status code into something an operator can act on.
   ///
