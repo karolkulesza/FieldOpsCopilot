@@ -64,7 +64,27 @@ abstract interface class ModelDownloader {
 /// the hop bound and the operator-facing error messages somewhere to live.
 class HttpModelDownloader implements ModelDownloader {
   HttpModelDownloader({HttpClient? client, this.maxRedirects = 5})
-    : _client = client ?? HttpClient();
+    : _client = client ?? HttpClient() {
+    // Transport compression is handled in three layers, because leaving
+    // `autoUncompress` at its default silently breaks both integrity and the size
+    // check: `Content-Length` then describes the *encoded* body while the stream
+    // yields *decoded* bytes, so any content-encoding host — a TLS-terminating
+    // enterprise proxy is squarely in this app's fleet story — turns every
+    // download into "truncated transfer: received 13000 of 95 bytes", sending the
+    // operator after a problem that does not exist.
+    //
+    // 1. every request asks for `identity` (see [open]);
+    // 2. a response that content-encodes anyway is rejected by name — that is the
+    //    functional guard, since the pinned SHA-256 describes the artifact as
+    //    published and an encoded body simply cannot be checked against it;
+    // 3. and inflation is off, so bytes are never quietly rewritten in flight.
+    //
+    // Layer 3 is deliberately unobservable through layer 2: `HttpClient` leaves
+    // `Content-Encoding` on the headers even when it inflates (verified on Dart
+    // 3.12.2), so the rejection fires either way. It is kept as the belt to that
+    // braces, and pinned by a test that reads the flag directly.
+    _client.autoUncompress = false;
+  }
 
   final HttpClient _client;
 
@@ -87,6 +107,7 @@ class HttpModelDownloader implements ModelDownloader {
     for (var hop = 0; hop <= maxRedirects; hop++) {
       final request = await _client.getUrl(target);
       request.followRedirects = false;
+      request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
       if (token != null && token.isNotEmpty) {
         request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
       }
@@ -114,6 +135,23 @@ class HttpModelDownloader implements ModelDownloader {
         throw ModelDownloadException(
           _explain(response.statusCode, target),
           statusCode: response.statusCode,
+        );
+      }
+
+      // With `autoUncompress` off, a content-encoded body would be hashed and
+      // installed in its encoded form — which is not what the pin describes. The
+      // request asked for `identity`; a server that ignored that is a condition to
+      // name, not to paper over.
+      final encoding = response.headers.value(
+        HttpHeaders.contentEncodingHeader,
+      );
+      if (encoding != null && encoding.trim().toLowerCase() != 'identity') {
+        await response.drain<void>();
+        throw ModelDownloadException(
+          'the model host returned Content-Encoding: $encoding for $target — the '
+          'pinned SHA-256 describes the artifact as published, so a '
+          'transport-encoded body cannot be verified. Fetch a direct, '
+          'unencoded URL (or an origin that honours Accept-Encoding: identity).',
         );
       }
 

@@ -166,10 +166,16 @@ the artifact it expects and fetches the bytes at runtime.
 
 ### Getting the weights (what a reviewer has to do)
 
-1. **Accept the license** for the model you want, with the account that will issue
-   the token:
+1. **Accept the [Gemma terms](https://ai.google.dev/gemma/terms)** for the model
+   you want, with the account that will issue the token:
    - Gemma 4 E2B (INT4, LiteRT-LM) — the primary target, ~2.4GB
    - Gemma 3 1B (INT4, LiteRT-LM) — the low-RAM alternative, ~0.5GB
+
+   The LiteRT-LM builds are published as separate repositories from the base
+   models; find the current one for your target (on HuggingFace,
+   [search `gemma litert`](https://huggingface.co/models?search=gemma+litert)).
+   No specific repository URL is hard-coded in this repo on purpose — see the note
+   below.
 2. **Create an access token** on that account.
 3. **Copy the direct download URL** for the exact file you licensed, and
 4. **compute its SHA-256** — `shasum -a 256 <file>` — either by downloading it once
@@ -191,6 +197,11 @@ wrong pinned hash is indistinguishable, at runtime, from a corrupt download. A
 descriptor missing either one therefore **refuses to provision** and the home
 screen says which piece is missing; it never installs weights it cannot verify.
 
+The same reasoning applies to the license link the app shows an operator: it points
+at the Gemma terms, which resolve, rather than at a repository path — model hosts
+answer `401` for gated *and* non-existent repositories alike, so a repository URL
+written into the source could not be validated even in principle.
+
 `FIELDOPS_MODEL_ID` selects a catalog entry (file name, documented size, license
 page). `FIELDOPS_MODEL_URI` and `FIELDOPS_MODEL_SHA256` apply to that active
 model.
@@ -204,19 +215,34 @@ model.
 1. **Nothing, if a receipt already vouches for the file.** A successful
    verification writes a small sidecar recording the digest and size, so the
    startup readiness check costs no re-hash of 2.4GB. The receipt is invalidated
-   automatically if the pinned hash moves or the file's size changes.
+   automatically if the pinned hash moves or the file's size changes. It is a cache
+   of a verification, not a security control — it sits in the same app-writable
+   directory as the weights, which is why `ready` means "verified earlier, cheaply
+   re-confirmed" and an explicit re-hash is a separate operation.
 2. **Hashes weights that are already on disk** rather than re-downloading them —
    the side-load path (see below) — and files a receipt if they match.
-3. **Streams a download to a `.part` staging file, hashing as it writes.** The
-   artifact is never buffered in memory and never read twice. Progress is
-   reported per chunk, and degrades to an indeterminate state when the server
-   declares no `Content-Length` instead of inventing a percentage.
-4. **Installs only on a digest match**, by atomic rename. The path an engine loads
-   from therefore only ever holds a complete, verified file.
-5. **Deletes anything that fails**, reporting the digest it actually got. A body
-   shorter than the declared `Content-Length` is reported as a *truncated
-   transfer*, not corruption, so the operator does not go hunting for the wrong
-   problem.
+3. **Fetches a replacement if that hash fails**, in the same call. This is the
+   ordinary upgrade path: the pin moves to a new revision while the old artifact
+   is still installed. The old file is left in place *until* the new bytes have
+   verified, so a device that cannot reach the network is never stripped of the
+   only weights it has — and it is never loadable in the meantime either, because
+   no receipt vouches for it.
+4. **Streams the download to a per-transfer `.part.<nonce>` staging file, hashing
+   as it writes.** The artifact is never buffered in memory and never read twice.
+   Progress is reported per chunk, and degrades to an indeterminate state when the
+   server declares no `Content-Length` instead of inventing a percentage. Every
+   request asks for `Accept-Encoding: identity` and a content-encoded response is
+   rejected by name: the pinned digest describes the artifact *as published*, so
+   an inflated body would be the wrong bytes to hash.
+5. **Installs only on a digest match**, by atomic rename — which is also the swap
+   that replaces a stale artifact. The path an engine loads from therefore only
+   ever holds a complete, verified file. Operations on one model are serialised, so
+   two overlapping calls cannot interleave into each other's files.
+6. **Deletes fetched bytes that fail**, reporting the digest it actually got and
+   whether the bytes came from the network or from disk. A body that does not match
+   the declared `Content-Length` is reported as a *truncated* or *over-long
+   transfer* rather than corruption, so the operator does not go hunting for the
+   wrong problem.
 
 Storage is the **application-support directory**, not the cache directory: iOS may
 evict `Library/Caches` under storage pressure, and a technician in a basement
@@ -260,9 +286,18 @@ switch, and short-lived signed URLs issued per device by an enterprise backend s
 no long-lived credential ever ships inside the app. That last one slots in behind
 `modelAccessTokenProvider` without the provisioner changing at all.
 
+The transport is a first-party `dart:io` downloader rather than the model plugin's
+network-install API (the sprint plan mentions the latter): `flutter_gemma` is not a
+dependency until Task 1.8, and keeping the transfer here means the credential
+scoping and the verification order are covered by this repo's own tests against a
+loopback server. If 1.8 prefers the plugin's installer, it slots in behind
+`ModelDownloader` with those tests still guarding the contract.
+
 Two things this deliberately does *not* do yet, both cheap to add and neither
 needed for the demo: resuming an interrupted transfer with a `Range` request, and
-cancelling one in flight.
+cancelling one in flight. A cross-process lock is a third — provisioning serialises
+callers within one `ModelProvisioner` (the app has exactly one), which covers every
+in-app path but not two OS processes writing the same directory.
 
 ## Getting started
 

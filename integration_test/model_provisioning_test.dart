@@ -88,13 +88,30 @@ void main() {
       expect(verified.file.path, storage.installedFile(descriptor).path);
       expect(await verified.file.length(), verified.sizeBytes);
       expect(verified.source, ModelVerificationSource.download);
-      // Both shipping platforms have a mechanism, so anything else here means
-      // the marking silently did not apply.
-      expect(
-        verified.excludedFromBackup,
-        isTrue,
-        reason: 'weights must be excluded from device backup',
-      );
+
+      // Backup exclusion is only *observable* on iOS/macOS, where the native call
+      // either set `NSURLIsExcludedFromBackupKey` or reported a failure. On Android
+      // the exclusion is declared in the manifest and applied by the OS at backup
+      // time, so this flag is a constant there — asserting it would be a test that
+      // passes whether or not the rules work, which is precisely the trap that
+      // Task 1.2's review taught this repo to avoid. Evidence for the Android leg
+      // is the merged manifest at build time (`android:fullBackupContent` and
+      // `android:dataExtractionRules`), checked in the build, not here.
+      switch (PlatformBackupExclusion.mechanismFor()) {
+        case BackupExclusionMechanism.resourceAttribute:
+          expect(
+            verified.excludedFromBackup,
+            isTrue,
+            reason: 'the native no-backup call must have succeeded',
+          );
+        case BackupExclusionMechanism.manifest:
+          debugPrint(
+            'backup exclusion is declarative on this platform; verify the '
+            'merged manifest rather than this flag',
+          );
+        case BackupExclusionMechanism.none:
+          fail('no backup-exclusion mechanism on a shipping platform');
+      }
 
       // Progress actually tracked the transfer rather than jumping to done.
       expect(lastReportedPercent, 100);
@@ -123,9 +140,10 @@ String _describeFailure(
   ModelDescriptor descriptor,
 ) => switch (result) {
   ModelVerified() => 'verified',
-  ModelCorrupt(:final actualSha256Hex) =>
-    'bytes hashed to $actualSha256Hex, expected ${descriptor.sha256Hex} — '
-        're-check FIELDOPS_MODEL_SHA256 against the exact revision downloaded',
+  ModelCorrupt(:final actualSha256Hex, :final origin) =>
+    '${origin.name} bytes hashed to $actualSha256Hex, expected '
+        '${descriptor.sha256Hex} — re-check FIELDOPS_MODEL_SHA256 against the '
+        'exact revision downloaded',
   ModelDownloadFailed(:final message, :final statusCode) =>
     'download failed${statusCode == null ? '' : ' ($statusCode)'}: $message',
   ModelNotConfigured(:final issue) => 'not configured: ${issue.name}',

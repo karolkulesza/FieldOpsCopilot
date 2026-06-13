@@ -42,11 +42,20 @@ class ModelDescriptor {
   /// Human-readable name for the "model ready" UI and log lines.
   final String displayName;
 
-  /// File name the artifact is installed under. The extension matters to the
+  /// File name the artifact is installed under **locally**. It need not match the
+  /// remote file name — nothing fetches this — but the extension matters to the
   /// runtime: LiteRT-LM loads `.litertlm`, MediaPipe loads `.task`/`.bin`.
   final String fileName;
 
-  /// Where a reviewer accepts the license and obtains a download token.
+  /// Where the model's license is accepted.
+  ///
+  /// Shown to the operator as an instruction when provisioning is unconfigured, so
+  /// it must be a URL that actually resolves — a 404 in the one place the app says
+  /// what to do next is worse than saying nothing. It therefore points at the Gemma
+  /// terms rather than at a guessed repository path: the exact repository and file
+  /// are a deployment input (`FIELDOPS_MODEL_URI`), and hosts reply `401` to gated
+  /// *and* non-existent repositories alike, so a repository URL written here could
+  /// not be checked even in principle.
   final String licensePage;
 
   /// Resolved download URL, or `null` when none has been configured.
@@ -138,19 +147,24 @@ abstract final class ModelCatalog {
   /// so nothing above the provisioner changes when the choice does.
   static const gemma31bId = 'gemma-3-1b-it-int4';
 
+  /// The Gemma terms, which is what a reviewer actually has to accept. Verified to
+  /// resolve; a specific model-repository URL is not written down here because it
+  /// cannot be (see [ModelDescriptor.licensePage]).
+  static const gemmaTermsUrl = 'https://ai.google.dev/gemma/terms';
+
   static const _catalog = <String, ModelDescriptor>{
     gemma4E2bId: ModelDescriptor(
       id: gemma4E2bId,
       displayName: 'Gemma 4 E2B (INT4, LiteRT-LM)',
       fileName: 'gemma-4-e2b-it-int4.litertlm',
-      licensePage: 'https://huggingface.co/google/gemma-4-e2b-it-litert-lm',
+      licensePage: gemmaTermsUrl,
       approximateSizeBytes: 2400 * 1000 * 1000,
     ),
     gemma31bId: ModelDescriptor(
       id: gemma31bId,
       displayName: 'Gemma 3 1B (INT4, LiteRT-LM)',
       fileName: 'gemma-3-1b-it-int4.litertlm',
-      licensePage: 'https://huggingface.co/google/gemma-3-1b-it-litert-lm',
+      licensePage: gemmaTermsUrl,
       approximateSizeBytes: 550 * 1000 * 1000,
     ),
   };
