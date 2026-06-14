@@ -3,9 +3,9 @@ import 'dart:io';
 
 import 'package:field_ops_copilot/engines/impl/gemma_llm_engine.dart';
 import 'package:field_ops_copilot/engines/llm_engine.dart';
+import 'package:field_ops_copilot/engines/tool_schema.dart';
 import 'package:field_ops_copilot/services/inference/inference_config.dart';
 import 'package:field_ops_copilot/services/inference/providers.dart';
-import 'package:field_ops_copilot/engines/tool_schema.dart';
 import 'package:field_ops_copilot/services/models/model_descriptor.dart';
 import 'package:field_ops_copilot/services/models/model_provisioner.dart';
 import 'package:field_ops_copilot/services/models/model_storage.dart';
