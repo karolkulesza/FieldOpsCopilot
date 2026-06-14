@@ -50,7 +50,7 @@ database to help technicians diagnose faults and produce structured repair plans
   on a dedicated background isolate, behind the same `LlmEngine` interface the
   fake implements. Tool calls arrive as the model's **native function-call
   tokens**, not as prompt-engineered JSON. See _On-device inference_ below.
-- **Test suite** — 221 host tests (engine fakes, database + FTS, model provisioning,
+- **Test suite** — 224 host tests (engine fakes, database + FTS, model provisioning,
   the inference isolate and its wire protocol, widgets) plus an on-device integration
   tier for the model itself.
 - **CI** — GitHub Actions running `dart format`, `flutter analyze`, and
@@ -504,8 +504,8 @@ anyone quotes a number against it.
 2.59GB artifact through the same process moments before loading it (the suite provisions
 itself), so the post-load RSS includes transfer buffers and freed pages the allocator has
 not returned — which is why it swings 734–1266 MB for identical work. Treat it as an
-upper bound on the process, not as the model's footprint. Even so it clears the spec's
-**500MB iOS target** by a wide margin before any Metal working set, so that target looks
+upper bound on the process, not as the model's footprint. Even so it **exceeds** the spec's
+500MB iOS target by a wide margin, before any Metal working set, so that target looks
 unreachable; the spec now carries the evidence and the caveat rather than a replacement
 number, because the number worth writing down is a device number measured *without* a
 download in the same process.
