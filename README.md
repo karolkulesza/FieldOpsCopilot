@@ -453,6 +453,40 @@ depend on. Feeding a tool *result* back for a second model turn is the agent
 loop's job (Task 1.9) and will extend the interface rather than quietly inherit
 an accumulated conversation.
 
+### Measured (iOS 16.4 simulator, CPU backend, 2026-06-14)
+
+Run on an iPad Pro 11" simulator on an Apple-silicon Mac, against the real 2.59GB
+artifact. **These are not demo-device numbers** — the simulator has no Metal GPU, so
+the runtime fell back to CPU, and simulator RSS accounting is not a device's. They are
+recorded because they establish what the architecture *does*, and the device run
+replaces them rather than repeating them.
+
+| Measurement | Value | Note |
+|---|---|---|
+| Backend actually initialised | `cpu` | Requested "engine's choice"; no Metal on a simulator |
+| Model load | 11.4 s | Cold, 2.59GB `.litertlm` |
+| Context window | 2048 tokens | As requested; not clamped |
+| Process RSS | 179 MB → 734 MB across the load | `ProcessInfo.currentRss`, whole process |
+| "Say OK" | 1 token, TTFT 1.77 s | Streamed, terminated cleanly |
+| Grounded E-102 turn + 1 tool | 5.4 s to a structured `get_local_parts_inventory{sku: BRK-990-XP}` | Native `tool_calls`, not parsed prose |
+| UI isolate during the load | 712 ticks in 11.47 s, **worst gap 90 ms** | A 16 ms timer on the UI isolate; see below |
+
+The last row is the isolate claim, measured. Had inference run on the UI isolate, the
+load would appear as a gap of ~11 s and every frame in it would be lost; the observed
+worst gap is 90 ms. Two honest caveats: 90 ms is still ~5 dropped frames, so the
+boundary is not free, and a CPU-backend simulator is not where this number ultimately
+matters.
+
+**Throughput is not yet meaningfully measured.** A one-token answer makes "tokens per
+second" a restatement of TTFT, and the grounded turn's 5.4 s is dominated by prefill of
+a ~400-token prompt. The spec's 15 tok/s target needs a device run with a long
+generation before anyone quotes a number against it.
+
+**The spec's 500MB iOS footprint target is already in doubt.** 734MB of process RSS on
+CPU, before any Metal working set, is above it. That is a measurement to *act* on
+rather than a failure — but it must be a device measurement first, so the spec now
+carries the caveat rather than a corrected figure.
+
 ### Platform requirement
 
 `flutter_gemma` requires **iOS 16.0** (`background_downloader` requires 14.0), so
