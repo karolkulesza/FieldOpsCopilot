@@ -10,7 +10,7 @@ jobs:
   analyze-and-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: subosito/flutter-action@v2
         with:
@@ -18,6 +18,19 @@ jobs:
 
       - name: Install dependencies
         run: flutter pub get
+
+      # Generated Drift code (`*.g.dart`) is committed, so it can silently drift
+      # from the table/`.drift` sources it is generated from — which already
+      # happened once in Task 1.2 and was caught only by human review. Rebuilding
+      # and asserting a clean tree makes stale codegen a CI failure instead.
+      #
+      # Runs before `analyze`/`test` deliberately: if generation *changes* the
+      # sources, everything after this step should be judged against the
+      # regenerated code, not the committed snapshot.
+      - name: Verify generated code is up to date
+        run: |
+          dart run build_runner build --delete-conflicting-outputs
+          git diff --exit-code
 
       - name: Verify formatting
         run: dart format --output=none --set-exit-if-changed .
