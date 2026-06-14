@@ -61,8 +61,8 @@ void main() {
     // Read first, before anything expensive. Two reasons, and the second is the one that
     // matters: a mistyped backend name should fail in the first second rather than after an
     // optional 2.59GB download, and evaluating it here means it is exercised on **every**
-    // invocation — including runs that skip for want of weights. That is the only coverage
-    // this knob can get without a device, and it has never yet run on one.
+    // invocation — including runs that skip for want of weights, which is the only coverage
+    // available when no device is attached.
     final backend = _configuredBackend;
 
     final storage = await ModelStorage.openDefault();

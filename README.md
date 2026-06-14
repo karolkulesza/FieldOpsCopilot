@@ -473,9 +473,10 @@ an accumulated conversation.
 
 ### Measured on the demo device (iPad Air M4, iOS 26.5, 2026-06-14)
 
-Two runs on the physical device against the real 2.59GB artifact. The simulator figures
-that preceded these are kept below only because the *comparison* is informative — where
-they disagree, these are the numbers.
+Three runs on the physical device against the real 2.59GB artifact: two on the backend the
+engine chose (Metal) and one with the backend forced to CPU to narrow down the stall described
+below. The simulator figures are kept only because the *comparison* is informative — where they
+disagree, the device numbers are the numbers.
 
 | Measurement | iPad Air M4 (2 runs) | iOS 16.4 simulator (3 runs) | iPad Air M4, forced CPU (1 run) |
 |---|---|---|---|
@@ -519,15 +520,30 @@ not a silent fallback) still stalled — **2197 ms, worse than Metal's 1445–17
 loading *faster* overall (4.4 s against 7.0–7.2 s, Metal setup being the difference). So
 **first-load Metal pipeline compilation is not the cause.** One run, on one device.
 
-That leaves:
+That leaves two, and the CPU run constrains the shape of the first one rather than just
+supporting it:
 
-- **process-wide memory pressure** — a 2.59GB `mmap` taking RSS past 1.6GB can stall every
-  thread in the process without anything Dart-level blocking. The CPU run makes this *more*
-  plausible, not less: RSS landed at 1635 MB against Metal's 1669–1671 MB, so the footprint is
-  the model rather than a GPU working set, and the stall grew as a share of a shorter load;
-- the plugin's own `Isolate.run` for engine creation, or platform-channel traffic from the
-  worker (`path_provider` and `shared_preferences` are marshalled via the root isolate's
-  messenger).
+- **Memory *traffic*, not resident size.** Across the three device runs, resident size and stall
+  length move in **opposite** directions: 1668.6 MB → 1445 ms, 1670.6 MB → 1728 ms, and
+  1635.3 MB → **2197 ms**. The lowest-RSS run stalled worst, so "RSS past 1.6GB stalls every
+  thread" is not the version of the hypothesis the data supports. What survives is churn rather
+  than level — page faults and allocation during the `mmap` walk — which also fits a *faster*
+  load stalling *longer*, since the same work is compressed into less time. This matters for the
+  side-loaded experiment: someone could remove the download, watch RSS barely move, and wrongly
+  conclude the hypothesis is dead. The thing to watch there is fault and allocation activity, not
+  the resident figure.
+- **The worker's isolate group and its shared heap** — offered by review as an untested
+  hypothesis and recorded as one, because it is the only candidate so far that explains the
+  direction of the anomaly. `IsolateInferenceHost` uses `Isolate.spawn`, so the worker joins the
+  **root isolate's group** and shares its heap; a major GC driven by the worker's allocations
+  would therefore pause the UI isolate, even though neither the worker nor the plugin's own
+  `Isolate.run` can block it directly. A DevTools timeline showing the stall coinciding with GC
+  events would confirm it. Note the remedy space is narrow if it is true: `Isolate.spawnUri`
+  would give a separate group and heap but is not available in Flutter's AOT builds, so the
+  answer would be reducing worker-side allocation or scheduling the load — not isolating the
+  heap.
+- Also still open: platform-channel traffic from the worker (`path_provider` and
+  `shared_preferences` are marshalled via the root isolate's messenger).
 
 What would still distinguish them: a **side-loaded-weights run**, so no 2.6GB transfer precedes
 the load — which also yields the download-free RSS figure this section has to hedge — and a
