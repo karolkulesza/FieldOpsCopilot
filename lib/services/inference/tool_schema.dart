@@ -2,9 +2,9 @@
 /// about it.
 ///
 /// Task 0.2 declared `ToolDefinition.parameters` as a "JSON-schema-ish type
-/// descriptor", which was enough for a fake that never rendered it. It is not
-/// enough now, because two different code paths inside the runtime read this map
-/// and both expect the *same* concrete shape — a JSON-Schema object:
+/// descriptor", which was enough for a fake that never rendered it. It is not enough
+/// now, because the map has to satisfy **two consumers that read it completely
+/// differently**, and neither one tells you when it does not:
 ///
 /// ```json
 /// {"type": "object",
@@ -12,17 +12,24 @@
 ///  "required": ["sku"]}
 /// ```
 ///
-/// * Gemma 4 hands the map to the LiteRT-LM SDK as `tools_json`, which renders the
-///   native tool declaration from it.
-/// * Gemma 3 has no native declaration, so the plugin builds a textual one by
-///   reading `properties` and `required` out of this same map.
+/// * **Gemma 4** — Dart passes the map through untouched as the SDK's `tools_json`,
+///   and a native template this app cannot read renders the declaration from it.
+///   Setting tools there also switches on constrained decoding, so a malformed schema
+///   is at least as likely to fail *inside* the native engine as to produce a usable
+///   declaration. Either way the diagnosis arrives from a layer with no Dart stack.
+/// * **Gemma 3 (`gemmaIt`)** — no native declaration at all. The plugin writes the map
+///   into the prompt **verbatim**: `'<name>: <description> Parameters: '` followed by
+///   `jsonEncode(parameters)`. So a bare `{"sku": "String"}` does not throw and does
+///   not degrade; it simply teaches the model a shape that nothing downstream agrees
+///   with, and the tool call comes back with arguments the registry cannot read.
 ///
-/// A map in any other shape does not fail loudly at either site. It renders as a
-/// tool with **no arguments**, and the model then either omits the argument or
-/// invents one — a failure that surfaces as "the model is bad at tool calling"
-/// three layers away from the mistake. So the shape is validated here, at
-/// registration time, and [validateToolDefinition] is called before any tool
-/// reaches the runtime.
+/// A correction worth recording, because the first version of this comment got it
+/// wrong in a way that sounded convincing: it claimed both paths read `properties` and
+/// `required` structurally, and that a non-schema map "renders as a tool with no
+/// arguments". Only the Gemma 4 path consumes the map structurally, and the textual
+/// path does not drop the arguments — it forwards the nonsense. The conclusion holds
+/// (validate at registration, where the mistake is) but the mechanism is not the one
+/// originally described.
 ///
 /// This is the contract Task 1.5's registry must emit. [objectSchema] exists so it
 /// (and the tests here) can build a conforming map without hand-writing it.
@@ -136,9 +143,14 @@ List<ToolSchemaProblem> validateToolDefinition(ToolDefinition definition) {
       );
       continue;
     }
-    // The plugin's declaration builder infers a type from `properties`/`items`
-    // when there is no explicit `type`, and refuses to guess otherwise — an
-    // untyped scalar reaches the model as an unusable declaration.
+    // A conservative rule, and worth being straight about its provenance: it is
+    // modelled on the *one* place the plugin infers a property type — the
+    // FunctionGemma declaration builder, which reads `properties`/`items` and throws
+    // rather than guessing anything else. This app never selects that model type, so
+    // that code does not run here. The rule is kept because an untyped scalar is
+    // genuinely under-specified for both consumers this file exists to protect (a
+    // native template that must emit a type, and a prompt that hands the model the
+    // map as-is), and because the family set may grow.
     final hasInferableType =
         schema.containsKey('properties') || schema.containsKey('items');
     if (schema['type'] is! String && !hasInferableType) {

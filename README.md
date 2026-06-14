@@ -50,7 +50,9 @@ database to help technicians diagnose faults and produce structured repair plans
   on a dedicated background isolate, behind the same `LlmEngine` interface the
   fake implements. Tool calls arrive as the model's **native function-call
   tokens**, not as prompt-engineered JSON. See _On-device inference_ below.
-- **Test suite** — a widget smoke test plus unit tests for all four fakes.
+- **Test suite** — 221 host tests (engine fakes, database + FTS, model provisioning,
+  the inference isolate and its wire protocol, widgets) plus an on-device integration
+  tier for the model itself.
 - **CI** — GitHub Actions running `dart format`, `flutter analyze`, and
   `flutter test` on every push and pull request.
 
@@ -434,16 +436,29 @@ the delay of the one ahead of it.
 ### Tool calling
 
 Tools are declared as `ToolDefinition`s whose `parameters` map is a JSON-Schema
-object, validated at registration by `tool_schema.dart`. That validation earns
-its place: a plausible-looking `{'sku': 'String'}` map does not fail — it renders
-as a tool with **no arguments**, and the model then omits the SKU or invents one.
-The symptom shows up two layers away as "the model is bad at tool calling", so
-the shape is checked where the mistake is.
+object, validated at registration by `tool_schema.dart`. That validation earns its
+place because the same map feeds two consumers that read it completely differently,
+and neither rejects a bad one:
 
-One plugin detail is equally quiet and equally load-bearing: passing `tools:`
-gets the declaration in front of the model, but `InferenceChat` only *reads back*
-the structured calls when `supportsFunctionCalls` is true. Without it the model
-emits a perfectly good tool call that is parsed and then dropped.
+- **Gemma 4** — the map goes to the SDK untouched as `tools_json`, and a native
+  template renders the declaration from it. Passing tools also switches on
+  constrained decoding, so a malformed schema is at least as likely to fail inside
+  the native engine as to produce a usable declaration — with no Dart stack to read.
+- **Gemma 3** — no native declaration; the plugin writes the map into the prompt
+  *verbatim*. A plausible-looking `{'sku': 'String'}` neither throws nor degrades. It
+  teaches the model a shape nothing downstream agrees with, and the tool call comes
+  back with arguments the registry cannot read.
+
+Either way the symptom appears two layers away as "the model is bad at tool calling",
+so the shape is checked where the mistake is.
+
+A second plugin detail is equally quiet, and what it gates depends on the family:
+`supportsFunctionCalls` must be set whenever tools are passed. On Gemma 4 the
+declaration reaches the model regardless, but `InferenceChat` only *reads back* the
+structured calls when the flag is true — so the model emits a perfectly good tool call
+that is parsed and then dropped. On the Gemma 3 fallback the flag gates the
+declaration too: the tools are never mentioned to the model at all, and the plugin
+logs "Tools will be ignored".
 
 ### What the engine does not do yet
 
@@ -465,7 +480,7 @@ replaces them rather than repeating them.
 |---|---|---|
 | Backend actually initialised | `cpu` | Requested "engine's choice"; no Metal on a simulator |
 | Model load | 11.4 s | Cold, 2.59GB `.litertlm` |
-| Context window | 2048 tokens | As requested; not clamped |
+| Context window | 2048 tokens requested, 2048 in force | A Dart-side value: the engine applies `max(requested, 1024)` before native init, and nothing reports the KV-cache the runtime actually allocated |
 | Process RSS | 179 MB → 734 MB across the load | `ProcessInfo.currentRss`, whole process |
 | "Say OK" | 1 token, TTFT 1.77 s | Streamed, terminated cleanly |
 | Grounded E-102 turn + 1 tool | 5.4 s to a structured `get_local_parts_inventory{sku: BRK-990-XP}` | Native `tool_calls`, not parsed prose |

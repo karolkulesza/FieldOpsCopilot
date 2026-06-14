@@ -3,9 +3,12 @@ import 'package:field_ops_copilot/services/inference/tool_schema.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The trap this guards is specific and quiet: a `parameters` map that is not a
-/// JSON-Schema object still renders — as a tool with **no arguments**. The model
-/// then calls the tool without the `sku` it needs, or invents one, and the symptom
-/// appears in the agent loop as a bad model rather than a bad registration.
+/// JSON-Schema object is not rejected by anything downstream. On the Gemma 3 path the
+/// plugin `jsonEncode`s it straight into the prompt, so the model is taught a shape
+/// nothing else agrees with; on the Gemma 4 path it goes to a native template as
+/// `tools_json` and also drives constrained decoding, where a bad schema fails with no
+/// Dart stack to read. Either way the symptom appears in the agent loop as a bad model
+/// rather than a bad registration.
 void main() {
   /// The tool Task 1.5 will register first, in the shape the runtime requires.
   final inventoryTool = ToolDefinition(
@@ -94,8 +97,9 @@ void main() {
     });
 
     test('rejects the bare name-to-type map — the actual trap', () {
-      // This is what "JSON-schema-ish" invites you to write, and it is exactly the
-      // shape that reaches the model as a tool with no arguments.
+      // This is what "JSON-schema-ish" invites you to write. On the Gemma 3 path it
+      // reaches the model verbatim as `Parameters: {"sku":"String"}`; on Gemma 4 it
+      // goes to a native template as `tools_json`. Neither rejects it here.
       final problems = validateToolDefinition(
         const ToolDefinition(
           name: 'get_local_parts_inventory',
