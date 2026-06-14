@@ -260,7 +260,7 @@ class GemmaRuntime implements InferenceRuntime {
     name: definition.name,
     description: definition.description,
     // Passed through unchanged: `ToolDefinition.parameters` is already required to
-    // be the JSON-Schema object the plugin wants (see `tool_schema.dart`), and this
+    // be the JSON-Schema object the plugin wants (see `engines/tool_schema.dart`), and this
     // is the reason that contract is enforced rather than guessed at.
     parameters: definition.parameters,
   );

@@ -13,7 +13,7 @@ import 'dart:async';
 
 import '../../services/inference/inference_config.dart';
 import '../../services/inference/inference_isolate.dart';
-import '../../services/inference/tool_schema.dart';
+import '../tool_schema.dart';
 import '../llm_engine.dart';
 
 /// [LlmEngine] backed by real weights on the device.

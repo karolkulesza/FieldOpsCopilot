@@ -99,6 +99,16 @@ class InferenceConfig {
 
   final int randomSeed;
 
+  /// The smallest context window a `.litertlm` bundle will accept.
+  ///
+  /// Named rather than written as a bare `1024` at each use, because it is not this
+  /// app's choice: every supported bundle bakes that `kv_cache_max_len`, and the engine
+  /// package silently raises anything smaller to it. Kept in step with
+  /// `flutter_gemma_litertlm`'s `kMinLitertlmContextTokens` by hand — deliberately not
+  /// imported, since this file's whole purpose is to keep plugin types out of the app's
+  /// configuration vocabulary.
+  static const int litertlmContextFloor = 1024;
+
   /// Context window this app asks for.
   ///
   /// Chosen over the plugin's 1024 default because the grounded prompt is not
