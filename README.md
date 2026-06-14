@@ -520,7 +520,7 @@ not a silent fallback) still stalled — **2197 ms, worse than Metal's 1445–17
 loading *faster* overall (4.4 s against 7.0–7.2 s, Metal setup being the difference). So
 **first-load Metal pipeline compilation is not the cause.** One run, on one device.
 
-That leaves two, and the CPU run constrains the shape of the first one rather than just
+That leaves three, and the CPU run constrains the shape of the first rather than just
 supporting it:
 
 - **Memory *traffic*, not resident size.** Across the three device runs, resident size and stall
