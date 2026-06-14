@@ -5,10 +5,10 @@ import 'package:field_ops_copilot/engines/impl/gemma_llm_engine.dart';
 import 'package:field_ops_copilot/engines/llm_engine.dart';
 import 'package:field_ops_copilot/services/inference/inference_config.dart';
 import 'package:field_ops_copilot/services/inference/providers.dart';
+import 'package:field_ops_copilot/services/inference/tool_schema.dart';
 import 'package:field_ops_copilot/services/models/model_descriptor.dart';
 import 'package:field_ops_copilot/services/models/model_provisioner.dart';
 import 'package:field_ops_copilot/services/models/model_storage.dart';
-import 'package:field_ops_copilot/services/inference/tool_schema.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -180,12 +180,29 @@ void main() {
       // The load really happened rather than being short-circuited: nothing maps a
       // multi-gigabyte model in under a millisecond.
       expect(runtime.loadMillis, greaterThan(0));
-      // The engine clamps a context window up to the bundle's baked KV-cache length,
-      // so it must never come back *below* what was asked for — a smaller window
-      // than requested would silently truncate the grounded prompt.
+
+      // What this can and cannot witness, stated exactly, because the first version
+      // of this assertion was a tautology dressed as a measurement:
+      // `LoadedRuntime.contextTokens` is `max(requested, 1024)` computed in Dart
+      // before the engine touches native code, so `>= 2048` could not fail on any
+      // device, with any model, or with no model at all. Nothing in either package
+      // reports the KV-cache the native runtime really allocated.
+      //
+      // Equality against what was requested *is* falsifiable: it fails if the value
+      // is mangled crossing the config → wire → plugin path, and it fails if the
+      // engine's floor silently raises a request — which is what would happen to
+      // anyone who lowered `contextTokens` below 1024 expecting a shorter reply.
       expect(
         runtime.contextTokens,
-        greaterThanOrEqualTo(InferenceConfig.defaultContextTokens),
+        engine.config.contextTokens,
+        reason:
+            'the requested context window must survive the isolate hop unchanged '
+            'and must not have been raised by the engine floor',
+      );
+      expect(
+        engine.config.contextTokens,
+        greaterThanOrEqualTo(1024),
+        reason: 'below the .litertlm floor the engine would raise it silently',
       );
     },
     timeout: const Timeout(Duration(minutes: 5)),
@@ -245,6 +262,7 @@ void main() {
 
       final calls = <LlmToolCall>[];
       final prose = StringBuffer();
+      var done = false;
       final stopwatch = Stopwatch()..start();
 
       await for (final event in engine.generate(
@@ -257,7 +275,11 @@ void main() {
           case LlmToolCall call:
             calls.add(call);
           case LlmDone():
-            break;
+            // Recorded, not `break`ed: a bare `break` here leaves the `switch`, not
+            // the `await for`, so it would assert nothing. The turn that carries a
+            // tool call has to terminate as cleanly as a plain one — the agent loop
+            // waits on exactly this event before executing the tool.
+            done = true;
         }
       }
       stopwatch.stop();
@@ -294,6 +316,11 @@ void main() {
         contains('BRK-990-XP'),
         reason: 'the call must carry the SKU the manual entry names',
       );
+      expect(
+        done,
+        isTrue,
+        reason: 'a turn carrying a tool call must still terminate with LlmDone',
+      );
     },
     timeout: const Timeout(Duration(minutes: 5)),
   );
@@ -301,17 +328,24 @@ void main() {
   testWidgets(
     'a second turn does not inherit the first turn\'s history',
     (tester) async {
-      // Not an AC, but the property Task 1.9 will build on and the one most likely
-      // to break silently: `LlmEngine.generate` is contracted as a *stateless* turn,
-      // and the fake behaves that way. If the runtime reused one chat, this second
-      // turn would answer in the context of the E-102 diagnosis above.
+      // Not an AC, but the property Task 1.9 will build on and the one most likely to
+      // break silently: `LlmEngine.generate` is contracted as a *stateless* turn, and
+      // the fake behaves that way.
+      //
+      // The question matters more than the assertion. An earlier version asked for
+      // "the colour of a clear sky at noon" and asserted the answer did not mention a
+      // SKU — which a model carrying the entire E-102 conversation would also pass,
+      // since it would still answer "Blue". This asks something **only the previous
+      // turn's history could answer**: with a leaked conversation the model has the
+      // fault code and will name it; with a fresh chat it cannot know it.
       final engine = requireEngine();
       if (engine == null) return;
 
       final tokens = <String>[];
       await for (final event in engine.generate(
         prompt:
-            'Reply with exactly one word: the colour of a clear sky at noon.',
+            'Which fault code did I ask you about in my previous message? '
+            'If there was no previous message, reply with exactly: NONE',
       )) {
         if (event is LlmToken) tokens.add(event.text);
       }
@@ -319,8 +353,14 @@ void main() {
       final answer = tokens.join().trim();
       debugPrint('[TC-LLM-STATELESS] answer: $answer');
       expect(answer, isNotEmpty);
-      // A turn carrying the previous conversation would still be discussing brakes.
-      expect(answer.toLowerCase(), isNot(contains('brk-990')));
+      // The leak detector: E-102 is knowable only from the turn before this one.
+      expect(
+        answer.toUpperCase(),
+        isNot(contains('102')),
+        reason:
+            'the model named a fault code it could only have from the previous '
+            'turn — history leaked across generate() calls',
+      );
     },
     timeout: const Timeout(Duration(minutes: 5)),
   );
