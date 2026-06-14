@@ -100,10 +100,19 @@ class SeedSkipped extends SeedOutcome {
 /// review:
 ///
 /// * **Manual rows go through [DatabaseService.upsertManualEntries]**, never a raw
-///   insert, so fault codes are canonicalised and the FTS5 sync triggers fire.
-///   Writing `manual_entries` by any other path leaves the index stale, and
-///   `SELECT COUNT(*) FROM manual_fts` would not notice — it is answered from the
-///   content table on an external-content index.
+///   insert. Two things ride on that, and only one of them is the obvious one.
+///   Fault codes are canonicalised (also done in [SeedBundle.parse]; the
+///   redundancy is deliberate). And the write is `ON CONFLICT DO UPDATE`, not
+///   `INSERT OR REPLACE` — which matters on a **re-seed**: OR REPLACE deletes the
+///   conflicting row implicitly, and with `recursive_triggers` off (SQLite's
+///   default) that delete fires no trigger, so the old terms stay in the FTS index
+///   forever. `SELECT COUNT(*) FROM manual_fts` would not notice, being answered
+///   from the content table on an external-content index; only a search for a term
+///   that existed solely in the replaced text does.
+///
+///   Note that plain triggers *do* fire for any ordinary insert, so a raw insert
+///   on a clean database would index correctly — the hazard is specifically the
+///   replace-shaped write on an existing row.
 /// * **The write is one transaction.** A seed that inserted the manuals, then threw
 ///   on the inventory, would leave a database that is seeded enough to look healthy
 ///   and store a marker it has not earned. Nothing is written unless everything is.
