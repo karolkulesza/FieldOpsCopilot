@@ -38,7 +38,7 @@ enum DatabaseKeyKind {
 /// the same callback forces the cipher to attempt decryption at open time, so an
 /// incorrect key fails fast with a [SqliteException] instead of surfacing later.
 @DriftDatabase(
-  tables: [Technicians, InventoryParts, WorkOrders, ManualEntries],
+  tables: [Technicians, InventoryParts, WorkOrders, ManualEntries, SeedMarkers],
   include: {'database_service.drift'},
 )
 class DatabaseService extends _$DatabaseService {
@@ -71,10 +71,12 @@ class DatabaseService extends _$DatabaseService {
   }
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   /// v1 shipped the technician/inventory/work-order tables; v2 (Task 1.2) adds
-  /// the manual table, its FTS5 index and the triggers that keep them in sync.
+  /// the manual table, its FTS5 index and the triggers that keep them in sync;
+  /// v3 (Task 1.3) adds the seed-marker table and gives `inventory_parts.sku` the
+  /// `COLLATE NOCASE` collation.
   ///
   /// `createTable` emits only `CREATE TABLE`, so every non-table entity has to be
   /// created explicitly — including [idxManualEntriesCode]. Miss one and upgraded
@@ -91,6 +93,24 @@ class DatabaseService extends _$DatabaseService {
         await m.create(manualEntriesAfterDelete);
         await m.create(manualEntriesAfterUpdate);
       }
+      if (from < 3) {
+        await m.createTable(seedMarkers);
+        // A column *collation* is part of the table definition, and SQLite has no
+        // `ALTER COLUMN`, so NOCASE on `sku` can only arrive by rewriting the
+        // table — which is exactly what an empty [TableMigration] does (create
+        // under a temp name with the current schema, copy the rows, swap). No
+        // `columnTransformer` is needed because no column's *type or value*
+        // changes.
+        //
+        // Two consequences worth stating. The rewrite renumbers rowids, which is
+        // harmless here (nothing indexes `inventory_parts` by rowid — unlike
+        // `manual_entries`, whose FTS index does). And if a pre-v3 install held
+        // two SKUs differing only in case, rebuilding the primary key under
+        // NOCASE would fail as a uniqueness violation; no writer for this table
+        // existed before this task, so that state is unreachable in practice
+        // rather than handled.
+        await m.alterTable(TableMigration(inventoryParts));
+      }
     },
   );
 
@@ -101,6 +121,51 @@ class DatabaseService extends _$DatabaseService {
   /// Returns the technician with [id], or `null` if none exists.
   Future<TechnicianRow?> technicianById(String id) =>
       (select(technicians)..where((t) => t.id.equals(id))).getSingleOrNull();
+
+  /// Inserts or replaces inventory rows, canonicalising each SKU on the way in so
+  /// [inventoryPartBySku] can match exactly.
+  ///
+  /// Mirrors [upsertManualEntries] deliberately: the write path is what makes the
+  /// stored form canonical, and the `COLLATE NOCASE` collation on the column is
+  /// the backstop for rows written by some other path, not the primary mechanism.
+  Future<void> upsertInventoryParts(Iterable<InventoryPartRow> parts) {
+    final normalized = parts
+        .map((p) => p.copyWith(sku: normalizeSku(p.sku)))
+        .toList(growable: false);
+    return batch(
+      (b) => b.insertAllOnConflictUpdate(inventoryParts, normalized),
+    );
+  }
+
+  /// Exact SKU lookup — the query the agent's `get_local_parts_inventory` tool
+  /// (Task 1.5) is built on.
+  ///
+  /// [sku] is canonicalised before comparison, and `inventory_parts.sku` is
+  /// declared `COLLATE NOCASE`, so `" brk-990-xp "` finds `BRK-990-XP` through the
+  /// primary-key index. Returns `null` for an unknown SKU — a tool argument the
+  /// model invented is a normal outcome, not an error.
+  Future<InventoryPartRow?> inventoryPartBySku(String sku) {
+    if (normalizeSku(sku).isEmpty) return Future.value();
+    return inventoryPartBySkuQuery(sku).getSingleOrNull();
+  }
+
+  /// The statement [inventoryPartBySku] runs.
+  ///
+  /// Exposed for the same reason as [manualEntryByCodeQuery]: a test can assert
+  /// the query plan of the SQL drift *actually emits*, which a hand-written
+  /// equivalent would not catch if this method regressed to wrapping the column in
+  /// `upper(...)`.
+  SimpleSelectStatement<$InventoryPartsTable, InventoryPartRow>
+  inventoryPartBySkuQuery(String sku) =>
+      select(inventoryParts)..where((t) => t.sku.equals(normalizeSku(sku)));
+
+  /// Every inventory row, ordered by SKU so callers and tests see a stable order.
+  Future<List<InventoryPartRow>> allInventoryParts() =>
+      (select(inventoryParts)..orderBy([(t) => OrderingTerm.asc(t.sku)])).get();
+
+  /// The seed marker for [id], or `null` if that dataset was never applied.
+  Future<SeedMarkerRow?> seedMarker(String id) =>
+      (select(seedMarkers)..where((t) => t.id.equals(id))).getSingleOrNull();
 
   /// Inserts or replaces manual entries in a single transaction, canonicalising
   /// each fault code on the way in so [manualEntryByCode] can match exactly.
