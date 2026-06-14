@@ -24,10 +24,20 @@ class FakeLlmEngine implements LlmEngine {
 
   /// Whether a turn's stream has been handed out and not yet finished.
   ///
-  /// Mirrors `IsolateInferenceHost`, which registers a turn when `generate` is called and
-  /// clears it when the stream closes or is cancelled — including the wart that a caller
-  /// who never listens holds the slot. Reproducing the wart is the point: a consumer that
-  /// leaks turns should misbehave here too, not only on device.
+  /// Held from [generate] until the returned stream completes or is cancelled. **This is
+  /// one place the fake is deliberately *stricter* than the device engine, and the
+  /// divergence is worth stating rather than papering over.** `IsolateInferenceHost`
+  /// subscribes to its own port unconditionally, so a turn nobody listened to is still
+  /// released when the worker finishes it; the fake holds the slot until *someone drains
+  /// the stream*, forever if nobody does.
+  ///
+  /// Perfect parity is not available here, because the fake's turn is instantaneous while
+  /// the device's takes seconds. Releasing the slot as eagerly as the device does would
+  /// mean it was never held by the time [generate] returned — and the guard would then be
+  /// unable to catch the one thing it exists for, two overlapping calls. Dart also cannot
+  /// detect a stream that will never be subscribed. So the fake errs strict: a consumer
+  /// that asks for a turn and abandons it without cancelling is a bug worth surfacing on
+  /// the host, where it is cheap to find.
   bool _turnInFlight = false;
 
   @override

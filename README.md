@@ -50,9 +50,11 @@ database to help technicians diagnose faults and produce structured repair plans
   on a dedicated background isolate, behind the same `LlmEngine` interface the
   fake implements. Tool calls arrive as the model's **native function-call
   tokens**, not as prompt-engineered JSON. See _On-device inference_ below.
-- **Test suite** — 224 host tests (engine fakes, database + FTS, model provisioning,
-  the inference isolate and its wire protocol, widgets) plus an on-device integration
-  tier for the model itself.
+- **Test suite** — a host tier covering the engine fakes, database + FTS, model
+  provisioning, the inference isolate and its wire protocol, and widgets; plus an
+  on-device integration tier for the model itself. (Deliberately no count here: the
+  number went stale in three consecutive review rounds. `flutter test` is the source of
+  truth, and per-task counts live in the sprint plan, which is a dated snapshot.)
 - **CI** — GitHub Actions running `dart format`, `flutter analyze`, and
   `flutter test` on every push and pull request.
 
