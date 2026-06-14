@@ -196,14 +196,33 @@ The manual and the parts inventory ship as one bundled asset
 `DatabaseInitializer.ensureSeeded()`. Three decisions are worth naming, because each
 one is answering a way this could go quietly wrong.
 
-**The asset is validated completely before anything is written.** It is a build
+**The asset's structure is validated before anything is written.** It is a build
 input in the same sense as the model's URL and digest — it lives inside the bundle
-and nothing at runtime can repair it — so `SeedBundle.parse` rejects a non-object
-root, a missing revision, a missing dataset, a row missing a field, a blank
-`id`/`code`/`sku`, a non-integer or negative `stock`, and a **duplicate** id or SKU.
-Duplicates are an error rather than a silent dedup: the write is an upsert, so a
-duplicated id would seed one row short of what the asset appears to declare and
-nothing downstream would look wrong.
+and nothing at runtime can repair it — so `SeedBundle.parse` rejects anything the
+loader could not honestly apply: wrong shapes and types, missing or blank required
+fields, out-of-range `stock`, values longer than the column that will store them,
+and duplicate or whitespace-padded keys. It does not validate *meaning*: a manual
+citing an unstocked SKU parses fine.
+
+The authoritative list is `SeedBundle.parse`'s docstring, deliberately not repeated
+here — this paragraph carried its own copy for two commits and was wrong in both,
+first by claiming completeness it did not have and then by omitting the three rules
+that gave it completeness.
+
+Two of those rules are worth their own line, because the reason is not obvious:
+
+- **Duplicates are an error rather than a silent dedup.** The write is an upsert, so
+  a duplicated id would seed one row short of what the asset appears to declare and
+  nothing downstream would look wrong. A whitespace-padded `id` is rejected for the
+  same reason — `id` is the primary key and, unlike `code`/`sku`, is deliberately not
+  canonicalised, so `"m1"` and `"m1 "` would otherwise pass the duplicate check as
+  distinct and produce two manual entries nothing could tell apart.
+- **Lengths are checked here rather than left to the column.** Drift's `withLength`
+  check runs at insert time, which is *inside* the seeding transaction — correct
+  behaviour, but too late to be a parse error. (The bounds are duplicated between
+  `kSkuMaxLength`/`kPartNameMaxLength` and the `withLength` literals out of necessity:
+  `drift_dev` reads those arguments from the source expression and silently drops a
+  named constant, emitting no max at all. A test pins the two together.)
 
 **Seeding runs once, not on every launch.** A `seed_markers` row records which
 dataset revision was applied. This is not an optimisation — `inventory_parts.stock`

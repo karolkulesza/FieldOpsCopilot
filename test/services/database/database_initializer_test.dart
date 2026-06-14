@@ -127,11 +127,17 @@ void main() {
     });
 
     test('a failure mid-write rolls the whole seed back', () async {
-      // Failure is injected at the *last* step — the marker write, after both
-      // datasets are in — which is the worst case the transaction exists for.
-      // Without it the database would hold three manuals and five parts with no
-      // marker (so it re-seeds forever), or in the mirror case a marker vouching
-      // for rows that were rolled back (so it never seeds again).
+      // Failure is injected at the *last* step — after both datasets are in and
+      // after the marker has been written — which is the worst case the transaction
+      // exists for. Both bad end states are then reachable and asserted against:
+      // rows without a marker (re-seeds forever) and a marker vouching for rows that
+      // were rolled back (never seeds again).
+      //
+      // The injection writes the marker before throwing precisely so the marker
+      // assertion below discriminates. An override that merely *replaced*
+      // `recordSeedMarker` would leave the row absent whether or not the transaction
+      // rolled back, making that expectation unfailable — which is what a first
+      // version of this test did.
       //
       // Deliberately not driven by drift's `withLength` check any more: R0-F2
       // moved length validation into the parser, so an over-length name now fails
@@ -149,10 +155,14 @@ void main() {
         throwsA(isA<StateError>()),
       );
 
+      // Marker first, deliberately. It is the assertion whose liveness is easiest
+      // to lose and hardest to see: with the rows asserted first, a mutation that
+      // keeps everything would fail on the rows and never reach here, so ordering it
+      // first is what makes `transaction` removal fail *on this line* — checked.
+      expect(await failing.seedMarker('test_seed'), isNull);
       expect(await failing.select(failing.manualEntries).get(), isEmpty);
       expect(await failing.manualFtsIndexedDocumentCount(), 0);
       expect(await failing.allInventoryParts(), isEmpty);
-      expect(await failing.seedMarker('test_seed'), isNull);
     });
   });
 
@@ -818,8 +828,16 @@ void main() {
   });
 }
 
-/// A database whose marker write always fails, so the seeding transaction can be
-/// made to fail at its final step with both datasets already written.
+/// A database that writes the seed marker and *then* fails, so the seeding
+/// transaction can be made to fail at its final step with every row — the marker
+/// included — already written.
+///
+/// It writes before throwing on purpose. An override that simply *replaced*
+/// `recordSeedMarker` would leave the marker row absent for a reason unrelated to the
+/// rollback, so the test's marker assertion could not fail; that was true of a first
+/// version of this class. Writing first makes all four assertions discriminate, and
+/// makes the "marker vouching for rolled-back rows" state the test comment describes
+/// actually reachable.
 ///
 /// Plaintext and in-memory: encryption is irrelevant to whether a transaction rolls
 /// back, and `DatabaseService`'s constructor takes any [QueryExecutor], so this needs
@@ -832,8 +850,14 @@ class _MarkerFailingDatabase extends DatabaseService {
     required String id,
     required int revision,
     DateTime? appliedAt,
-  }) =>
-      Future.error(StateError('injected failure after the rows were written'));
+  }) async {
+    await super.recordSeedMarker(
+      id: id,
+      revision: revision,
+      appliedAt: appliedAt,
+    );
+    throw StateError('injected failure after every row was written');
+  }
 }
 
 /// A [SeedSource] that returns text handed to it, standing in for the asset bundle.
