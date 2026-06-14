@@ -477,15 +477,15 @@ Two runs on the physical device against the real 2.59GB artifact. The simulator 
 that preceded these are kept below only because the *comparison* is informative — where
 they disagree, these are the numbers.
 
-| Measurement | iPad Air M4 (2 runs) | iOS 16.4 simulator (3 runs) |
-|---|---|---|
-| Backend actually initialised | **`gpu`** (Metal) | `cpu` (no Metal on a simulator) |
-| Model load | **7.0 – 7.2 s** | 10.8 – 13.1 s |
-| Time to first token, `"Say OK"` | **337 / 551 ms** — §3.1's <500 ms target **not met** (1 of 2 runs) | 1.55 – 1.77 s |
-| Grounded turn + one tool → structured call | **2.48 – 2.58 s** | 4.6 – 5.4 s |
-| Process RSS after load | **1669 – 1671 MB** (from 364 MB) | 734 – 1266 MB (from 117 – 223 MB) |
-| UI isolate, worst gap during load | **1445 – 1728 ms** ⚠️ (87 – 104 frames) | 32 – 90 ms |
-| UI isolate, worst gap while streaming | **77 – 135 ms** (5 – 8 frames) | 31 – 40 ms |
+| Measurement | iPad Air M4 (2 runs) | iOS 16.4 simulator (3 runs) | iPad Air M4, forced CPU (1 run) |
+|---|---|---|---|
+| Backend actually initialised | **`gpu`** (Metal) | `cpu` (no Metal on a simulator) | `cpu` (requested and honoured) |
+| Model load | **7.0 – 7.2 s** | 10.8 – 13.1 s | 4.4 s |
+| Time to first token, `"Say OK"` | **337 / 551 ms** — §3.1's <500 ms target **not met** (1 of 2 runs) | 1.55 – 1.77 s | 488 ms |
+| Grounded turn + one tool → structured call | **2.48 – 2.58 s** | 4.6 – 5.4 s | 3.54 s |
+| Process RSS after load | **1669 – 1671 MB** (from 364 MB) | 734 – 1266 MB (from 117 – 223 MB) | 1635 MB (from 363 MB) |
+| UI isolate, worst gap during load | **1445 – 1728 ms** ⚠️ (87 – 104 frames) | 32 – 90 ms | **2197 ms** ⚠️ |
+| UI isolate, worst gap while streaming | **77 – 135 ms** (5 – 8 frames) | 31 – 40 ms | 139 ms |
 
 The tool call is the result that mattered: on real hardware, under grounding, Gemma 4
 returns a native structured `get_local_parts_inventory{sku: BRK-990-XP}` through the SDK's
@@ -513,21 +513,29 @@ this section softened both:
   footprint cap, which is recorded as refuted. Both are measurements that failed, and both are
   now written down as failed.
 
-The cause is **not yet established**, and the honest candidates are:
+**One cause has been eliminated, two remain.** A forced-CPU run on the same device
+(`--dart-define=FIELDOPS_TEST_BACKEND=cpu`, logged as `requested=cpu backend=cpu` so it was
+not a silent fallback) still stalled — **2197 ms, worse than Metal's 1445–1728 ms** — while
+loading *faster* overall (4.4 s against 7.0–7.2 s, Metal setup being the difference). So
+**first-load Metal pipeline compilation is not the cause.** One run, on one device.
 
-- process-wide memory pressure — a 2.59GB `mmap` plus Metal buffer allocation taking RSS to
-  1.67GB can stall every thread in the process, including the UI isolate, without anything
-  Dart-level blocking;
-- the plugin's own `Isolate.run` for engine creation, or Metal shader/pipeline compilation on
-  first load;
-- platform-channel traffic from the worker (`path_provider`, `shared_preferences` are
-  marshalled via the root isolate's messenger).
+That leaves:
 
-What would distinguish them: re-run with side-loaded weights so no 2.6GB transfer precedes
-the load, force `InferenceBackend.cpu` on device to see whether Metal setup is implicated,
-and profile the load with the DevTools timeline. Until then the mitigation is scheduling
-rather than architecture — **load the model before the UI needs to be interactive**, behind
-the readiness banner, which is what Task 1.11 should design for rather than discover.
+- **process-wide memory pressure** — a 2.59GB `mmap` taking RSS past 1.6GB can stall every
+  thread in the process without anything Dart-level blocking. The CPU run makes this *more*
+  plausible, not less: RSS landed at 1635 MB against Metal's 1669–1671 MB, so the footprint is
+  the model rather than a GPU working set, and the stall grew as a share of a shorter load;
+- the plugin's own `Isolate.run` for engine creation, or platform-channel traffic from the
+  worker (`path_provider` and `shared_preferences` are marshalled via the root isolate's
+  messenger).
+
+What would still distinguish them: a **side-loaded-weights run**, so no 2.6GB transfer precedes
+the load — which also yields the download-free RSS figure this section has to hedge — and a
+**DevTools timeline** across `initialize()` to tell a Dart-level block from a process-wide
+stall. Until then the mitigation is scheduling rather than architecture: **load the model
+before the UI needs to be interactive**, behind the readiness banner. Note the trap in the
+obvious implementation — what stalls is the UI isolate, so a spinner shown *during* the load
+freezes with it, and a frozen indicator reads as a hang.
 
 **Throughput is still not measured** — and that is a different state from the two failures
 above, worth keeping distinct. A one-token answer makes tokens-per-second a restatement of

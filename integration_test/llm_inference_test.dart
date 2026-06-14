@@ -58,6 +58,13 @@ void main() {
   var loadProbe = _IsolateBlockingProbe.empty();
 
   setUpAll(() async {
+    // Read first, before anything expensive. Two reasons, and the second is the one that
+    // matters: a mistyped backend name should fail in the first second rather than after an
+    // optional 2.59GB download, and evaluating it here means it is exercised on **every**
+    // invocation — including runs that skip for want of weights. That is the only coverage
+    // this knob can get without a device, and it has never yet run on one.
+    final backend = _configuredBackend;
+
     final storage = await ModelStorage.openDefault();
     final provisioner = ModelProvisioner(storage: storage);
     addTearDown(provisioner.dispose);
@@ -136,7 +143,7 @@ void main() {
       config: InferenceConfig(
         modelPath: path,
         family: inferenceFamilyFor(descriptor.id),
-        backend: _configuredBackend,
+        backend: backend,
       ),
     );
     // Measured across the load, because a 2.6GB memory-map is the single most
@@ -374,7 +381,15 @@ void main() {
 /// one of the three candidate causes is first-load Metal pipeline compilation. Forcing
 /// `cpu` on the device is the cheapest discriminator available: if the stall persists
 /// without Metal, that candidate is out. Defaults to `auto` (engine's choice), which is
-/// what the acceptance runs use.
+/// what the acceptance runs used.
+///
+/// **Exercised once, on the device, and it produced the answer it was built for.** With
+/// `cpu` the run logged `requested=cpu backend=cpu` — so the override was honoured rather
+/// than silently falling back, which is why `TC-LLM-LOAD-01` logs requested-versus-actual at
+/// all — and the UI-isolate stall was **2197ms, worse than the 1445-1728ms seen on Metal**.
+/// First-load Metal pipeline compilation is therefore **not** the cause. `flutter test` still
+/// does not run this directory, so `flutter analyze` plus that single device run is the whole
+/// of its verification.
 const String _backendFlag = 'FIELDOPS_TEST_BACKEND';
 
 const String _backendName = String.fromEnvironment(
