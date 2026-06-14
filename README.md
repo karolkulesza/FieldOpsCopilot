@@ -59,9 +59,12 @@ database to help technicians diagnose faults and produce structured repair plans
   number went stale in three consecutive review rounds. `flutter test` is the source of
   truth, and per-task counts live in the sprint plan, which is a dated snapshot.)
 - **CI** — GitHub Actions running a codegen-freshness gate (`build_runner build`
-  followed by `git diff --exit-code`, since generated Drift code is committed and can
-  drift from its sources), then `dart format`, `flutter analyze`, and `flutter test`
-  on every push and pull request.
+  followed by `git diff --exit-code` plus an untracked-output check, since generated
+  Drift code is committed and can drift from its sources), then `dart format`,
+  `flutter analyze`, and `flutter test` on every push and pull request. Reproducing
+  the gate locally needs a **cold** build: with a warm `.dart_tool/build` cache
+  build_runner writes zero outputs and leaves a stale in-source file alone, so the
+  check passes without having verified anything.
 
 ## Architecture
 
@@ -209,6 +212,13 @@ re-applying the asset at every start would roll a technician's work back silentl
 Bumping the asset's `revision` re-seeds deliberately, overwriting both the manual
 text and the stock levels; a real fleet would *sync* inventory rather than seed it,
 which is the offline-sync design in the "narrate, don't build" section.
+
+A re-seed is **upsert-shaped, not replace-shaped**, and the difference is worth
+knowing before anything relies on it: rows present in the new asset are overwritten,
+but a row *dropped* from the asset survives in the database (a removed manual stays
+searchable), and a key omitted from a row — `location`, say — is left at its old
+value rather than cleared, because drift leaves absent columns out of the
+`DO UPDATE SET`. Deleting content therefore needs a migration, not a revision bump.
 
 **The write is one transaction.** Manuals, inventory and the marker commit together
 or not at all. A seed that inserted the manuals and then failed on the inventory

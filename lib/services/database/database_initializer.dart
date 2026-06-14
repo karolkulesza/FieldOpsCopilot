@@ -32,10 +32,16 @@ class AssetBundleSeedSource implements SeedSource {
 
   /// Bundle to read from; `null` means [rootBundle].
   ///
-  /// Nullable rather than defaulted to `rootBundle` in the constructor so this
-  /// class stays `const`-constructible: reading [rootBundle] touches
-  /// `ServicesBinding`, and resolving it eagerly would bind the initializer to a
-  /// live binding at construction time rather than at load time.
+  /// Nullable rather than defaulted to [rootBundle] for one plain reason: a `const`
+  /// constructor's default value must itself be `const`, and `rootBundle` is a
+  /// mutable top-level `final` (`asset_bundle.dart`: `final AssetBundle rootBundle =
+  /// _initRootBundle();`), so `{this.bundle = rootBundle}` does not compile.
+  ///
+  /// It is *not* about binding initialisation, which an earlier version of this
+  /// comment claimed. `_initRootBundle()` returns a bare `PlatformAssetBundle()`,
+  /// which declares no constructor and reaches `ServicesBinding.instance` only
+  /// inside `load()` — so reading `rootBundle` touches no binding, and the binding
+  /// is needed at load time whether the reference is resolved eagerly or lazily.
   final AssetBundle? bundle;
 
   final String assetKey;
@@ -117,8 +123,11 @@ class SeedSkipped extends SeedOutcome {
 ///   on the inventory, would leave a database that is seeded enough to look healthy
 ///   and store a marker it has not earned. Nothing is written unless everything is.
 ///
-/// The asset is parsed and fully validated *before* the transaction opens, so a
-/// malformed asset cannot half-apply.
+/// The asset is parsed and structurally validated *before* the transaction opens
+/// (see [SeedBundle.parse] for exactly what that covers), so a malformed asset is
+/// rejected rather than half-applied. Drift's own column checks are a second gate
+/// that fires at insert time, inside the transaction — the atomicity above is what
+/// makes that safe rather than partial.
 class DatabaseInitializer {
   DatabaseInitializer({required DatabaseService database, SeedSource? source})
     : _db = database,
