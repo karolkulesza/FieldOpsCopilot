@@ -22,11 +22,18 @@ import 'package:integration_test/integration_test.dart';
 ///   --dart-define=FIELDOPS_MODEL_SHA256=<its sha256>
 /// ```
 ///
-/// The defines are needed even though nothing is downloaded here: they are what make
-/// the installed artifact *verifiable*, and this suite refuses to load weights whose
-/// digest nothing has checked. If the model is not installed and verified, every test
-/// **skips with the reason** rather than failing — a checkout has no 2.6GB artifact
-/// and CI must not fetch one, which is also why this lives in `integration_test/`.
+/// The defines are what make the installed artifact *verifiable*: this suite refuses
+/// to load weights whose digest nothing has checked. If the model is not installed and
+/// verified, every test **skips with the reason** rather than failing — a checkout has
+/// no 2.6GB artifact and CI must not fetch one, which is also why this lives in
+/// `integration_test/`.
+///
+/// Add `--dart-define=FIELDOPS_TEST_PROVISION=true` to have the suite download the
+/// weights itself first. That is needed more often than it looks: `flutter test`
+/// re-installs the app for each suite and wipes its data container, so weights
+/// downloaded by `model_provisioning_test.dart` are already gone by the time this file
+/// runs. Side-loading, or a device where the app is installed once and driven
+/// repeatedly, avoids it.
 ///
 /// Assertions are fuzzy on purpose (the plan's word). A model's exact wording is not
 /// a contract, so what is asserted is behaviour: it loads, it streams, it terminates,
@@ -56,20 +63,57 @@ void main() {
     addTearDown(provisioner.dispose);
 
     final issue = descriptor.configurationIssue;
-    final status = await provisioner.statusOf(descriptor);
+    var status = await provisioner.statusOf(descriptor);
+
+    // Fresh app container? Fetch the weights, but only when explicitly asked to.
+    //
+    // `flutter test integration_test/…` **re-installs the app for every suite**, and
+    // that wipes its data container — so the artifact the provisioning suite just
+    // downloaded is gone by the time this one starts. On a device that is worked
+    // around by side-loading or by a manual provisioning run; on a simulator or a
+    // freshly re-installed app there is nothing to work around it with, hence this
+    // switch.
+    //
+    // It is opt-in rather than automatic because the default matters: a 2.6GB
+    // transfer inside an inference suite turns a network failure into what looks like
+    // an inference failure, and this file's whole job is to say something trustworthy
+    // about the model.
+    if (issue == null &&
+        status != ModelInstallStatus.ready &&
+        _provisionIfMissing) {
+      debugPrint('[TC-LLM] provisioning weights first (opt-in)');
+      var lastPercent = -1;
+      final result = await provisioner.provision(
+        descriptor,
+        onProgress: (progress) {
+          final fraction = progress.fraction;
+          if (fraction == null) return;
+          final percent = (fraction * 100).floor();
+          if (percent > lastPercent) {
+            lastPercent = percent;
+            if (percent % 10 == 0) {
+              debugPrint('[TC-LLM] ${progress.phase.name}: $percent%');
+            }
+          }
+        },
+      );
+      debugPrint('[TC-LLM] provisioning result: ${result.runtimeType}');
+      status = await provisioner.statusOf(descriptor);
+    }
+
     skipReason = switch ((issue, status)) {
       (final issue?, _) =>
         'model source not configured (${issue.name}) — pass '
             'FIELDOPS_MODEL_URI and FIELDOPS_MODEL_SHA256. '
             'License: ${descriptor.licensePage}',
-      // Deliberately not provisioned here. This suite is about the engine, and a
-      // 2.6GB download inside it would turn an inference failure into a network
-      // one. `integration_test/model_provisioning_test.dart` is the task that
-      // fetches, and pre-installing on the demo device is the documented flow.
+      // Not fetched unless asked — see the opt-in above.
       (_, ModelInstallStatus.absent) =>
-        'weights are not installed — run '
-            'integration_test/model_provisioning_test.dart first, or side-load '
-            '${descriptor.fileName} into <app support>/models',
+        'weights are not installed — pass '
+            '--dart-define=$_provisionFlag=true to fetch them as part of this '
+            'run, or side-load ${descriptor.fileName} into '
+            '<app support>/models. Note that a separate run of '
+            'model_provisioning_test.dart does *not* help: each suite '
+            're-installs the app and wipes its data container.',
       // Present but unhashed against the current pin. Loading anyway is the one
       // thing Task 1.7 exists to prevent.
       (_, ModelInstallStatus.unverified) =>
@@ -281,6 +325,11 @@ void main() {
     timeout: const Timeout(Duration(minutes: 5)),
   );
 }
+
+/// Build flag that lets this suite fetch the weights when the container is empty.
+const String _provisionFlag = 'FIELDOPS_TEST_PROVISION';
+
+const bool _provisionIfMissing = bool.fromEnvironment(_provisionFlag);
 
 /// The tool Task 1.5's registry will own, declared here in the shape the runtime
 /// requires so this task can prove native function calling before 1.5 exists.
