@@ -167,6 +167,22 @@ class DatabaseService extends _$DatabaseService {
   Future<SeedMarkerRow?> seedMarker(String id) =>
       (select(seedMarkers)..where((t) => t.id.equals(id))).getSingleOrNull();
 
+  /// Records that seed dataset [id] has been applied at [revision].
+  ///
+  /// Called inside the seeding transaction, so the marker and the rows it vouches
+  /// for commit together or not at all.
+  Future<void> recordSeedMarker({
+    required String id,
+    required int revision,
+    DateTime? appliedAt,
+  }) => into(seedMarkers).insertOnConflictUpdate(
+    SeedMarkerRow(
+      id: id,
+      revision: revision,
+      appliedAt: appliedAt ?? DateTime.now(),
+    ),
+  );
+
   /// Inserts or replaces manual entries in a single transaction, canonicalising
   /// each fault code on the way in so [manualEntryByCode] can match exactly.
   ///
