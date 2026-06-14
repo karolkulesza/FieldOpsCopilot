@@ -481,10 +481,11 @@ they disagree, these are the numbers.
 |---|---|---|
 | Backend actually initialised | **`gpu`** (Metal) | `cpu` (no Metal on a simulator) |
 | Model load | **7.0 – 7.2 s** | 10.8 – 13.1 s |
-| Time to first token, `"Say OK"` | **337 – 551 ms** | 1.55 – 1.77 s |
+| Time to first token, `"Say OK"` | **337 / 551 ms** — §3.1's <500 ms target **not met** (1 of 2 runs) | 1.55 – 1.77 s |
 | Grounded turn + one tool → structured call | **2.48 – 2.58 s** | 4.6 – 5.4 s |
 | Process RSS after load | **1669 – 1671 MB** (from 364 MB) | 734 – 1266 MB (from 117 – 223 MB) |
-| UI isolate, worst gap during load | **1445 – 1728 ms** ⚠️ | 32 – 90 ms |
+| UI isolate, worst gap during load | **1445 – 1728 ms** ⚠️ (87 – 104 frames) | 32 – 90 ms |
+| UI isolate, worst gap while streaming | **77 – 135 ms** (5 – 8 frames) | 31 – 40 ms |
 
 The tool call is the result that mattered: on real hardware, under grounding, Gemma 4
 returns a native structured `get_local_parts_inventory{sku: BRK-990-XP}` through the SDK's
@@ -493,10 +494,24 @@ run.
 
 **The UI-isolate number is bad, and it is the one the simulator most misled us about.**
 The isolate boundary keeps a 7-second model load from being a 7-second freeze, but ~1.4–1.7 s
-of that load still stalls the UI isolate — around 90 dropped frames, reproducible across
-both runs, and 17× worse than the simulator suggested. Against the spec's §3.1 promise that
-the UI thread never drops frames, that is a **real violation during model load**, not a
-rounding error.
+of that load still stalls the UI isolate — **87–104 dropped frames** at a 16.7 ms budget,
+reproducible across both runs, and 17× worse than the simulator suggested. Against the spec's
+§3.1 promise that the UI thread never drops frames, that is a **real violation during model
+load**, not a rounding error.
+
+Two neighbouring claims have to be held to the same standard, because an earlier version of
+this section softened both:
+
+- **Streaming is far better than the load, and still not compliant.** The worst gap while
+  tokens arrive is 77–135 ms — 5–8 dropped frames, not zero. Calling that "genuinely clean"
+  (as this section first did) is not something 135 ms against a 16.7 ms budget supports, and it
+  has a concrete consequence: Task 1.11 is the screen-recorded demo, and an 8-frame hitch
+  during streaming is visible in a recording.
+- **§3.1's <500 ms TTFT target is not met.** 337 ms and 551 ms on the exact chip class the
+  spec names — one run under, one 10% over. A 1-of-2 pass rate is not a met target, and
+  "borderline-met" applied a gentler standard than the same evidence applied to §3.4's
+  footprint cap, which is recorded as refuted. Both are measurements that failed, and both are
+  now written down as failed.
 
 The cause is **not yet established**, and the honest candidates are:
 
@@ -514,12 +529,13 @@ and profile the load with the DevTools timeline. Until then the mitigation is sc
 rather than architecture — **load the model before the UI needs to be interactive**, behind
 the readiness banner, which is what Task 1.11 should design for rather than discover.
 
-**Throughput is still not measured.** A one-token answer makes tokens-per-second a
-restatement of TTFT (the "1.7 / 2.7 tok/s" the harness prints is exactly that arithmetic and
-means nothing). The spec's 15 tok/s target needs a long generation on device — a real gap,
-not a satisfied criterion. Note also that the TTFT above is for a trivial prompt; the
-grounded prompt's ~400-token prefill is inside the 2.5 s figure, and no separate TTFT was
-captured for it.
+**Throughput is still not measured** — and that is a different state from the two failures
+above, worth keeping distinct. A one-token answer makes tokens-per-second a restatement of
+TTFT (the "1.7 / 2.7 tok/s" the harness prints is exactly that arithmetic and means nothing),
+so the spec's 15 tok/s target is untested rather than missed. It needs a long generation on
+device, which Task 1.11's demo run will produce. The TTFT figure above is likewise for a
+prefill-light prompt; the grounded prompt's ~400-token prefill sits inside the 2.5 s turn
+figure, and no separate TTFT was captured for it.
 
 **The spec's 500MB iOS footprint target is unreachable, and now measurably so.** 1.67GB of
 process RSS on the device, twice, within 2MB of each other — far more consistent than the

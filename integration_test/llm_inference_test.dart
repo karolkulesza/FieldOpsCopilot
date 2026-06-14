@@ -136,6 +136,7 @@ void main() {
       config: InferenceConfig(
         modelPath: path,
         family: inferenceFamilyFor(descriptor.id),
+        backend: _configuredBackend,
       ),
     );
     // Measured across the load, because a 2.6GB memory-map is the single most
@@ -168,8 +169,9 @@ void main() {
 
       final runtime = engine.runtime!;
       debugPrint(
-        '[TC-LLM-LOAD-01] backend=${runtime.backend} '
-        'load=${runtime.loadMillis}ms context=${runtime.contextTokens} tokens',
+        '[TC-LLM-LOAD-01] requested=${engine.config.backend.name} '
+        'backend=${runtime.backend} load=${runtime.loadMillis}ms '
+        'context=${runtime.contextTokens} tokens',
       );
       debugPrint(
         '[TC-LLM-LOAD-01] rss after load: '
@@ -365,6 +367,29 @@ void main() {
     timeout: const Timeout(Duration(minutes: 5)),
   );
 }
+
+/// Backend override, for narrowing where the load-time UI stall comes from.
+///
+/// The device run showed the UI isolate blocked for 1445-1728ms during `initialize()`, and
+/// one of the three candidate causes is first-load Metal pipeline compilation. Forcing
+/// `cpu` on the device is the cheapest discriminator available: if the stall persists
+/// without Metal, that candidate is out. Defaults to `auto` (engine's choice), which is
+/// what the acceptance runs use.
+const String _backendFlag = 'FIELDOPS_TEST_BACKEND';
+
+const String _backendName = String.fromEnvironment(
+  _backendFlag,
+  defaultValue: 'auto',
+);
+
+InferenceBackend get _configuredBackend => InferenceBackend.values.firstWhere(
+  (backend) => backend.name == _backendName,
+  orElse: () => throw ArgumentError.value(
+    _backendName,
+    _backendFlag,
+    'expected one of ${InferenceBackend.values.map((b) => b.name).join(', ')}',
+  ),
+);
 
 /// Build flag that lets this suite fetch the weights when the container is empty.
 const String _provisionFlag = 'FIELDOPS_TEST_PROVISION';
