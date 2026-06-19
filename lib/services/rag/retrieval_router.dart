@@ -148,10 +148,21 @@ class RetrievalRouter {
   ///
   /// Looseness is affordable **only** because every candidate is verified by
   /// lookup before it changes anything — see the class doc. Two exclusions are
-  /// worth stating because they are load-bearing rather than incidental: the
-  /// leading word boundary plus the mandatory one-or-two-letter prefix means a
-  /// digit run without one (`10mm`, `0.5mm`, `Aisle 4`) is not a candidate, and
-  /// requiring at least two digits keeps `breaker 4A` out.
+  /// load-bearing, and they exclude different things. An earlier version of this
+  /// comment credited the second with work the first already does, which review
+  /// refuted:
+  ///
+  /// * **The leading `\b` plus the mandatory one-or-two-letter prefix** keeps
+  ///   out a digit run with no short letter in front of it: `10mm`, `0.5mm`,
+  ///   `Aisle 4`, `step 2`, `gap 6mm` — and `breaker 4A`, which is
+  ///   digits-then-letter behind a three-letter word and so is excluded at any
+  ///   digit count.
+  /// * **Requiring at least two digits** excludes something narrower: a one- or
+  ///   two-letter word followed by a *single* digit. `use a T 5 driver`,
+  ///   `shelf B 3`, `A4 paper` — and `torque to 8 Nm`, which is the one that
+  ///   shows why the floor earns its place, because `to` is ordinary English
+  ///   rather than an identifier. Relax the floor to `\d{1,4}` and the router
+  ///   starts spending lookups on prose.
   static final RegExp faultCodePattern = RegExp(
     r'\b([A-Za-z]{1,2})[\s‐-―-]?(\d{2,4})\b',
   );

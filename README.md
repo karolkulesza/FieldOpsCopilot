@@ -348,14 +348,28 @@ content from its weights, i.e. the exact failure this whole retrieval path
 exists to prevent.
 
 **The inquiry is untrusted; the manual text is not.** Manual prose comes from the
-bundled asset that `SeedBundle.parse` validated. The inquiry does not, so a
+bundled asset that `SeedBundle.parse` validated — `upsertManualEntries` is the
+trust boundary, and this asymmetry stops being safe the day anything writes
+`manual_entries` from a non-asset source. The inquiry is not validated, so a
 technician who types (or, in Tier 2, has transcribed) `[MANUAL DOCUMENT]` could
 otherwise open a second, fabricated "verified" block inside their own question.
-`PromptCompiler.neutralizeMarkers` rewrites the opening bracket of this
-compiler's markers, case-insensitively, keeping the words so the diagnosis does
-not lose them. **This is a block-boundary defence, not a prompt-injection cure** —
-nothing here stops a user simply *asking* the model to ignore its instructions,
-and it should not be described as if it did.
+`PromptCompiler.neutralizeMarkers` rewrites **every square bracket** in the
+inquiry to a round one, keeping the words so the diagnosis does not lose them.
+
+The blunt rule replaced a narrower one, and the reason is worth carrying. The
+first version matched the marker spellings case-insensitively, and review broke
+it with a single extra space (`[MANUAL  DOCUMENT]`) — then a leading space, a tab
+and a newline did the same. Widening the pattern to absorb whitespace would have
+left the zero-width and homoglyph variants, every one of which reads as the
+marker to a language model — which is the same argument that already made the
+guard case-insensitive. Removing the character makes the property structural
+rather than enumerative: the inquiry cannot contain `[` at all, so no bracketed
+marker of any spelling can appear inside it, and the test asserts that invariant
+instead of a list of attacks someone happened to think of.
+
+**It is still a block-boundary defence, not a prompt-injection cure** — nothing
+here stops a user simply *asking* the model to ignore its instructions, and it
+should not be described as if it did.
 
 **Documents are capped** (`maxDocuments`, default 2). Task 1.8 measured a
 ~400-token grounded prompt for a single entry, and the router can return one row
@@ -827,10 +841,14 @@ Tests are split into two tiers:
   the behaviour worth testing is HTTP behaviour: redirect hops, `Content-Length`
   vs. chunked, and which requests carry the access token. The seeding suite reads
   the **shipped** asset off disk as well as its own fixtures, so a broken bundled
-  JSON cannot pass behind green fixtures and fail on the device. The retrieval
-  suites go further and use *only* the shipped asset: their expected document ids
-  are a property of that exact prose and its porter stems, so a fixture would let
-  them stay green while the bundled manual stopped producing them.
+  JSON cannot pass behind green fixtures and fail on the device. The **router**
+  suite goes further and uses nothing but the shipped asset, as do the prompt
+  compiler's two AC groups: their expected document ids are a property of that
+  exact prose and its porter stems, so a fixture would let them stay green while
+  the bundled manual stopped producing them. The compiler's remaining groups —
+  layout, the document cap, and the untrusted-inquiry defence — deliberately use
+  hand-built entries, because what they assert is the compiler's own formatting
+  rather than anything about the corpus.
 - **Integration tier** (`integration_test/`) — on-device runs against real
   backends. `flutter test` does not pick this directory up, so CI stays host-only.
   Both suites **skip** with an actionable message unless the model defines above are

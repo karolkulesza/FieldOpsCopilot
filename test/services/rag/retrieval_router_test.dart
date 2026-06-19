@@ -288,6 +288,39 @@ void main() {
       },
     );
 
+    test('a code repeated around another code is still cut everywhere', () async {
+      // R0-F3. The spans reach `_withoutSpans` grouped by canonical code, not in
+      // text order, so a code that repeats *around* another one produces
+      // out-of-order starts — here `[0, 16, 8]`. Without the sort, the cursor has
+      // already passed position 8 when that span arrives and the overlap branch
+      // silently drops it, leaving a resolved `E-305` in the residual for FTS to
+      // tokenize into `e` plus `305`. The two existing repetition tests use one
+      // code repeated or two codes appearing once, so neither interleaves and
+      // neither could see this: deleting the sort left all 318 tests green.
+      final result = await router.retrieve('E-102 x E-305 y E-102 z');
+
+      expect(result.resolvedCodes, ['E-102', 'E-305']);
+      expect(result.searchedTerms, ['x', 'y', 'z']);
+    });
+
+    test('a one- or two-letter word before a single digit is not a code', () async {
+      // R0-F4. This is what the two-digit floor actually excludes. `breaker 4A`
+      // — which the pattern's doc used to credit to the floor — is out because of
+      // the letter prefix instead, so it could never bind this. `to 8` can:
+      // relax `\d{2,4}` to `\d{1,4}` and `torque to 8 Nm` yields the candidate
+      // `TO-8`, spending a lookup on ordinary English rather than an identifier.
+      for (final query in const [
+        'torque to 8 Nm',
+        'use a T 5 driver',
+        'shelf B 3',
+        'A4 paper',
+      ]) {
+        final result = await router.retrieve(query);
+        expect(result.resolvedCodes, isEmpty, reason: 'query: $query');
+        expect(result.unresolvedCodes, isEmpty, reason: 'query: $query');
+      }
+    });
+
     test(
       'maxCodes bounds the lookups, and the surplus stays searchable',
       () async {
@@ -316,6 +349,32 @@ void main() {
 
       final wide = await router.retrieve('cabin shaking, E-102 on controller');
       expect(wide.entryIds, hasLength(3));
+    });
+
+    test('route reports the full-text leg even when it adds no new row', () async {
+      // R0-F1. `route` used to derive the full-text leg from `entries.length >
+      // codeHitIds.length`, which is silent exactly when every full-text hit is
+      // also a code hit — the merged list grows by nothing. That bug shipped for
+      // one commit and was fixed by recording `ftsHitIds`; nothing bound the fix,
+      // so restoring the old expression left all 318 tests green.
+      //
+      // This is the discriminating state, reached two ways. Both must say
+      // `hybrid`; the old derivation says `code`.
+      final onlyOverlap = await router.retrieve(
+        'door clutch belt slipping, E-305',
+      );
+      expect(onlyOverlap.entries, hasLength(1));
+      expect(onlyOverlap.codeHitIds, {'apex_9_err_305'});
+      expect(onlyOverlap.ftsHitIds, {'apex_9_err_305'});
+      expect(onlyOverlap.route, RetrievalRoute.hybrid);
+
+      final narrowed = await RetrievalRouter(
+        db,
+        ftsLimit: 1,
+      ).retrieve('cabin shaking, E-102 on controller');
+      expect(narrowed.entries, hasLength(1));
+      expect(narrowed.ftsHitIds, hasLength(1));
+      expect(narrowed.route, RetrievalRoute.hybrid);
     });
 
     test('nothing matches anywhere, and the result says so', () async {
