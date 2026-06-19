@@ -379,17 +379,20 @@ Required Tools: Hammer
     });
 
     test('the residual the rule does not cover, asserted so nobody re-claims it', () {
-      // `Ps`/`Pe` is a category, not a shape. A bracket *piece* such as U+23A1 is
-      // category `So` and survives — as does a header written with no brackets
-      // at all. Neither forges this compiler's delimiters, and both belong to the
-      // general look-alike case the class doc disclaims. Pinned as a test because
-      // this one paragraph has now over-claimed twice, and a boundary nobody
-      // asserts is a boundary that drifts.
-      // Each of these is a delimiter outside Ps/Pe, verified by measuring its
-      // category rather than by assuming it: bracket pieces and corner brackets
-      // (So), the quotation-class guillemets (Pi/Pf), and plain angle brackets
-      // (Sm). Listed in full because round 2 named only the first and the
-      // reviewer pointed out the residual is broader than one example implies.
+      // `Ps`/`Pe` is a category, not a shape, so delimiters outside it survive:
+      // bracket pieces, corner brackets, the guillemets, plain angle brackets,
+      // and a header with no delimiter at all. None forges this compiler's
+      // delimiters; all belong to the general look-alike case the class doc
+      // disclaims. Pinned as a test because this one paragraph has over-claimed
+      // in three consecutive rounds, and a boundary nobody asserts is one that
+      // drifts.
+      //
+      // No general-category name appears below, on purpose. An earlier version
+      // labelled each survivor and said the labels were "verified by measuring"
+      // — what had been measured was `Ps`/`Pe` membership, which is what the
+      // rule asks and what these assertions check; the category names were
+      // carried over from prose and one of them (U+23A1) was wrong. Membership
+      // is the only fact the code depends on, so it is the only fact stated.
       for (final survivor in const [
         '\u23A1MANUAL DOCUMENT\u23A4', // ⎡ ⎤ bracket pieces
         '\u231CMANUAL DOCUMENT\u231D', // ⌜ ⌝ corner

@@ -48,9 +48,17 @@ import 'retrieval_router.dart';
 /// this paragraph both claimed more than the code did. Delimiters *outside*
 /// those two categories are not rewritten, and they are a broader set than one
 /// example suggests: bracket **pieces** and corner brackets (`⎡` U+23A1, `⌜`
-/// U+231C — category `So`), the quotation-class marks (`«` `»` — `Pi`/`Pf`), and
-/// plain `<` `>`. A header written with no brackets at all survives too. There
-/// is a test pinning the boundary.
+/// U+231C), the quotation-class guillemets (`«` `»`), and plain `<` `>`. A
+/// header written with no delimiter at all survives too. Each is pinned by a
+/// test, which is where the boundary actually lives.
+///
+/// Those survivors are deliberately listed **without** their general-category
+/// names. Round 3 carried `So` for U+23A1 through this doc, the README, a test
+/// comment and a review turn before anyone ran `unicodedata` on it — it is `Sm`,
+/// the same category as the `<` `>` in the same sentence. Nothing in the code
+/// reads a category name; the rule asks one question, `Ps`/`Pe` membership, and
+/// the test asserts the answer behaviourally. Four decorative facts had already
+/// rotted once, so they are gone rather than corrected.
 ///
 /// None of them is a homoglyph of `[`, which is the class that actually forges
 /// *this* compiler's delimiters and is closed. The rest is the general
