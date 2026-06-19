@@ -119,6 +119,27 @@ void main() {
       expect(await ftsOnly('door belt squealing'), contains('apex_9_err_305'));
     });
 
+    test(
+      'the code hit leads because it is a code hit, not because bm25 agrees',
+      () async {
+        // The AC's own input is a weak test of ordering, and a mutation proved it:
+        // bm25 already ranks _305 top for "door belt squealing", so swapping the
+        // merge to put the full-text leg first leaves the assertion above green.
+        // This input separates the two properties. Full text ranks _305 then _102;
+        // the code hit is a third entry that bm25 would never lead with, so only a
+        // code-first merge produces this order.
+        final result = await router.retrieve('squealing noise E-204');
+
+        expect(result.codeHitIds, {'apex_9_err_204'});
+        expect(result.ftsHitIds, {'apex_9_err_305', 'apex_9_err_102'});
+        expect(result.entryIds, [
+          'apex_9_err_204',
+          'apex_9_err_305',
+          'apex_9_err_102',
+        ]);
+      },
+    );
+
     test('the code is cut from the residual, its digits with it', () async {
       final result = await router.retrieve(query);
 
