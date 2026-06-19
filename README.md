@@ -369,10 +369,17 @@ brackets around fullwidth *letters*, which exercises nothing new.
 
 Matching on the general categories is what stops that recurring: it is a
 property of Unicode rather than a list someone maintained. **The residual is
-named rather than papered over** — a bracket *piece* such as `⎡` (U+23A1) is
-category `So`, is not rewritten, and there is a test asserting it survives. So
-does a header written with no brackets at all. Neither forges this compiler's
-delimiters; both are the general look-alike case below.
+named rather than papered over**, and it is broader than one example suggests:
+bracket pieces and corner brackets (`⎡`, `⌜` — category `So`), the
+quotation-class guillemets (`«` `»` — `Pi`/`Pf`) and plain `<` `>` are all
+outside `Ps`/`Pe` and all survive, as does a header written with no delimiter at
+all. A test pins each of them, plus the counter-case that keeps the boundary
+honest — the CJK corner bracket `「` *is* `Ps` and *is* rewritten, so the list
+cannot be read as "CJK punctuation survives".
+
+None of the survivors is a homoglyph of `[`, which is the class that actually
+forges these delimiters and is closed. The rest is the general look-alike case
+below.
 
 **It is still a block-boundary defence, not a prompt-injection cure** — nothing
 here stops a user simply *asking* the model to ignore its instructions, and it

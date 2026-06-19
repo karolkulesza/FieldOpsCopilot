@@ -25,7 +25,9 @@ import 'retrieval_router.dart';
 /// (or, from Tier 2, dictates something transcribed as) `[MANUAL DOCUMENT]` can
 /// otherwise open a second, fabricated document block inside the inquiry and
 /// have the model treat it as verified content. [neutralizeMarkers] rewrites
-/// **every square bracket** in the inquiry to a round one.
+/// **every bracket character** in the inquiry — every codepoint Unicode
+/// classifies as opening or closing punctuation, not only `[` and `]` — to a
+/// plain round one. `{`, `（`, `「` and the rest go the same way.
 ///
 /// The blunt rule is deliberate and it replaces a narrower one that did not
 /// hold. Matching the marker spellings — even case-insensitively — only excludes
@@ -43,12 +45,17 @@ import 'retrieval_router.dart';
 /// `⟦`, `〔` are all `Ps` and all rewritten.
 ///
 /// The residual is named rather than hidden, because the first two versions of
-/// this paragraph both claimed more than the code did. A look-alike *outside*
-/// those categories is not covered: `⎡` (U+23A1, a bracket **piece**, category
-/// `So`) survives, and there is a test asserting that it does. So does a header
-/// written with no brackets at all. Neither is a forgery of this compiler's
-/// delimiters; both are the general look-alike case, which is the same bucket as
-/// the disclaimer below.
+/// this paragraph both claimed more than the code did. Delimiters *outside*
+/// those two categories are not rewritten, and they are a broader set than one
+/// example suggests: bracket **pieces** and corner brackets (`⎡` U+23A1, `⌜`
+/// U+231C — category `So`), the quotation-class marks (`«` `»` — `Pi`/`Pf`), and
+/// plain `<` `>`. A header written with no brackets at all survives too. There
+/// is a test pinning the boundary.
+///
+/// None of them is a homoglyph of `[`, which is the class that actually forges
+/// *this* compiler's delimiters and is closed. The rest is the general
+/// look-alike case — the same bucket as the disclaimer below, and not something
+/// this function should be read as covering.
 ///
 /// It is still a **block-boundary** defence and not a general prompt-injection
 /// cure: nothing stops a user from simply *asking* the model to ignore its

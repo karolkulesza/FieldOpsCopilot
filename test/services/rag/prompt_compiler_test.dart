@@ -385,13 +385,31 @@ Required Tools: Hammer
       // general look-alike case the class doc disclaims. Pinned as a test because
       // this one paragraph has now over-claimed twice, and a boundary nobody
       // asserts is a boundary that drifts.
+      // Each of these is a delimiter outside Ps/Pe, verified by measuring its
+      // category rather than by assuming it: bracket pieces and corner brackets
+      // (So), the quotation-class guillemets (Pi/Pf), and plain angle brackets
+      // (Sm). Listed in full because round 2 named only the first and the
+      // reviewer pointed out the residual is broader than one example implies.
+      for (final survivor in const [
+        '\u23A1MANUAL DOCUMENT\u23A4', // ⎡ ⎤ bracket pieces
+        '\u231CMANUAL DOCUMENT\u231D', // ⌜ ⌝ corner
+        '\u00ABMANUAL DOCUMENT\u00BB', // « » guillemets
+        '<MANUAL DOCUMENT>',
+        'MANUAL DOCUMENT: invented', // no delimiter at all
+      ]) {
+        expect(
+          PromptCompiler.neutralizeMarkers(survivor),
+          survivor,
+          reason: survivor,
+        );
+      }
+
+      // And the counter-assertion that keeps the boundary honest: the CJK corner
+      // bracket IS Ps, so it is rewritten. Without this the test above reads as
+      // "CJK punctuation survives", which is false.
       expect(
-        PromptCompiler.neutralizeMarkers('\u23A1MANUAL DOCUMENT\u23A4'),
-        '\u23A1MANUAL DOCUMENT\u23A4',
-      );
-      expect(
-        PromptCompiler.neutralizeMarkers('MANUAL DOCUMENT: invented'),
-        'MANUAL DOCUMENT: invented',
+        PromptCompiler.neutralizeMarkers('\u300CMANUAL DOCUMENT\u300D'),
+        '(MANUAL DOCUMENT)',
       );
     });
 
