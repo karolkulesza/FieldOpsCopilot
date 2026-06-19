@@ -353,19 +353,26 @@ trust boundary, and this asymmetry stops being safe the day anything writes
 `manual_entries` from a non-asset source. The inquiry is not validated, so a
 technician who types (or, in Tier 2, has transcribed) `[MANUAL DOCUMENT]` could
 otherwise open a second, fabricated "verified" block inside their own question.
-`PromptCompiler.neutralizeMarkers` rewrites **every square bracket** in the
-inquiry to a round one, keeping the words so the diagnosis does not lose them.
+`PromptCompiler.neutralizeMarkers` rewrites **every Unicode opening/closing
+punctuation character** (`\p{Ps}` / `\p{Pe}`) in the inquiry to a plain round
+bracket, keeping the words so the diagnosis does not lose them.
 
-The blunt rule replaced a narrower one, and the reason is worth carrying. The
-first version matched the marker spellings case-insensitively, and review broke
-it with a single extra space (`[MANUAL  DOCUMENT]`) — then a leading space, a tab
-and a newline did the same. Widening the pattern to absorb whitespace would have
-left the zero-width and homoglyph variants, every one of which reads as the
-marker to a language model — which is the same argument that already made the
-guard case-insensitive. Removing the character makes the property structural
-rather than enumerative: the inquiry cannot contain `[` at all, so no bracketed
-marker of any spelling can appear inside it, and the test asserts that invariant
-instead of a list of attacks someone happened to think of.
+That rule arrived in two corrections, and both are worth carrying because they
+are the same mistake at different depths. The first version matched the marker
+spellings case-insensitively, and review broke it with a single extra space
+(`[MANUAL  DOCUMENT]`) — then a leading space, a tab and a newline. The second
+replaced the pattern with `replaceAll('[', '(')` and justified it by saying a
+pattern guard "would still have left the homoglyph variants" — while knowing
+exactly one codepoint, so `［MANUAL DOCUMENT］` walked straight through. Review
+caught that too, and caught the test that was supposed to cover it using ASCII
+brackets around fullwidth *letters*, which exercises nothing new.
+
+Matching on the general categories is what stops that recurring: it is a
+property of Unicode rather than a list someone maintained. **The residual is
+named rather than papered over** — a bracket *piece* such as `⎡` (U+23A1) is
+category `So`, is not rewritten, and there is a test asserting it survives. So
+does a header written with no brackets at all. Neither forges this compiler's
+delimiters; both are the general look-alike case below.
 
 **It is still a block-boundary defence, not a prompt-injection cure** — nothing
 here stops a user simply *asking* the model to ignore its instructions, and it
