@@ -45,8 +45,21 @@ abstract class AgentTool {
   /// registry that constructs cannot produce a definition the device rejects.
   ToolDefinition get definition;
 
-  /// The name the model calls and the registry routes on.
-  String get name => definition.name;
+  // There is deliberately **no `name` getter here.** An earlier version had one,
+  // defaulting to `definition.name`, and `ToolRegistry` routed on it — which made the
+  // "every declared tool is dispatchable" invariant depend on a subclass not
+  // overriding a single getter, on a class this very docstring says is left open for
+  // subclassing. Override it and the tool is declared under one name and routed under
+  // another: permanently `unknown_tool` (review finding R0-F2, demonstrated with a
+  // probe). Rather than check that the two names agree, the second one is gone: the
+  // registry reads `definition.name` and nothing else — the only string the model is
+  // ever told. Callers that want the name ask for `tool.definition.name`.
+  //
+  // Stated precisely, because the loose version of this sentence is the same mistake
+  // one layer along: a subclass can still define a `name` member of its own, and
+  // nothing prevents it. What changed is that **the registry no longer consults one**,
+  // so such a member cannot affect what is declared or what is dispatchable. That is
+  // narrower than "divergence is impossible" and it is what the code actually buys.
 
   /// Runs the tool and returns the payload fed back to the model.
   ///
@@ -67,17 +80,30 @@ abstract class AgentTool {
 /// Carries the parameter name because that is the one thing the model needs in order
 /// to fix the call, and it is what TC-TOOL-FAIL-01 asserts.
 class ToolArgumentException implements Exception {
-  const ToolArgumentException({
+  /// The argument was absent, `null`, or blank — the model supplied no value.
+  const ToolArgumentException.missing({
     required this.parameter,
-    required this.code,
     required this.message,
-  });
+  }) : code = ToolFailureCode.missingParameter;
+
+  /// The argument was present but not of the declared type.
+  const ToolArgumentException.invalid({
+    required this.parameter,
+    required this.message,
+  }) : code = ToolFailureCode.invalidParameter;
 
   /// The argument at fault, e.g. `sku`.
   final String parameter;
 
-  /// Either [ToolFailureCode.missingParameter] or
+  /// Always [ToolFailureCode.missingParameter] or
   /// [ToolFailureCode.invalidParameter].
+  ///
+  /// True by construction rather than by documentation: there are only the two named
+  /// constructors above, so a caller cannot build one carrying
+  /// [ToolFailureCode.unknownTool] and have `dispatch` faithfully report
+  /// `error: unknown_tool` for a tool that plainly exists. (Raised as a non-blocking
+  /// review note, which suggested an `assert`; an `assert` is compiled out in release
+  /// and Task 1.4 already paid for that lesson, so the shape is closed instead.)
   final ToolFailureCode code;
 
   /// Written for the model: says what was wrong and what to send instead.
@@ -119,9 +145,8 @@ class ToolArguments {
   /// schema.)
   String requiredString(String name) {
     if (!_raw.containsKey(name)) {
-      throw ToolArgumentException(
+      throw ToolArgumentException.missing(
         parameter: name,
-        code: ToolFailureCode.missingParameter,
         message:
             'required argument "$name" was not provided; call the tool again '
             'with "$name" set to a string value',
@@ -129,27 +154,24 @@ class ToolArguments {
     }
     final value = _raw[name];
     if (value == null) {
-      throw ToolArgumentException(
+      throw ToolArgumentException.missing(
         parameter: name,
-        code: ToolFailureCode.missingParameter,
         message:
             'required argument "$name" was null; call the tool again with '
             '"$name" set to a string value',
       );
     }
     if (value is! String) {
-      throw ToolArgumentException(
+      throw ToolArgumentException.invalid(
         parameter: name,
-        code: ToolFailureCode.invalidParameter,
         message:
             'argument "$name" must be a string, but a '
             '${value.runtimeType} was provided',
       );
     }
     if (value.trim().isEmpty) {
-      throw ToolArgumentException(
+      throw ToolArgumentException.missing(
         parameter: name,
-        code: ToolFailureCode.missingParameter,
         message:
             'required argument "$name" was blank; call the tool again with '
             '"$name" set to a non-empty string value',
