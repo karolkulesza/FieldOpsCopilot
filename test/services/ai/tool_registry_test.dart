@@ -579,12 +579,22 @@ void main() {
       //
       // **`Mixed_Case_Tool` is load-bearing, not filler — do not "tidy" it away.**
       // It is the only fixture here whose name is not already lower-case, so it is the
-      // only one that can catch a dispatch key that has been transformed rather than
-      // replaced. Measured: keying `_byName` on `definition.name.toLowerCase()` kills
-      // this test, and deleting *just this line* lets that same mutation walk through
-      // the whole file green. Every other name in the suite is lower-case, so nothing
-      // else in 34 tests would notice. (Raised as a non-blocking note in review round
-      // 1, with that two-step mutation as the evidence.)
+      // only one that can catch a dispatch key that has been *transformed* rather than
+      // replaced. Every other name in the suite is lower-case, so nothing else in 34
+      // tests would notice.
+      //
+      // Measured against this file as it stands, and stated as the three steps it
+      // actually takes: (1) key `_byName` on `definition.name.toLowerCase()` → this
+      // test fails and only this one; (2) additionally delete this fixture line → the
+      // mutation is **still caught**, now by the literal list below, which no longer
+      // matches `toolNames`; (3) additionally drop `'Mixed_Case_Tool'` from that
+      // literal → all 34 pass, and the dispatch-key mutation is invisible.
+      //
+      // Step 2 is the one worth having in writing, because an earlier version of this
+      // comment claimed the mutation went green there and it does not — the literal
+      // assertion added in the same commit had made the guard *stronger* than the
+      // comment describing it (review finding R2-F1). Two independent things therefore
+      // have to be removed before the coverage is lost, which is the point.
       final many = ToolRegistry([
         GetPartsInventoryTool(db),
         _StubTool(_stubDefinition('alpha')),
@@ -592,9 +602,18 @@ void main() {
       ]);
 
       // Against literals, deliberately. Comparing `toolNames` to
-      // `definitions.map((d) => d.name)` reads like a check and is a tautology — both
-      // sides are now the same comprehension over the same live getter, so no
-      // registry-keying mutation can make them differ. Also flagged in round 1.
+      // `definitions.map((d) => d.name)` reads like a check and is nearly a tautology —
+      // both are the same comprehension over the same getter, so no registry-*keying*
+      // mutation can separate them. Flagged in round 1, which is why the literals came
+      // in.
+      //
+      // The comparison is kept below rather than deleted, and for a reason the round-1
+      // note surfaced only afterwards: it is the one assertion in the file that would
+      // catch an **unstable** `definition` getter. `toolNames` and `definitions` re-read
+      // `tool.definition` per call, so a getter returning a different name on a later
+      // call makes the two sides differ — the divergence `AgentTool.definition`'s
+      // docstring asks implementers to avoid and nothing enforces. It is a cheap guard
+      // against the one hazard the literals cannot see, not a duplicate of them.
       expect(many.toolNames, [
         'get_local_parts_inventory',
         'alpha',

@@ -7,12 +7,19 @@
 /// 2. **Dispatching** what comes back — [ToolRegistry.dispatch] maps an
 ///    `LlmToolCall` to the matching [AgentTool] and returns a [ToolOutcome].
 ///
-/// Keeping both on one object is what makes the two halves impossible to disagree: a
-/// tool the model was told about is a tool the registry can execute, because the
-/// declaration and the dispatch key are the *same* string — `definition.name`. That
-/// wording is deliberate: it used to say "by construction" while the dispatch key came
-/// from a separate overridable getter, which is exactly how the two halves *could*
-/// disagree (review finding R0-F2).
+/// Keeping both on one object is what keeps the two halves from disagreeing — **so long
+/// as `AgentTool.definition` is stable**: a tool the model was told about is a tool the
+/// registry can execute, because the declaration and the dispatch key are the *same*
+/// string, `definition.name`.
+///
+/// Both hedges are deliberate and each was earned. The sentence used to claim the halves
+/// were impossible to disagree "by construction" while the dispatch key came from a
+/// separate overridable getter — exactly how they *could* disagree (R0-F2). Removing that
+/// getter fixed it, and then documenting the remaining hazard exposed that "impossible"
+/// was still too strong: `_byName` is snapshotted here in the constructor while
+/// [definitions] and [toolNames] re-read `tool.definition` on every access, so a
+/// definition whose `name` changed between calls would diverge them, and nothing enforces
+/// that it will not (R2-F2). See `AgentTool.definition`.
 library;
 
 import 'package:flutter/foundation.dart';
