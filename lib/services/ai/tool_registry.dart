@@ -43,9 +43,12 @@ class ToolRegistry {
     // `definitions` is derived from `_tools`, so it still contains both of two tools
     // sharing a name and the duplicate check can fire. Handing it a name-keyed
     // collection instead — `{for (final t in _tools) t.definition.name: t}.values` —
-    // collapses that pair into one entry and silently disarms the check. That
-    // substitution is the mutation tabled as M4, and it kills exactly
-    // 'rejects two tools registered under the same name'.
+    // collapses that pair into one entry and silently disarms the check. Making that
+    // substitution kills exactly one test, 'rejects two tools registered under the
+    // same name' — which is the evidence for this paragraph, stated inline because a
+    // reader can act on it. (An earlier version cited a mutation id, `M4`, that lives
+    // only in a review ledger deleted once the loop closes: a citation the reader
+    // cannot follow. R1-F2.)
     //
     // The statement *order* below is NOT load-bearing, and an earlier version of this
     // comment claimed it was — in three documents, citing a regression guard that does

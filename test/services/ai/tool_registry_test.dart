@@ -128,9 +128,17 @@ void main() {
     });
 
     test('rejects two tools registered under the same name', () {
-      // Guards the constructor's ordering: validating a name-keyed map instead of the
-      // list would collapse these two into one entry and this test would pass for the
-      // wrong reason — nothing to detect rather than detection working.
+      // Guards the *argument* handed to the validator — not the constructor's
+      // statement order. Validating a name-keyed collection instead of `definitions`
+      // would collapse these two into one entry, leaving nothing to detect rather than
+      // detection working.
+      //
+      // This comment used to open "Guards the constructor's ordering", which was
+      // false: swapping the two statements in the constructor leaves this test green.
+      // It was the **fourth** copy of that claim and the one that mattered most,
+      // because the claim cited *this* test as its guard — so a reader landing here
+      // learned the wrong thing about what deleting the `expect` below would cost.
+      // Raised as R0-F1, missed by the first fix, caught again as R1-F1.
       expect(
         () => ToolRegistry([
           GetPartsInventoryTool(db),
@@ -568,13 +576,31 @@ void main() {
       // getter — declare under one name, route under another. `AgentTool` no longer
       // has a `name`, so the two cannot drift; this test is what notices if the
       // dispatch key stops being the declared name.
+      //
+      // **`Mixed_Case_Tool` is load-bearing, not filler — do not "tidy" it away.**
+      // It is the only fixture here whose name is not already lower-case, so it is the
+      // only one that can catch a dispatch key that has been transformed rather than
+      // replaced. Measured: keying `_byName` on `definition.name.toLowerCase()` kills
+      // this test, and deleting *just this line* lets that same mutation walk through
+      // the whole file green. Every other name in the suite is lower-case, so nothing
+      // else in 34 tests would notice. (Raised as a non-blocking note in review round
+      // 1, with that two-step mutation as the evidence.)
       final many = ToolRegistry([
         GetPartsInventoryTool(db),
         _StubTool(_stubDefinition('alpha')),
         _StubTool(_stubDefinition('Mixed_Case_Tool')),
       ]);
 
-      expect(many.toolNames, many.definitions.map((d) => d.name).toList());
+      // Against literals, deliberately. Comparing `toolNames` to
+      // `definitions.map((d) => d.name)` reads like a check and is a tautology — both
+      // sides are now the same comprehension over the same live getter, so no
+      // registry-keying mutation can make them differ. Also flagged in round 1.
+      expect(many.toolNames, [
+        'get_local_parts_inventory',
+        'alpha',
+        'Mixed_Case_Tool',
+      ]);
+      expect(many.definitions.map((d) => d.name), many.toolNames);
       for (final definition in many.definitions) {
         expect(
           many.toolNamed(definition.name),
