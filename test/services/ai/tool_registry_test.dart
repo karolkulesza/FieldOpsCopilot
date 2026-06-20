@@ -604,22 +604,35 @@ void main() {
       // Against literals, deliberately. Comparing `toolNames` to
       // `definitions.map((d) => d.name)` reads like a check and is nearly a tautology —
       // both are the same comprehension over the same getter, so no registry-*keying*
-      // mutation can separate them. Flagged in round 1, which is why the literals came
-      // in.
+      // mutation can separate them (raised in review round 1, which is why the literals
+      // came in).
       //
-      // The comparison is kept below rather than deleted, and for a reason the round-1
-      // note surfaced only afterwards: it is the one assertion in the file that would
-      // catch an **unstable** `definition` getter. `toolNames` and `definitions` re-read
-      // `tool.definition` per call, so a getter returning a different name on a later
-      // call makes the two sides differ — the divergence `AgentTool.definition`'s
-      // docstring asks implementers to avoid and nothing enforces. It is a cheap guard
-      // against the one hazard the literals cannot see, not a duplicate of them.
+      // That comparison used to sit here as well, justified as "the one assertion that
+      // would catch an unstable `definition` getter". **That was false and it is now
+      // deleted** (R3-F1). Measured with a probe whose `definition` is a getter counting
+      // its own accesses:
+      //
+      //   * A getter that changes on *every* access is caught by the literal list below,
+      //     which is reached first.
+      //   * A getter that changes *after construction* — the case the old comment
+      //     described — is caught by the `toolNamed` loop underneath: `_byName` was keyed
+      //     during construction, so looking up the newly-read name misses. Measured
+      //     directly: `toolNamed('unstable')` still resolves while
+      //     `toolNamed('unstable_4')` is `null`.
+      //   * Whether the deleted comparison failed at all depended on which accesses its
+      //     two sides happened to read. That is an accident of interleaving, not a
+      //     guard, and documenting it would have pointed a reader deciding what to prune
+      //     at the wrong line — keeping the incidental assertion and dropping the
+      //     `toolNamed` loop that actually holds the invariant.
+      //
+      // Recorded because the claim came from a reviewer's suggestion and I shipped it
+      // into documentation without measuring it. **A reviewer's suggestion is not
+      // evidence either.**
       expect(many.toolNames, [
         'get_local_parts_inventory',
         'alpha',
         'Mixed_Case_Tool',
       ]);
-      expect(many.definitions.map((d) => d.name), many.toolNames);
       for (final definition in many.definitions) {
         expect(
           many.toolNamed(definition.name),
