@@ -1172,9 +1172,11 @@ real ordering, each needing a fixture where the two candidate orders disagree.
 Adversarial review then ran its own mutations and found more. Across two rounds it
 wrote 38 of them; **14 survived**.
 
-The review ran five rounds and raised **nineteen findings** — six, five, four, two
-and two, which is written out per round so the total is checkable on the page rather
-than restated from memory. An earlier version said fifteen, because round 4
+The review ran **six rounds** and raised **nineteen findings** — six, five, four,
+two, two and none, written out per round so the total is checkable on the page rather
+than restated from memory. (Five became six when the round that approved the work
+landed; a count of rounds is only final once the loop closes, which is the same
+staleness that broke the finding total twice.) An earlier version said fifteen, because round 4
 recomputed the *split* below without revisiting the *total*, leaving a README that
 narrated a finding by ID in one paragraph and excluded it from the count in another
 (R4-F1). **A total is a claim, and a total that has to be maintained by hand is a
@@ -1213,11 +1215,15 @@ it did not provide**, which is the same species as the envelope-recursion commen
 and it belongs here rather than above.
 
 The suite now stands at **438 tests and 33 mutations, 0 survivors**. Six of those
-mutations were added to bind the review rounds' fixes (M29–M34) and one more
-(M28) to bind a defect self-caught before handoff; an earlier version of this
-sentence said seven for the review rounds by counting M34 twice, since round 2
-*replaced* a duplicated slot rather than adding one — "a list is not a set", one
-paragraph after coining the phrase.
+mutations were added to bind the review rounds' fixes — the text-path encodability
+probe, string-mode entry in the brace scan, each alias list's preference order,
+text-path `renamedFrom`, and the probe's *subject* — and one more to bind the
+resolution-ordering defect self-caught before handoff. An earlier version said seven
+for the review rounds by counting the last one twice, since round 2 *replaced* a
+duplicated slot rather than adding one — "a list is not a set", one paragraph after
+coining the phrase. (Described rather than cited by `Mnn` id: the harness lives
+outside the repo, and Task 1.5's R1-F2 was exactly a production comment citing a
+mutation id the reader could not follow.)
 
 The corrections in this section are themselves worth keeping, because it exists to
 be accurate about measurement and each version of it was not. It claimed "six of
