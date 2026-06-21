@@ -1021,12 +1021,23 @@ valid JSON" — mostly evaporated. Two shapes are left:
 reasonable to assume the runtime parses a textual tool call if the model emits
 one. For the model this app ships, it does not.
 `FunctionCallFormatFactory.create` maps `ModelType.gemma4` to
-`SdkPassthroughFunctionCallFormat`, whose implementation is four overrides
+`SdkPassthroughFunctionCallFormat`, whose implementation is **five** overrides
 returning constants — `isFunctionCallStart` → `false`, `isDefinitelyText` →
-`true`, `isFunctionCallComplete` → `false`, and `parse(String)` → **`null`**
-(`flutter_gemma-1.4.1/lib/core/parsing/`). Every other model family in that
-factory gets a real text parser; Gemma 4 gets none, because it is expected to
-deliver structured calls through the SDK instead. So a Gemma 4 turn that spells a
+`true`, `isFunctionCallComplete` → `false`, `parse(String)` → **`null`**, and
+`parseAll(String)` → **`const []`**
+(`flutter_gemma-1.4.1/lib/core/parsing/sdk_passthrough_function_call_format.dart`,
+`grep -c '@override'` → 5). Every other model family in that factory gets a real
+text parser; Gemma 4 gets none, because it is expected to deliver structured calls
+through the SDK instead.
+
+That fifth override is the one that matters most for this argument, and this
+paragraph originally said "four" and omitted it — because the grep that produced
+the list was truncated at twenty lines, while the prose claimed the file had been
+read (R1-F1). `parseAll` is the entry point the plugin's `JsonFunctionCallFormat`
+uses to pull *several* calls out of one text buffer, so its returning `const []`
+for Gemma 4 is the sharpest available statement that this model family gets no
+text parsing at all. **An enumeration is only as good as the read that produced
+it** — and a `head`-limited grep is not a read of the file. So a Gemma 4 turn that spells a
 call out in prose reaches the app as plain text that nothing will parse — which is
 this guard's entire reason to exist, and it is a stronger argument than the one
 this section originally made from first principles.
@@ -1148,19 +1159,39 @@ bind that pass had been passing on the **ambiguity** rule instead — a test tha
 passed for a reason unrelated to the criterion it was mapped to, the pattern
 Tasks 1.2, 1.4 and 1.8 each recorded. It is replaced by two tests that bind the
 real ordering, each needing a fixture where the two candidate orders disagree.
-Adversarial review then found a third defect of the same family and four claims
-the code did not support — **six mutations of the reviewer's own survived**, and
-four of those survivors became findings. The behavioural one (R0-F1) is the
-encodability hole described above. The others were an enumeration nothing bound
-(R0-F3, four entries deleted), a `renamedFrom` guarded on one path and not the
-other (R0-F4), a docstring overstating what `jsonEncode` accepts (R0-F5), and — the
-one worth its own line — **a test whose fixture did not exercise its own
-criterion**: `a brace inside a string value does not truncate the object` used
-`"A}B{C"`, a *balanced* `}`…`{` pair that a plain brace counter walks straight
-through, so string-awareness was bound only by the escaped-quote test beside it
-while the test written for it was green either way (R0-F2). One character of
-fixture. The suite now stands at **437 tests and 33 mutations, 0 survivors**, six
-of the mutations added specifically to bind the round's fixes.
+Adversarial review then ran its own mutations and found more. Across two rounds it
+wrote 38 of them; **14 survived**. Four of the eleven findings came out of those
+mutations — R0-F3 and R0-F4 from survivors, R1-F4 from a survivor of the round-1
+fixes, and R0-F2 from the *kill-list* of a mutation that died (it killed the test
+beside the one whose criterion it was): the remaining seven came from re-reading
+source and re-measuring claims, which is the cheaper half of the work and found the
+High. The behavioural ones were the
+encodability hole above (R0-F1) and a gap in that very fix (R1-F4): the probe reads
+the *decoded* arguments, but `object` is also in scope and also a
+`Map<String, Object?>`, so swapping the subject compiles, passes everything, and
+reopens R0-F1 for arguments delivered as a JSON *string* — whose value is then a
+perfectly encodable `String` that nothing looks through. The rest were an
+enumeration nothing bound (R0-F3, four entries deleted), a `renamedFrom` guarded on
+one path and not the other (R0-F4), and — the one worth its own line — **a test
+whose fixture did not exercise its own criterion**: `a brace inside a string value
+does not truncate the object` used `"A}B{C"`, a *balanced* `}`…`{` pair that a plain
+brace counter walks straight through, so string-awareness was bound only by the
+escaped-quote test beside it while the test written for it was green either way
+(R0-F2). One character of fixture.
+
+The suite now stands at **438 tests and 33 mutations, 0 survivors**, seven of the
+mutations added specifically to bind the two rounds of fixes.
+
+Two corrections in this paragraph are themselves worth keeping, because the
+paragraph exists to be accurate about measurement and its first version was not.
+It claimed "six of the reviewer's mutations survived, four became findings" — the
+reviewer's own ledger records 13 survivors in round 0 alone, 7 of which fed 2
+findings, so the numbers were wrong in both directions and had been copied from a
+summary rather than counted. And "33 mutations" was true of the *list* while two
+entries were byte-identical edits, making 32 distinct ones; the duplicate has been
+replaced with the R1-F4 mutation, so 33 is now 33 real edits and the harness is
+checked for duplicate (anchor, replacement) pairs. **A count of mutations is a
+claim like any other, and a list is not a set.**
 
 One process note worth keeping, because it is a lesson this repo had already
 written down: the harness reverts with `git checkout`, so it **requires a
