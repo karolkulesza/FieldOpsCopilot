@@ -57,6 +57,11 @@ database to help technicians diagnose faults and produce structured repair plans
   got wrong (unknown tool, missing or mistyped argument, unstocked SKU) comes
   back as a payload the agent loop can feed back, not as a throw. See _Agent
   tools_ below.
+- **Defensive tool-call guard** — the degraded path into the registry: it
+  validates a native tool-call event, extracts a call the model emitted as prose
+  or JSON text instead of native tokens, canonicalises a near-miss tool name, and
+  reports "there is no tool call here" as a typed value rather than a throw. See
+  _The defensive tool-call guard_ below.
 - **Model provisioning** — download-with-progress, streaming SHA-256 verification
   against a pinned digest, atomic install into no-backup storage, and a visible
   "model ready" state on the home screen, with the trigger to fetch and verify.
@@ -123,6 +128,12 @@ lib/
     ├── rag/
     │   ├── retrieval_router.dart     # Free text → code lookup + FTS, merged code-first
     │   └── prompt_compiler.dart      # Retrieval → the grounded [MANUAL DOCUMENT] prompt
+    ├── ai/
+    │   ├── base_tool.dart            # AgentTool contract, typed arguments, ToolOutcome
+    │   ├── tool_registry.dart        # Declares tools to the model; routes calls back
+    │   ├── tool_call_guard.dart      # Degraded path: malformed events, calls as text
+    │   └── tools/
+    │       └── get_parts_inventory_tool.dart  # Offline warehouse lookup by SKU
     └── models/
         ├── model_descriptor.dart     # What artifact to fetch, and what it must hash to
         ├── model_storage.dart        # Layout, receipts, no-backup marking
@@ -986,10 +997,138 @@ separate tool, not a widened parameter.
 Same position as the seeding engine and the retrieval router: a library with
 tests and no production call site, because binding a `DatabaseService` needs the
 encryption key Task 1.1 deferred. Task 1.11 owns the key and the wiring; Task
-1.9's agent loop is the first consumer of `dispatch`, and Task 1.6's guard feeds
-the degraded path into it. Fuzzy tool-name matching belongs there rather than
+1.9's agent loop is the first consumer of `dispatch`, and the guard below feeds
+the degraded path into it. Lenient tool-name matching lives there rather than
 here — `dispatch` matches names exactly, because on the primary path Gemma 4's
 constrained decoding emits a name that came from this registry.
+
+## The defensive tool-call guard
+
+`ToolCallGuard` is the degraded path into `dispatch`, and it is deliberately
+small. Task 1.8 confirmed on the device that Gemma 4 emits **native
+function-call tokens**, so the plugin delivers a structured `LlmToolCall` on the
+happy path and this task's original premise — "coerce noisy model output into
+valid JSON" — mostly evaporated. Two shapes are left:
+
+| Input | Result |
+|---|---|
+| A well-formed native event | `GuardedCall` holding the **same instance**, unchanged |
+| A native event with an unusable name or unserialisable arguments | `GuardFailure` |
+| A call emitted as prose, a fenced block or a JSON blob | `GuardedCall` extracted from the text |
+| Anything else | `GuardFailure` — the loop treats the turn as carrying no tool call |
+
+**Extract-and-parse only.** A string-aware scan finds the *extent* of a JSON
+object and `jsonDecode` decides whether it is one. There is no bracket repair, no
+quote balancing, no salvaging of truncated JSON: something that does not decode
+is not a tool call, which is a cheaper answer than a wrong one. Nothing
+enumerates wrapper syntax either — because the scan starts a candidate at every
+`{`, a fenced code block, a `<tool_call>` tag, a JSON array and OpenAI's nested
+`{"type": "function", "function": {…}}` envelope are all the same input to it.
+That last one is why the file no longer contains an explicit envelope-unwrapping
+recursion; see below.
+
+### A guard failure is not an unknown tool
+
+The load-bearing distinction. A `GuardFailure` means **"there is no tool call
+here"** — never "that tool does not exist". A name the guard cannot resolve is
+passed through *unchanged*, so `dispatch` answers `unknown_tool` with the payload
+it already has written for the model. Reporting it here as well would give one
+condition two different reports depending on which layer noticed first.
+
+That is also why lenient name matching lives here and exact matching lives in the
+registry: **one** forgiving place rather than two. A near-miss resolves by exact
+equality after dropping case and every non-alphanumeric character — a property,
+not a list of spellings — so `GET_LOCAL_PARTS_INVENTORY`,
+`getLocalPartsInventory`, `get-local-parts-inventory` and
+`functions.get_local_parts_inventory` all reach the declared name. It is
+deliberately **not** fuzzy matching: no edit distance, no prefix scoring, because
+the cost of guessing wrong is dispatching to the wrong tool, which is worse than
+an `unknown_tool` the model can recover from. Two declared names that normalise
+alike make the guard refuse to guess rather than pick one.
+
+### Text has to prove it is a call; a native event does not
+
+A native event arrived through the runtime's function-calling path, so it *is* a
+call. A JSON object sitting in prose is not, and the rule for promoting one is:
+it names a tool this build knows, **or** it is shaped like a call (a name and an
+arguments key). Without that rule, `{"name": "Bob", "age": 3}` in an answer
+becomes a call to a tool named `Bob` and the loop reports a tool failure for a
+sentence. The second half of the disjunction is what keeps the paragraph above
+true: `{"tool": "invented_tool", "arguments": {}}` *is* an attempt, so it passes
+through under the name the model chose and the registry reports `unknown_tool`.
+
+Absent arguments become `{}`, and unreadable arguments are a failure. This is
+Task 1.5's blank-SKU reasoning one layer up: a tool may legitimately take no
+arguments, and for one that does not, `{}` reaches the registry as
+`missing_parameter` — accurate, because the model named no value. Answering the
+same way for arguments that *were* supplied in a shape nothing can read would
+describe a call that never happened. Positional arguments are refused for the
+same reason: mapping `["BRK-990-XP"]` onto `sku` works only for a
+single-parameter tool and silently mis-assigns the moment a tool takes two.
+
+One residual is recorded rather than engineered around: a model that echoes a
+tool *declaration* back as text reads as a call whose arguments are the JSON
+schema, because a declaration and a call share their key names. The outcome is a
+`missing_parameter` — a recoverable turn — and the available discriminators are
+exactly the enumerate-the-attack shape Task 1.4 learned to avoid.
+
+### Why the encodability check is structural
+
+A native event's arguments are ordinary Dart values; nothing upstream constrains
+them. The isolate wire's `decodeEvent` checks that the arguments *are* a `Map`
+and never inspects the values, and `FakeLlmEngine` scripts whatever a test hands
+it. What breaks is Task 1.9 putting the attempted call into the next turn:
+`jsonEncode` throws `JsonUnsupportedObjectError`, which is an **`Error`** — not
+something the loop's `on Exception` recovery catches.
+
+So the guard walks the map with a predicate instead of encoding-and-catching,
+because catching that would mean `on Error`, the shape Task 1.5 rejected on
+purpose. Non-finite doubles are rejected on measurement rather than assumption:
+`jsonEncode(double.nan)` throws exactly as a `DateTime` does. Arguments recovered
+from *text* skip the check — they came out of `jsonDecode`, so they are
+JSON-encodable by construction.
+
+### What mutation testing changed
+
+The suite was green and 27 mutations were run against it, each against the whole
+433-test suite under `--reporter expanded` (the default reporter truncates its
+failing list, which produced two wrong counts in Task 1.4). Two survived, and
+**neither was a missing test — each was a defect the tests had been shaped
+around**:
+
+- **The envelope recursion was dead code.** `_callFromObject` recursed into an
+  object found under a name key so the OpenAI envelope would resolve. Deleting
+  the recursion killed nothing: the positional scan already offers the inner
+  object as its own candidate once the outer one is rejected for carrying no name
+  string. The scan had been doing the work the whole time while a test comment
+  credited the recursion — a false claim about first-party code, which is this
+  project's most-repeated failure mode. Deleted rather than re-documented.
+- **Name resolution had the wrong precedence.** Candidates were tried pass-major
+  (both spellings exact, then both normalised), which let a *segment's* exact
+  match beat the *whole name's* normalised match: with `getparts` and `parts`
+  both registered, `get.parts` resolved to `parts` — a different tool than the
+  model named. It is now candidate-major.
+
+The second is the more useful one, because the mutation that exposed it deleted
+the exact-match pass and *survived*, and chasing why showed the test meant to
+bind that pass had been passing on the **ambiguity** rule instead — a test that
+passed for a reason unrelated to the criterion it was mapped to, the pattern
+Tasks 1.2, 1.4 and 1.8 each recorded. It is replaced by two tests that bind the
+real ordering, each needing a fixture where the two candidate orders disagree.
+After the fixes, 27 mutations kill 27.
+
+One process note worth keeping, because it is a lesson this repo had already
+written down: the harness reverts with `git checkout`, so it **requires a
+committed baseline**. Task 1.5 recorded that, and this harness hit it anyway —
+the first revert destroyed both uncommitted fixes, which had to be re-applied.
+It now refuses to run when the file under mutation is dirty.
+
+### Not wired into the app
+
+Same as the registry it feeds: a library with tests and no production call site.
+Task 1.9's agent loop is the consumer — it decides what a `GuardFailure` *means*
+for a turn (feed the message back, or treat the turn as a plain answer), which is
+what `GuardFailureReason` exists to let it branch on.
 
 ## Getting started
 
@@ -1015,7 +1154,8 @@ Tests are split into two tiers:
 
 - **Unit tier** (`test/`) — pure Dart, deterministic, runs in CI on every commit
   (engine fakes, database, FTS, seeding, retrieval routing and prompt
-  compilation, the agent tool registry, model provisioning, widget tests). The HTTP
+  compilation, the agent tool registry, the tool-call guard, model provisioning,
+  widget tests). The HTTP
   transport is covered against a loopback `HttpServer` rather than a mock, because
   the behaviour worth testing is HTTP behaviour: redirect hops, `Content-Length`
   vs. chunked, and which requests carry the access token. The seeding suite reads
