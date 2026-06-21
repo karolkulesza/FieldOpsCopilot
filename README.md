@@ -1172,17 +1172,20 @@ real ordering, each needing a fixture where the two candidate orders disagree.
 Adversarial review then ran its own mutations and found more. Across two rounds it
 wrote 38 of them; **14 survived**.
 
-The review ran **six rounds** and raised **nineteen findings** — six, five, four,
-two, two and none, written out per round so the total is checkable on the page rather
-than restated from memory. (Five became six when the round that approved the work
-landed; a count of rounds is only final once the loop closes, which is the same
-staleness that broke the finding total twice.) An earlier version said fifteen, because round 4
-recomputed the *split* below without revisiting the *total*, leaving a README that
-narrated a finding by ID in one paragraph and excluded it from the count in another
-(R4-F1). **A total is a claim, and a total that has to be maintained by hand is a
-claim that goes stale every round.**
+The review ran **seven rounds** and raised **twenty-two findings** — six, five,
+four, two, two, none and three, written out per round so the total is checkable on
+the page rather than restated from memory.
 
-Four of the nineteen came out of the mutations — R0-F3 and R0-F4 from survivors,
+That breakdown has been re-stated three times now, and every restatement is the
+argument for having it. It said fifteen while round 4 had recomputed the *split*
+below without revisiting the *sum*, leaving a README that narrated a finding by ID
+in one paragraph and excluded it from the count in another (R4-F1). It said five
+rounds, which was true until the approving round landed. Then the reviewer reopened
+at **Final Acceptance** and found three more, so six rounds became seven and
+nineteen became twenty-two. **A total is a claim, and a total maintained by hand
+goes stale every round** — including the round you expect to be the last.
+
+Four of the twenty-two came out of the mutations — R0-F3 and R0-F4 from survivors,
 R1-F4 from a survivor of the round-1 fixes, and R0-F2 from the *kill-list* of a
 mutation that died (it killed the test beside the one whose criterion it was). The
 rest came from re-reading source and re-measuring claims, which is the cheaper half
@@ -1199,10 +1202,12 @@ reads the *decoded* arguments, but `object` is also in scope and also a
 reopens R0-F1 for arguments delivered as a JSON *string*, whose value is then a
 perfectly encodable `String` that nothing looks through.
 
-The remaining sixteen were **claims** — in comments, docstrings, this README and the
-review ledger — that the code, the dependency, or the measurement did not support.
-Sixteen of nineteen, against one behavioural defect: that ratio is the most useful
-thing this task measured about itself.
+Eighteen were **claims** — in comments, docstrings, this README and the review
+ledger — that the code, the dependency, or the measurement did not support. The
+twenty-second is a formatting lapse, kept in its own category rather than rounded
+into the claims so the ratio stays honest. Eighteen of twenty-two, against one
+behavioural defect: that ratio is the most useful thing this task measured about
+itself.
 R0-F2 is the one worth reading twice, because it took a round to classify correctly
 and the correction is the interesting part. `a brace inside a string value does not
 truncate the object` used `"A}B{C"`, a **balanced** `}`…`{` pair a plain brace
