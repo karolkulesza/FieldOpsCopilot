@@ -1174,24 +1174,31 @@ wrote 38 of them; **14 survived**. Four of the fifteen findings came out of thos
 mutations — R0-F3 and R0-F4 from survivors, R1-F4 from a survivor of the round-1
 fixes, and R0-F2 from the *kill-list* of a mutation that died (it killed the test
 beside the one whose criterion it was): the rest came from re-reading source and
-re-measuring claims, which is the cheaper half of the work and found the High. Exactly one was **behavioural** — the encodability hole above (R0-F1), where
+re-measuring claims, which is the cheaper half of the work and found the High.
+
+Exactly one was **behavioural** — the encodability hole above (R0-F1), where
 shipped code did the wrong thing.
 
-Three more were **correct code with nothing holding it there**, which is the
-category this project keeps rediscovering. R0-F4: `renamedFrom` was guarded on the
-native path ten times over and on the text path not at all. R1-F4: a gap in R0-F1's
-own fix — the probe reads the *decoded* arguments, but `object` is also in scope and
-also a `Map<String, Object?>`, so swapping the subject compiles, passes everything,
-and reopens R0-F1 for arguments delivered as a JSON *string*, whose value is then a
-perfectly encodable `String` that nothing looks through. And R0-F2, the one worth
-its own line, is the same category expressed in a *fixture*: `a brace inside a
-string value does not truncate the object` used `"A}B{C"`, a **balanced** `}`…`{`
-pair that a plain brace counter walks straight through, so string-awareness was
-bound only by the escaped-quote test beside it while the test written for it was
-green either way. One character of fixture.
+Two were **correct code with nothing holding it there**, the category this project
+keeps rediscovering. R0-F4: `renamedFrom` was guarded on the native path ten times
+over and on the text path not at all. R1-F4: a gap in R0-F1's own fix — the probe
+reads the *decoded* arguments, but `object` is also in scope and also a
+`Map<String, Object?>`, so swapping the subject compiles, passes everything, and
+reopens R0-F1 for arguments delivered as a JSON *string*, whose value is then a
+perfectly encodable `String` that nothing looks through.
 
-The remaining eleven were claims — in comments, docstrings, this README and the
+The remaining twelve were **claims** — in comments, docstrings, this README and the
 review ledger — that the code, the dependency, or the measurement did not support.
+R0-F2 is the one worth reading twice, because it took a round to classify correctly
+and the correction is the interesting part. `a brace inside a string value does not
+truncate the object` used `"A}B{C"`, a **balanced** `}`…`{` pair a plain brace
+counter walks straight through, so the test was green with or without the behaviour
+it named. That looks like an unbound property — but string-awareness *was* bound,
+measurably, by the escaped-quote test beside it: the mutation removing string
+tracking killed exactly that one test, before and after the fixture fix. So nothing
+was unguarded; what was wrong was a **comment crediting a vacuous test with a guard
+it did not provide**, which is the same species as the envelope-recursion comment,
+and it belongs here rather than above.
 
 The suite now stands at **438 tests and 33 mutations, 0 survivors**. Six of those
 mutations were added to bind the review rounds' fixes (M29–M34) and one more
@@ -1220,6 +1227,18 @@ tool**; `mutate.py` now refuses to run when two mutations share an `(anchor,
 replacement)` pair, and that refusal was verified by re-inserting the duplicate and
 watching it fire — because a guard nobody has watched fail is the thing this whole
 section is about.
+
+And the first version of *that* guard had a hole of its own, found the same way. It
+keyed uniqueness on the mutations' **labels** differing, so it caught a duplicate
+edit under a new label but waved through a whole-row copy-paste — label included,
+which is precisely how an unnoticed duplicate arises. Its reassuring `no duplicates`
+was a literal string rather than a derivation, so it would have printed alongside its
+own contradicting numbers (R3-F1). The check now compares the edit itself and then
+asserts `len(distinct) == len(MUTATIONS)`, and **both** duplicate shapes were
+falsified against throwaway copies: differently-labelled and identically-labelled
+each exit 1, the clean list exits 0. A guard written to enforce "watch it fail" is
+the last place to skip watching it fail — with two shapes to try, trying one is the
+same partial-enumeration move the rest of this section documents.
 
 One process note worth keeping, because it is a lesson this repo had already
 written down: the harness reverts with `git checkout`, so it **requires a
