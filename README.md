@@ -1017,6 +1017,20 @@ valid JSON" — mostly evaporated. Two shapes are left:
 | A call emitted as prose, a fenced block or a JSON blob | `GuardedCall` extracted from the text |
 | Anything else | `GuardFailure` — the loop treats the turn as carrying no tool call |
 
+**Why a text path is needed at all, on the plugin's own evidence.** It would be
+reasonable to assume the runtime parses a textual tool call if the model emits
+one. For the model this app ships, it does not.
+`FunctionCallFormatFactory.create` maps `ModelType.gemma4` to
+`SdkPassthroughFunctionCallFormat`, whose implementation is four overrides
+returning constants — `isFunctionCallStart` → `false`, `isDefinitelyText` →
+`true`, `isFunctionCallComplete` → `false`, and `parse(String)` → **`null`**
+(`flutter_gemma-1.4.1/lib/core/parsing/`). Every other model family in that
+factory gets a real text parser; Gemma 4 gets none, because it is expected to
+deliver structured calls through the SDK instead. So a Gemma 4 turn that spells a
+call out in prose reaches the app as plain text that nothing will parse — which is
+this guard's entire reason to exist, and it is a stronger argument than the one
+this section originally made from first principles.
+
 **Extract-and-parse only.** A string-aware scan finds the *extent* of a JSON
 object and `jsonDecode` decides whether it is one. There is no bracket repair, no
 quote balancing, no salvaging of truncated JSON: something that does not decode
@@ -1084,15 +1098,34 @@ something the loop's `on Exception` recovery catches.
 So the guard walks the map with a predicate instead of encoding-and-catching,
 because catching that would mean `on Error`, the shape Task 1.5 rejected on
 purpose. Non-finite doubles are rejected on measurement rather than assumption:
-`jsonEncode(double.nan)` throws exactly as a `DateTime` does. Arguments recovered
-from *text* skip the check — they came out of `jsonDecode`, so they are
-JSON-encodable by construction.
+`jsonEncode(double.nan)` throws exactly as a `DateTime` does. The predicate is
+deliberately *narrower* than `jsonEncode`, which falls back to calling `toJson()`
+on an unknown object — a tool argument that is only serialisable through
+someone's `toJson()` is not something a model can have sent.
+
+**Both paths run the probe, and the reason this paragraph used to say otherwise is
+worth keeping.** It claimed arguments recovered from text could skip the check
+because they came out of `jsonDecode` and were therefore "JSON-encodable by
+construction". Decoded does not imply re-encodable: a numeric literal that
+overflows a double decodes to `Infinity`, which `jsonEncode` refuses.
+`jsonDecode('{"n": 1e400}')` produces one, so
+`{"tool": …, "arguments": {"qty": 1e400}}` handed the agent loop precisely the
+value whose serialisation throws the uncatchable `Error` the paragraph above is
+about — while the native path rejected the identical value. Raised in review as
+R0-F1. The lesson generalises past this file: **a claim that some property holds
+"by construction" is a claim about a constructor someone has to have read.** The
+model-text path is the *more* likely source of an absurd numeric literal, not the
+less.
 
 ### What mutation testing changed
 
 The suite was green and 27 mutations were run against it, each against the whole
-433-test suite under `--reporter expanded` (the default reporter truncates its
-failing list, which produced two wrong counts in Task 1.4). Two survived, and
+suite under `--reporter expanded` (the default reporter truncates its failing
+list, which produced two wrong counts in Task 1.4). That first run was against a
+**432**-test suite, not the 433 an earlier draft of this paragraph claimed: the
+fix commit below replaced one ordering test with two, so 433 is the count for
+every run *after* the fixes, and stating it for the run that found them described
+a measurement against a tree that no longer existed. Two mutations survived, and
 **neither was a missing test — each was a defect the tests had been shaped
 around**:
 
@@ -1115,7 +1148,19 @@ bind that pass had been passing on the **ambiguity** rule instead — a test tha
 passed for a reason unrelated to the criterion it was mapped to, the pattern
 Tasks 1.2, 1.4 and 1.8 each recorded. It is replaced by two tests that bind the
 real ordering, each needing a fixture where the two candidate orders disagree.
-After the fixes, 27 mutations kill 27.
+Adversarial review then found a third defect of the same family and four claims
+the code did not support — **six mutations of the reviewer's own survived**, and
+four of those survivors became findings. The behavioural one (R0-F1) is the
+encodability hole described above. The others were an enumeration nothing bound
+(R0-F3, four entries deleted), a `renamedFrom` guarded on one path and not the
+other (R0-F4), a docstring overstating what `jsonEncode` accepts (R0-F5), and — the
+one worth its own line — **a test whose fixture did not exercise its own
+criterion**: `a brace inside a string value does not truncate the object` used
+`"A}B{C"`, a *balanced* `}`…`{` pair that a plain brace counter walks straight
+through, so string-awareness was bound only by the escaped-quote test beside it
+while the test written for it was green either way (R0-F2). One character of
+fixture. The suite now stands at **437 tests and 33 mutations, 0 survivors**, six
+of the mutations added specifically to bind the round's fixes.
 
 One process note worth keeping, because it is a lesson this repo had already
 written down: the harness reverts with `git checkout`, so it **requires a
