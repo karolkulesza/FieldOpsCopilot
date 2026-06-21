@@ -1170,11 +1170,21 @@ passed for a reason unrelated to the criterion it was mapped to, the pattern
 Tasks 1.2, 1.4 and 1.8 each recorded. It is replaced by two tests that bind the
 real ordering, each needing a fixture where the two candidate orders disagree.
 Adversarial review then ran its own mutations and found more. Across two rounds it
-wrote 38 of them; **14 survived**. Four of the fifteen findings came out of those
-mutations — R0-F3 and R0-F4 from survivors, R1-F4 from a survivor of the round-1
-fixes, and R0-F2 from the *kill-list* of a mutation that died (it killed the test
-beside the one whose criterion it was): the rest came from re-reading source and
-re-measuring claims, which is the cheaper half of the work and found the High.
+wrote 38 of them; **14 survived**.
+
+The review ran five rounds and raised **nineteen findings** — six, five, four, two
+and two, which is written out per round so the total is checkable on the page rather
+than restated from memory. An earlier version said fifteen, because round 4
+recomputed the *split* below without revisiting the *total*, leaving a README that
+narrated a finding by ID in one paragraph and excluded it from the count in another
+(R4-F1). **A total is a claim, and a total that has to be maintained by hand is a
+claim that goes stale every round.**
+
+Four of the nineteen came out of the mutations — R0-F3 and R0-F4 from survivors,
+R1-F4 from a survivor of the round-1 fixes, and R0-F2 from the *kill-list* of a
+mutation that died (it killed the test beside the one whose criterion it was). The
+rest came from re-reading source and re-measuring claims, which is the cheaper half
+of the work and found the High.
 
 Exactly one was **behavioural** — the encodability hole above (R0-F1), where
 shipped code did the wrong thing.
@@ -1187,8 +1197,10 @@ reads the *decoded* arguments, but `object` is also in scope and also a
 reopens R0-F1 for arguments delivered as a JSON *string*, whose value is then a
 perfectly encodable `String` that nothing looks through.
 
-The remaining twelve were **claims** — in comments, docstrings, this README and the
+The remaining sixteen were **claims** — in comments, docstrings, this README and the
 review ledger — that the code, the dependency, or the measurement did not support.
+Sixteen of nineteen, against one behavioural defect: that ratio is the most useful
+thing this task measured about itself.
 R0-F2 is the one worth reading twice, because it took a round to classify correctly
 and the correction is the interesting part. `a brace inside a string value does not
 truncate the object` used `"A}B{C"`, a **balanced** `}`…`{` pair a plain brace
@@ -1239,6 +1251,13 @@ falsified against throwaway copies: differently-labelled and identically-labelle
 each exit 1, the clean list exits 0. A guard written to enforce "watch it fail" is
 the last place to skip watching it fail — with two shapes to try, trying one is the
 same partial-enumeration move the rest of this section documents.
+
+The harness also refuses two mutations that share a **label** with different edits,
+which is a distinct hazard the reviewer raised as a non-blocking note: both parties
+key their round-over-round comparisons by label, and the results JSON is a list of
+`{label: …}`, so such a pair would be run and measured and then collapse into one
+the moment anybody diffed two runs — measured and silently dropped. Also falsified
+(exit 1, `34 mutations but only 33 distinct labels`).
 
 One process note worth keeping, because it is a lesson this repo had already
 written down: the harness reverts with `git checkout`, so it **requires a
