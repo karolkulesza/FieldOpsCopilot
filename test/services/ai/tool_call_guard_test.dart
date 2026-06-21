@@ -138,7 +138,7 @@ Once I have the stock level I'll finish the plan.''';
       expect(guardedCall(guard.inspectText(text)).name, toolName);
     });
 
-    test('reads the OpenAI-shaped envelope by recursing into it', () {
+    test('reads the OpenAI-shaped envelope', () {
       const text =
           '{"type": "function", "function": {"name": '
           '"get_local_parts_inventory", "arguments": "{\\"sku\\": '
@@ -148,6 +148,12 @@ Once I have the stock level I'll finish the plan.''';
 
       // Two leniencies in one input: the call is nested under `function`, and its
       // arguments arrive as a JSON *string* rather than an object.
+      //
+      // The nesting costs no code — the scan offers the inner object as its own
+      // candidate once the outer one is rejected for carrying no name string. This
+      // comment used to credit an explicit recursion in `_callFromObject`; deleting that
+      // recursion left this test green, which is what proved the scan had been doing the
+      // work, so the recursion is gone.
       expect(call.name, toolName);
       expect(call.arguments, {'sku': 'BRK-990-XP'});
     });
@@ -547,19 +553,38 @@ Sure!! ###{{{ tool call:: get inventory ]] "sku" -> BRK-990-XP <<<
       }
     });
 
-    test('an exact name wins over another name it could normalise to', () {
-      final both = ToolCallGuard(const ['get_parts', 'getparts']);
+    test('the whole name beats its own trailing segment', () {
+      // The defect this exists for: with both names registered, `get.parts` has a
+      // *whole-name* normalised match (`getparts`) and a *segment* exact match
+      // (`parts`). Resolving segments before finishing the whole name dispatches to a
+      // tool the model did not name. It needs a fixture where the two disagree — with
+      // only one of these names registered, every candidate order gives one answer.
+      final ordered = ToolCallGuard(const ['getparts', 'parts']);
 
-      // `get_parts` normalises to `getparts`, which is also a declared name. Exact
-      // matching runs first, so each spelling routes to itself.
-      for (final exact in ['get_parts', 'getparts']) {
-        expect(
-          (both.inspectEvent(LlmToolCall(name: exact)) as GuardedCall)
-              .call
-              .name,
-          exact,
-        );
-      }
+      final guarded =
+          ordered.inspectEvent(const LlmToolCall(name: 'get.parts'))
+              as GuardedCall;
+
+      expect(guarded.call.name, 'getparts');
+      expect(guarded.renamedFrom, 'get.parts');
+    });
+
+    test('an exact segment beats an ambiguous normalisation', () {
+      // Binds the exact-before-normalised half of the same ordering, and it is the only
+      // input that can: `get_parts` and `getParts` normalise alike, so the normalised
+      // lookup for the segment is *ambiguous* and refuses to guess. Only the exact pass
+      // resolves this; without it the name falls through unchanged to `unknown_tool`.
+      //
+      // The test this replaced claimed to bind the exact pass and did not — it asserted
+      // that two colliding names each pass through untouched, which is the ambiguity
+      // rule, and deleting the exact pass left it green.
+      final ambiguous = ToolCallGuard(const ['get_parts', 'getParts']);
+
+      final guarded =
+          ambiguous.inspectEvent(const LlmToolCall(name: 'functions.get_parts'))
+              as GuardedCall;
+
+      expect(guarded.call.name, 'get_parts');
     });
 
     test('a guard with no known names resolves nothing', () {

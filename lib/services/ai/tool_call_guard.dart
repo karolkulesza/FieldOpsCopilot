@@ -249,7 +249,7 @@ class ToolCallGuard {
     for (final candidate in _jsonObjectCandidates(text)) {
       final object = _decodeObject(candidate);
       if (object == null) continue;
-      final result = _callFromObject(object, 0);
+      final result = _callFromObject(object);
       if (result is GuardedCall) return result;
       if (result is GuardFailure &&
           result.reason != GuardFailureReason.noToolCallFound) {
@@ -261,27 +261,17 @@ class ToolCallGuard {
 
   /// Reads a decoded JSON object as a tool call.
   ///
-  /// [depth] bounds the envelope unwrapping below; JSON cannot cycle, so this is about
-  /// staying thin rather than about termination.
-  GuardResult _callFromObject(Map<String, Object?> object, int depth) {
-    // OpenAI-shaped envelope: `{"type": "function", "function": {"name": …,
-    // "arguments": …}}`. Handled by *recursing into* an object found under a name key
-    // rather than by special-casing the key `function`, so the same code reads
-    // `{"tool": {...}}` too. A nested object that turns out not to be a call does not
-    // disqualify the outer one — the outer read below still runs.
-    if (depth < _maxEnvelopeDepth) {
-      for (final key in _nameKeys) {
-        final value = object[key];
-        if (value is Map) {
-          final nested = _callFromObject(
-            Map<String, Object?>.from(value),
-            depth + 1,
-          );
-          if (nested is GuardedCall) return nested;
-        }
-      }
-    }
-
+  /// **Nested envelopes need no code here, and this is the second version of that
+  /// sentence.** The OpenAI-shaped `{"type": "function", "function": {"name": …,
+  /// "arguments": …}}` resolves because [_jsonObjectCandidates] starts a candidate at
+  /// *every* `{` in the text, so the inner object is offered on its own after the outer
+  /// one is rejected for having no name string. The first version of this method also
+  /// recursed into any object found under a name key, and a mutation deleting that
+  /// recursion killed **nothing** — the scan had been doing the work the whole time,
+  /// while a test comment credited the recursion. It is deleted rather than kept and
+  /// re-documented: unreachable leniency is machinery this task's brief rules out, and
+  /// a second path to the same answer is a second thing to keep true.
+  GuardResult _callFromObject(Map<String, Object?> object) {
     final rawName = _firstStringUnder(object, _nameKeys);
     if (rawName == null) {
       // No name-shaped key at all: this is some other JSON object that happened to be
@@ -369,9 +359,8 @@ class ToolCallGuard {
     final trimmed = rawName.trim();
     if (trimmed.isEmpty) return null;
 
-    // Exactly two spellings are tried, and both are resolved by the same exact-under-
-    // normalisation rule: the name as given, then its last dotted/scoped segment.
-    // The second exists because a runtime that namespaces its tools emits
+    // Exactly two spellings are tried: the name as given, then its last dotted/scoped
+    // segment. The second exists because a runtime that namespaces its tools emits
     // `functions.get_local_parts_inventory`, and normalisation alone will not strip a
     // prefix (it drops the separator but keeps `functions`).
     final segment = trimmed.split(_scopeSeparator).last.trim();
@@ -379,10 +368,19 @@ class ToolCallGuard {
         ? [trimmed]
         : [trimmed, segment];
 
+    // **Candidate-major, and the order is load-bearing.** Each spelling is resolved
+    // exactly, then by normalisation, before the *next* spelling is considered — so the
+    // whole name always beats its own segment, and within one spelling an exact hit
+    // beats a normalised one.
+    //
+    // The first version ran pass-major (both spellings exact, then both normalised),
+    // which let a segment's exact match beat the whole name's normalised match: with
+    // `getparts` and `parts` both registered, `get.parts` resolved to **`parts`** —
+    // dispatching to a different tool than the one the model named. Found because a
+    // mutation deleting the exact-match pass survived, and the test that was supposed to
+    // bind that pass had been passing because of the *ambiguity* rule instead.
     for (final candidate in candidates) {
       if (knownToolNames.contains(candidate)) return candidate;
-    }
-    for (final candidate in candidates) {
       final match = _byNormalised[_normalise(candidate)];
       if (match != null) return match;
     }
@@ -429,10 +427,6 @@ class ToolCallGuard {
     'parameter_values',
     'input',
   ];
-
-  /// One level of envelope unwrapping. Enough for `{"function": {...}}`; more would be
-  /// machinery this task's brief rules out.
-  static const int _maxEnvelopeDepth = 1;
 
   static final RegExp _scopeSeparator = RegExp(r'[.:/]');
   static final RegExp _nonAlphanumeric = RegExp('[^a-z0-9]');
