@@ -68,7 +68,11 @@ enum GuardFailureReason {
   /// Distinct from *absent* arguments, which are legitimate (a tool may take none).
   argumentsUnreadable,
 
-  /// A native event's argument map holds a value `jsonEncode` would refuse.
+  /// A call's argument map holds a value `jsonEncode` would refuse.
+  ///
+  /// Reachable from **both** paths, which is not what this docstring first said: a
+  /// native event can carry any Dart value, and a decoded text argument can carry
+  /// `Infinity` from an overflowing numeric literal (R0-F1).
   argumentsNotEncodable,
 }
 
@@ -187,19 +191,19 @@ class ToolCallGuard {
             'answer in plain text',
       );
     }
-    // Only the native path needs this probe. Arguments recovered from text come out of
-    // `jsonDecode`, so they are JSON-encodable by construction; a native event's map is
-    // ordinary Dart `Object?` and nothing upstream constrains its values. No current
-    // backend produces a bad one — the plugin's arguments are JSON-decoded too, and the
-    // isolate wire's `decodeEvent` rejects a non-`Map` outright — but `decodeEvent`
-    // checks only that the arguments *are* a map and never inspects the values, and
-    // `FakeLlmEngine` scripts whatever a test hands it. What breaks downstream is Task
-    // 1.9 putting the attempted call into the next turn's context: `jsonEncode` throws
-    // `JsonUnsupportedObjectError`, an **`Error`**, which is not something the loop's
-    // `on Exception` recovery catches.
+    // A native event's argument map is ordinary Dart `Object?` and nothing upstream
+    // constrains its values: the isolate wire's `decodeEvent` checks that the arguments
+    // *are* a `Map` and never inspects them, and `FakeLlmEngine` scripts whatever a test
+    // hands it. What breaks downstream is Task 1.9 putting the attempted call into the
+    // next turn's context: `jsonEncode` throws `JsonUnsupportedObjectError`, an
+    // **`Error`**, which is not something the loop's `on Exception` recovery catches.
     //
     // Checked structurally rather than by encoding-and-catching, for that same reason:
     // catching it would mean `on Error`, the shape Task 1.5 rejected on purpose.
+    //
+    // The text path runs the same probe — see `_callFromObject`. It used to skip it on
+    // the grounds that decoded arguments are "JSON-encodable by construction", which is
+    // false (R0-F1).
     if (!_isJsonEncodable(call.arguments)) {
       return const GuardFailure(
         reason: GuardFailureReason.argumentsNotEncodable,
@@ -315,6 +319,24 @@ class ToolCallGuard {
             'tool again with arguments as a JSON object',
       );
     }
+    // The text path needs the same probe the native path runs, and the reason it was
+    // once thought not to is a **false claim about `jsonDecode`**: these arguments came
+    // out of a decode, but "decoded" does not imply "re-encodable". A numeric literal
+    // that overflows a double decodes to `Infinity`, which `jsonEncode` refuses —
+    // measured, `jsonDecode('{"n": 1e400}')` yields `Infinity` and re-encoding that map
+    // throws `JsonUnsupportedObjectError`. So `{"tool": …, "arguments": {"qty": 1e400}}`
+    // used to produce a `GuardedCall` carrying precisely the value whose serialisation
+    // throws the uncatchable `Error` this file spends fifteen lines guarding against on
+    // the other path (review finding R0-F1). Model text is the *more* likely source of
+    // such a literal, not the less.
+    if (!_isJsonEncodable(arguments)) {
+      return const GuardFailure(
+        reason: GuardFailureReason.argumentsNotEncodable,
+        message:
+            'the arguments of that tool call held a number or value that cannot '
+            'be represented in JSON; call the tool again with plain JSON values',
+      );
+    }
 
     return GuardedCall(
       call: LlmToolCall(name: resolved, arguments: arguments),
@@ -387,10 +409,20 @@ class ToolCallGuard {
     return trimmed;
   }
 
-  /// Whether [value] is something `jsonEncode` will accept.
+  /// Whether [value] is a plain JSON value tree — `null`, `String`, `bool`, `int`, a
+  /// finite `double`, or a `List`/`Map` (with `String` keys) of those.
   ///
-  /// Non-finite doubles are rejected: measured, not assumed — `jsonEncode(double.nan)`
-  /// throws `JsonUnsupportedObjectError` exactly as a `DateTime` does.
+  /// **Deliberately narrower than what `jsonEncode` accepts**, and the docstring used to
+  /// say "something `jsonEncode` will accept", which is false in one direction: with no
+  /// `toEncodable`, `jsonEncode` falls back to calling `toJson()` on an unknown object,
+  /// so a class defining one encodes fine while this returns `false` for it (measured —
+  /// R0-F5). Narrower is the right way round here: the arguments are JSON in origin, and
+  /// a tool argument that is only serialisable via someone's `toJson()` is not something
+  /// the model can have sent.
+  ///
+  /// Non-finite doubles are rejected on measurement, not assumption —
+  /// `jsonEncode(double.nan)` throws `JsonUnsupportedObjectError` exactly as a `DateTime`
+  /// does, and `jsonDecode('{"n": 1e400}')` produces one of these.
   static bool _isJsonEncodable(Object? value) {
     if (value == null || value is String || value is bool) return true;
     if (value is int) return true;
@@ -409,26 +441,44 @@ class ToolCallGuard {
     message: 'no tool call was found in that response',
   );
 
-  /// Keys a model may put a tool name under, in preference order.
+  /// Keys a model may put a tool name under, in preference order — and the order is
+  /// bound by a test, because an object carrying two of them has to resolve somehow.
+  ///
+  /// **These are a judgement about model *text*, and the entries that were only a
+  /// judgement about nothing have been deleted.** `'function'`, `'recipient_name'` and
+  /// (below) `'parameter_values'` were removed in review: no test bound them and no
+  /// runtime attests them — `flutter_gemma` 1.4.1 and `flutter_gemma_litertlm` 1.3.1 use
+  /// none of those spellings anywhere, and the one place the plugin reads `function` it
+  /// holds a **Map**, which [_firstStringUnder] ignores. So the entry aimed at a shape
+  /// nothing produces (R0-F3). Decoration rots; deleting beats maintaining.
+  ///
+  /// What is left is deliberate leniency, and the honest justification is *not* the
+  /// plugin's key list: that list says what the plugin **parses**, which is weak evidence
+  /// about what weights **emit**. The proof is in this task's own AC — TC-GUARD-TXT-01's
+  /// input uses `"tool"`, a key the plugin never reads as a name. `name`/`arguments`/
+  /// `args`/`parameters` are what the plugin reads; `tool` is what the spec expects; the
+  /// remainder are conventional spellings bound by tests rather than attested by a
+  /// runtime, kept because the cost of an unused alias is one list entry and the cost of
+  /// a missing one is a dropped call.
   static const List<String> _nameKeys = [
     'tool',
     'tool_name',
     'name',
-    'function',
     'function_name',
-    'recipient_name',
   ];
 
-  /// Keys a model may put arguments under, in preference order.
+  /// Keys a model may put arguments under, in preference order (bound by a test).
   static const List<String> _argumentKeys = [
     'arguments',
     'args',
     'parameters',
-    'parameter_values',
     'input',
   ];
 
-  static final RegExp _scopeSeparator = RegExp(r'[.:/]');
+  /// Separators a namespaced tool name may use. `:` was here too and nothing bound or
+  /// attested it, so it went the same way as the dead alias keys (R0-F3); `.` and `/` are
+  /// each bound by a resolution test.
+  static final RegExp _scopeSeparator = RegExp(r'[./]');
   static final RegExp _nonAlphanumeric = RegExp('[^a-z0-9]');
 
   static String _normalise(String name) =>
