@@ -295,11 +295,13 @@ void main() {
       expect(result.stopReason, AgentStopReason.answered);
     });
 
-    test('the echo is dropped, because on this path the text is the call', () async {
+    test('the echo is dropped when the guard read the turn text', () async {
       // Review finding R0-F5. The echo's justification is that it carries "the
       // reasoning that led to the call" — true on the native path, false here,
-      // where the turn text *is* the call and `neutralizeMarkers` rewrites every
-      // brace in it. Echoing it showed the next turn a corrupted copy of the
+      // where the text carried the call and `neutralizeMarkers` rewrites every
+      // brace in it. Not "the text *is* the call" — `inspectText` scans for a
+      // JSON object anywhere in the text, so a turn's prose goes with it, which
+      // is the cost R1-F2 made the docstring state. Echoing it showed the next turn a corrupted copy of the
       // exact JSON shape the guard needs it to keep producing, immediately above
       // the correct rendering.
       final (loop, engine) = await loopOver(script);
