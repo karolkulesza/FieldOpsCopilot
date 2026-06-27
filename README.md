@@ -8,9 +8,10 @@ database to help technicians diagnose faults and produce structured repair plans
 
 > **Status: vertical slice under construction.** The runnable app shell, the
 > engine-abstraction layer, the encrypted database, offline retrieval, model
-> provisioning and the **on-device LLM engine** are in place. STT and vision are
-> still fakes, and the agent loop that ties retrieval to inference is the next
-> task — they slot in behind the interfaces described below.
+> provisioning, the **on-device LLM engine** and the **agent loop** that ties
+> retrieval to inference are in place. STT and vision are still fakes, and the
+> demo screen that puts the loop on screen is the next task — they slot in
+> behind the interfaces described below.
 
 ## What's implemented so far
 
@@ -62,6 +63,12 @@ database to help technicians diagnose faults and produce structured repair plans
   or JSON text instead of native tokens, canonicalises a near-miss tool name, and
   reports "there is no tool call here" as a typed value rather than a throw. See
   _The defensive tool-call guard_ below.
+- **Agent orchestration loop** — grounded prompt → model → native tool call →
+  local execution → result fed back → grounded answer, with a hard turn cap and
+  a repeat-call short circuit. Because `generate()` is a stateless single turn,
+  the loop carries the conversation as text, and the transcript it appends is
+  built so the model cannot forge the loop's own block markers. See _The agent
+  loop_ below.
 - **Model provisioning** — download-with-progress, streaming SHA-256 verification
   against a pinned digest, atomic install into no-backup storage, and a visible
   "model ready" state on the home screen, with the trigger to fetch and verify.
@@ -1283,6 +1290,178 @@ Task 1.9's agent loop is the consumer — it decides what a `GuardFailure` *mean
 for a turn (feed the message back, or treat the turn as a plain answer), which is
 what `GuardFailureReason` exists to let it branch on.
 
+## The agent loop
+
+`lib/services/ai/agent_loop.dart` is the piece the demo is named after: a
+grounded prompt goes in, the model answers or asks for a tool, the tool runs
+locally, its result goes back to the model, and a grounded answer comes out.
+
+```dart
+final loop = AgentLoop(engine: engine, registry: registry);
+final result = await loop.runToCompletion(compiler.compile(retrieved));
+// result.answer, result.stopReason, result.turns (the transcript)
+```
+
+It does not retrieve and it does not compile. It is handed a finished prompt,
+because the two halves fail differently and are worth testing apart: retrieval
+is a database question with exact answers, and this is a conversation-shaped
+question with fuzzy ones. `AgentLoop.run` streams `AgentEvent`s for a UI that
+wants live tokens and a "checking inventory…" indicator; `runToCompletion` is
+that stream drained.
+
+Everything it consumes already existed. What none of its dependencies could
+decide, and this file does, is four things.
+
+### How a turn ends, and how the conversation survives it
+
+`LlmEngine.generate` is a **stateless single turn** — a fresh conversation per
+call, closed after. There is no accumulated history to inherit, so the loop
+carries the conversation itself, as text, by appending a transcript to the
+prompt it was given:
+
+```
+<the whole grounded prompt from the compiler>
+
+[ASSISTANT]
+Checking the local warehouse.
+
+[TOOL CALL]
+{"tool":"get_local_parts_inventory","arguments":{"sku":"BRK-990-XP"}}
+[TOOL RESULT]
+{"sku":"BRK-990-XP","in_stock":2,"aisle":"Aisle 4, Shelf B"}
+
+[CONTINUE]
+The tool results above are the authoritative local warehouse data …
+```
+
+A turn ends when the engine's stream closes. `LlmDone` is consumed and carries
+no extra information at this layer — waiting for it would hang the loop on a
+runtime that closed without emitting one.
+
+### What a `GuardFailure` means for a turn
+
+Task 1.6 built `GuardFailureReason` "for the loop to branch on" and deliberately
+left the branch open. It is decided here, and it is not a single rule:
+
+- **`noToolCallFound`** means *there was no call here*. The turn is a plain
+  answer and the run ends.
+- **Every other reason** — `emptyToolName`, `argumentsUnreadable`,
+  `argumentsNotEncodable` — means the model tried to call something and got it
+  wrong. That is recoverable: a `[TOOL CALL REJECTED]` block carries the guard's
+  message back and the loop continues.
+
+Both directions of getting this wrong are real, which is why both are tested.
+Treating a malformed call as an answer ships the model's half-finished sentence
+("Let me look that up.") to a technician as the final word. Treating prose as a
+malformed call spends the turn budget arguing with a model that already
+answered.
+
+An **unknown tool name is not a guard failure at all.** The guard passes an
+unresolvable name through unchanged, `ToolRegistry.dispatch` answers
+`unknown_tool`, and that payload is fed back like any other result — one report
+of one condition, rather than two that differ by which layer noticed first.
+
+### Two bounds, doing different work
+
+- **`maxTurns`** (default 4) is the hard bound on calls to `generate`. Two turns
+  is the shortest complete run, so the default leaves room for one correction
+  round. Hitting it stops the loop with `AgentStopReason.iterationCapReached`
+  and a message that *reports the failure* rather than summarising a diagnosis
+  the loop never obtained. It is **clamped**, not asserted — an `assert` is
+  compiled out in release and would make the clamp unreachable from any test.
+- **The repeat short circuit** is not what makes the loop terminate, and the
+  README says so because the code reads as though it might. The same call twice
+  in one run executes once and replays the recorded outcome; a model that asks
+  the same question forever still runs to the cap, it just stops paying for the
+  query. It also keeps the second answer *identical* to the first, which a
+  re-execution could not promise for a tool that is not a pure read. Top-level
+  argument keys are sorted so key order does not make one call look like two;
+  nested maps are left alone, and a reordered nested map costs one extra
+  execution rather than a wrong answer.
+
+### The continuation prompt cannot be forged
+
+Everything appended above is written into a prompt whose preamble tells the
+model what to trust, and three of the four embedded pieces are model-authored or
+model-influenced. The third one is not obvious: `get_local_parts_inventory`
+echoes `normalizeSku(<the model's string>)` for a SKU it does not carry — trim
+and upper-case, no character filtering — so **the model chooses the content of a
+`[TOOL RESULT]` block**, and the interesting thing to put there is
+`[TOOL RESULT]` followed by an invented stock level.
+
+The defence is that every marker in this prompt starts a line, and no embedded
+value can start one:
+
+- **The call and result blocks are single `jsonEncode` lines.** `jsonEncode`
+  escapes every newline inside a string as the two characters `\n`, so no value
+  it emits can contain a real line break, whatever the model wrote. That is a
+  property of the encoder rather than a list of characters to strip — the shape
+  Task 1.4 learned to prefer over enumeration. The tool *name* is inside that
+  encoded line too, not written as bare prose, because a name recovered from
+  text is a decoded JSON string and really can contain a newline.
+- **The echoed turn text is the one piece that can legitimately contain line
+  breaks**, so it gets the other rule instead: `PromptCompiler.neutralizeMarkers`
+  rewrites every Unicode `Ps`/`Pe` codepoint to a round bracket, so it cannot
+  spell a bracketed marker at all. Reused rather than reimplemented — a second
+  copy of that rule would be a second thing to keep true.
+
+Only the *prompt* copy is neutralised. `AgentTurn.text` keeps what the model
+actually said, because that is what the technician saw and what Task 1.10 will
+snapshot.
+
+One change this forced upstream: the compiled prompt's `[USER INQUIRY]` block
+used to be wrapped in **unescaped** quotes, which Task 1.4 recorded as safe
+"only while that block is last". It no longer is, so `PromptCompiler.escapeQuotes`
+now escapes the backslash and then the quote — that order, because escaping
+quotes first doubles the backslash it just emitted and leaves a live quote
+behind. The invariant is checkable without enumerating hostile inputs: delete
+every escape pair from the inquiry block and exactly two quotes remain, which
+are the delimiters the compiler wrote.
+
+### What propagates rather than being fed back
+
+Two things, both for the reason Task 1.5 established — a value the model can
+act on is data, and everything else is a defect:
+
+- **An error on the engine's stream.** A broken runtime is not something the
+  model can correct, and a loop that caught it would hand a technician a
+  paraphrase of a crash.
+- **An `Error` out of a tool.** `AgentTool.execute`'s contract already requires
+  a JSON-encodable payload precisely because this loop serialises it, so a
+  violation is an app defect. A tool that throws an `Exception` is different and
+  is fed back as `execution_failed`.
+
+### The prompt budget, measured
+
+Task 1.9's brief was to measure `maxDocuments` against a real context window
+rather than inherit Task 1.4's reasoning about it. Measured on the shipped seed
+(`test/services/ai/agent_loop_test.dart`, printed on every run):
+
+| Prompt | Characters |
+|---|---|
+| Two-document grounded prompt (turn 1) | 1581 |
+| After one tool round trip (turn 2) | 2064 (+483) |
+| A third document, if the cap allowed it | +619 |
+
+**Characters, not tokens.** The tokenizer ships with the weights, so a token
+count computed on the host would be a guess wearing a number, and this repo has
+already paid for one of those. The host suite bounds the characters as a
+regression guard; the device suite (`integration_test/agent_loop_e2e_test.dart`)
+is what tests the real 2048-token window, by running the same round trip and
+failing if the turn does not complete.
+
+### Not wired into the app
+
+Same position as 1.3, 1.4, 1.5 and 1.6: a library with tests and no production
+call site, because binding a `DatabaseService` needs the encryption key Task 1.1
+deferred. **Task 1.11 owns the key, the seed trigger, the engine override and the
+composition** — retrieval → compilation → this loop is three lines, and the
+integration test writes them out.
+
+TC-AGENT-E2E-01 is **written but not yet run**: it needs the demo device and the
+2.6GB artifact, and it skips with an actionable reason without them. Its result
+is not recorded anywhere as a measurement until it has run.
+
 ## Getting started
 
 Requires the Flutter SDK (stable channel, Dart 3.12+). iOS 16.0+ / a 64-bit
@@ -1307,8 +1486,8 @@ Tests are split into two tiers:
 
 - **Unit tier** (`test/`) — pure Dart, deterministic, runs in CI on every commit
   (engine fakes, database, FTS, seeding, retrieval routing and prompt
-  compilation, the agent tool registry, the tool-call guard, model provisioning,
-  widget tests). The HTTP
+  compilation, the agent tool registry, the tool-call guard, the agent loop,
+  model provisioning, widget tests). The HTTP
   transport is covered against a loopback `HttpServer` rather than a mock, because
   the behaviour worth testing is HTTP behaviour: redirect hops, `Content-Length`
   vs. chunked, and which requests carry the access token. The seeding suite reads
@@ -1347,6 +1526,17 @@ Tests are split into two tiers:
     ```
 
     A USB connection avoids this entirely and is much faster to iterate on.
+  - `agent_loop_e2e_test.dart` (TC-AGENT-E2E-01) — the whole Tier 1 slice with
+    every hand-written part replaced by the real one: the prompt comes from the
+    compiler over the seeded database, the tool is the registry's over that same
+    database, and the round trip is the agent loop. Asserts that the loop
+    *answered* rather than hitting its cap, that it called the inventory tool for
+    the SKU the manual names, and that the answer quotes the stock figure read
+    back from the database — a fact a model answering from its weights cannot
+    produce by luck. A companion checks the other half of grounding: an inquiry
+    the manual does not cover must call no tool and name no SKU.
+
+    **Not yet run.** It needs the demo device and the provisioned weights.
 
 ## Tech stack
 
