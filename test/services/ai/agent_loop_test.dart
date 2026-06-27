@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -787,15 +788,35 @@ void main() {
   });
 
   group('what the loop refuses to swallow', () {
-    test('generate before initialize is a StateError', () async {
-      final engine = _RecordingEngine(FakeLlmEngine(turns: []));
-      final loop = AgentLoop(engine: engine, registry: registry);
+    test(
+      'running before initialize fails at the loop, not inside a turn',
+      () async {
+        // Written twice, because the first version passed for a reason unrelated
+        // to the criterion it was mapped to — the failure mode this repo keeps
+        // finding. `FakeLlmEngine.generate` *also* throws a `StateError` when it
+        // has not been initialized, so `throwsA(isA<StateError>())` stayed green
+        // with the loop's own check deleted (mutation M26 survived it). Two
+        // changes: the message is asserted, and it is asserted on the loop's
+        // wording rather than the engine's; and the engine is never handed a
+        // prompt at all, which is the behavioural difference the check buys.
+        final engine = _RecordingEngine(FakeLlmEngine(turns: []));
+        final loop = AgentLoop(engine: engine, registry: registry);
 
-      expect(
-        () => loop.runToCompletion('[GROUNDED PROMPT]'),
-        throwsA(isA<StateError>()),
-      );
-    });
+        await expectLater(
+          loop.runToCompletion('[GROUNDED PROMPT]'),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              contains(
+                'AgentLoop.run called before the engine was initialized',
+              ),
+            ),
+          ),
+        );
+        expect(engine.generateCalls, 0);
+      },
+    );
 
     test('an error on the engine stream propagates', () async {
       // Not something the model can correct, so it is not fed back. A loop that
@@ -877,12 +898,47 @@ void main() {
         AgentToken,
         AgentCompleted,
       ]);
-      // Started before completed, so the indicator is on screen *while* the
-      // query is in flight rather than after it.
+      // Started before completed — but see the next test for why that ordering
+      // is not the property that matters.
       expect(
         events.indexWhere((e) => e is AgentToolCallStarted),
         lessThan(events.indexWhere((e) => e is AgentToolCallCompleted)),
       );
+    });
+
+    test('the tool-start event arrives before the tool runs, not after', () async {
+      // The ordering assertion above cannot see this, and a mutation proved it:
+      // moving the `yield` to *after* `dispatch` leaves the Started → Completed
+      // sequence intact and killed nothing (M28). What the event is for is a UI
+      // indicator that is on screen *while* the query is in flight, so the
+      // binding has to observe the two against each other in time. A tool that
+      // blocks on a completer the test controls is the only way to do that.
+      final gate = Completer<void>();
+      final blocking = ToolRegistry([_GatedTool(gate.future)]);
+      final (loop, _) = await loopOver([
+        [const LlmToolCall(name: 'gated_tool', arguments: {}), const LlmDone()],
+        [const LlmToken('done'), const LlmDone()],
+      ], over: blocking);
+
+      final seen = <AgentEvent>[];
+      final subscription = loop.run('[GROUNDED PROMPT]').listen(seen.add);
+      addTearDown(subscription.cancel);
+
+      // Let the loop reach the tool and block there.
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        seen.whereType<AgentToolCallStarted>(),
+        hasLength(1),
+        reason:
+            'the indicator must be announced while the tool is still running',
+      );
+      expect(seen.whereType<AgentToolCallCompleted>(), isEmpty);
+
+      gate.complete();
+      await subscription.asFuture<void>();
+      expect(seen.whereType<AgentToolCallCompleted>(), hasLength(1));
     });
 
     test('the first turn is announced with the prompt it was given', () async {
@@ -1136,6 +1192,26 @@ class _ThrowingTool extends AgentTool {
   @override
   Future<Map<String, Object?>> execute(Map<String, Object?> arguments) async =>
       throw Exception('lookup exploded');
+}
+
+/// A tool that does not finish until the test lets it.
+class _GatedTool extends AgentTool {
+  _GatedTool(this._gate);
+
+  final Future<void> _gate;
+
+  @override
+  final ToolDefinition definition = ToolDefinition(
+    name: 'gated_tool',
+    description: 'Blocks until released.',
+    parameters: {},
+  );
+
+  @override
+  Future<Map<String, Object?>> execute(Map<String, Object?> arguments) async {
+    await _gate;
+    return const {'ok': true};
+  }
 }
 
 class _ErrorTool extends AgentTool {
