@@ -1508,10 +1508,22 @@ against the tree at the last commit, not carried over from the first pass.
 
 Review round 0 then showed the set had a hole of its own: nothing in it touched
 `AgentToolCallRejected` or `AgentToolCallStarted.repeated`, and two probes the
-reviewer added survived with zero failing tests. Four mutations were added
-(M30–M33) covering the line-terminator re-escaping, the two unbound stream
-signals, and the dropped echo on the degraded path. **34 mutations, 0
-survivors** on the final run.
+reviewer added survived with zero failing tests. **Five** mutations were added
+(M30–M34) — two for the line-terminator re-escaping, two for the unbound stream
+signals, one for the dropped echo on the degraded path.
+
+One of the five was itself a bad mutation before it was a passing one, which is
+worth recording because it is the harness's own version of the failure this
+section keeps describing. M30's first form inserted a *no-op* `replaceAllMapped`
+before the real one, so the re-escaping still ran; it reported `SURVIVED`, which
+would have read as "the tests do not cover this" when what it actually showed
+was "this edit changes nothing". A mutation that does not mutate measures the
+mutation, not the suite. Rewritten as two edits that disable the rule for real —
+one voiding the pattern, one narrowing the category class to `Cc` so only the
+separators slip through.
+
+**34 mutations, 0 survivors**, one run, whole suite, against the tree at the
+last commit.
 
 ### Not wired into the app
 
