@@ -1567,9 +1567,72 @@ deferred. **Task 1.11 owns the key, the seed trigger, the engine override and th
 composition** — retrieval → compilation → this loop is three lines, and the
 integration test writes them out.
 
-TC-AGENT-E2E-01 is **written but not yet run**: it needs the demo device and the
-2.6GB artifact, and it skips with an actionable reason without them. Its result
-is not recorded anywhere as a measurement until it has run.
+### Verified on the demo device (2026-08-05, iPad Air M4, iOS 26.5)
+
+TC-AGENT-E2E-01 **passed** against the real 2.59GB artifact, and the numbers are
+measurements rather than estimates:
+
+| | |
+|---|---|
+| Turn 0 (grounded prompt → native tool call) | prompt **933** chars, 136 chars of text, 1 tool, 0 rejected |
+| Turn 1 (tool result → final answer) | prompt **1510** chars, **1401** chars of answer, 0 tools |
+| Whole run | `stop=answered`, 2 turns, **11332 ms**, context 2048 tokens |
+
+The answer named `BRK-990-XP`, quoted **2 units** in **Aisle 4, Shelf B**, and
+laid out the manual's six procedure steps and three required tools. Those stock
+figures come from the device's own database — they are not facts about
+elevators, so a model answering from its weights could not have produced them.
+That is the whole grounding claim, met end to end.
+
+**What it settles about the prompt budget.** The host suite could only measure
+characters; this run puts a real prompt through a real 2048-token window and it
+completed. 1510 characters of prompt plus 1401 of generated answer is
+comfortably inside it, so `maxDocuments: 2` is not the binding constraint for a
+single-code inquiry. It is *not* a measurement of the ceiling — this retrieval
+returned one document, not the two the cap allows.
+
+**Still not measured: throughput.** The run reported one total (11332 ms for two
+turns), which cannot be split into tokens per second. The suite now prints
+per-turn elapsed and generated chars/s, so the next run closes it.
+
+### What the device run found that the host could not
+
+TC-AGENT-E2E-01b — the companion asserting an out-of-scope inquiry retrieves
+nothing — **failed on its premise**, at `expect(retrieved.isEmpty, isTrue)`,
+before the model was asked anything. Two independent causes:
+
+1. Its fixture said "the hydraulic ram on the loading crane is leaking", and
+   `hydraulic` is in the manual: E-204 is *Proportional Valve Flow Discrepancy*
+   and its symptoms name the hydraulic manifold. Choosing a hydraulic term as
+   the out-of-domain word for an elevator manual was just wrong.
+2. **Stop words match, and this one is a property of the retrieval path rather
+   than of the fixture.** The sanitizer joins terms with `OR` (deliberately —
+   see _Offline retrieval_) and FTS5's `porter` tokenizer removes no stop words,
+   so `the`, `on` and `is` each retrieve entries on their own. The fixture would
+   have matched with `hydraulic` removed, and so does *"the coffee machine in
+   the lobby is broken"*, which contains no elevator word at all.
+
+**Consequence, recorded rather than fixed here.** The no-match block — the thing
+that tells the model there is no entry and forbids a tool call — is reachable
+far less often than the design assumes. A technician asking about something the
+manual does not cover will usually get two *irrelevant* entries and a preamble
+instructing the model to answer only from them. That is a plausible route to a
+confident wrong answer, which is the failure the whole retrieval path exists to
+prevent.
+
+It is **not** fixed in Task 1.9, because the fix belongs to the router and the
+obvious versions are all bad: a hand-written stop-word list is the
+enumerate-the-attacks shape Task 1.4 already learned to avoid, and any
+document-frequency or bm25 threshold tuned against a **three-document** corpus
+would be a number with no evidence behind it. It needs a real decision and
+probably a bigger corpus. Recorded here, in the sprint plan, and pinned by
+`test/services/ai/tc_agent_e2e_premises_test.dart` so it cannot be rediscovered
+by accident.
+
+The fixture itself moved to the phrasing TC-RAG-COMP-01 already verified empty,
+and both device premises now live in `integration_test/e2e_fixtures.dart` with
+host tests asserting them in CI — none of that needed a device, and the run
+spent a build, a 2.6GB transfer and four minutes to learn it.
 
 ## Getting started
 
