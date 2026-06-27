@@ -1450,6 +1450,35 @@ regression guard; the device suite (`integration_test/agent_loop_e2e_test.dart`)
 is what tests the real 2048-token window, by running the same round trip and
 failing if the turn does not complete.
 
+### What the mutation pass found
+
+29 mutations across `agent_loop.dart` and the `escapeQuotes` change it forced
+into `prompt_compiler.dart`, each run against the **whole** suite under
+`--reporter expanded` — the default reporter truncates its failing list, which
+produced two wrong counts in Task 1.4. The harness names a file per mutation
+because this task's behaviour spans two, and it refuses a dirty baseline,
+duplicate mutation *edits* and duplicate mutation *labels*.
+
+**27 killed on the first pass; 2 survived, and both were gaps in the tests
+rather than in the code.** Both are failure modes this repo had already
+recorded, which is the interesting part:
+
+- **Deleting the loop's engine-readiness check killed nothing**, because
+  `FakeLlmEngine.generate` *also* throws a `StateError` when it has not been
+  initialized — so `throwsA(isA<StateError>())` was green with the check gone.
+  A test passing for a reason unrelated to the criterion it was mapped to. It
+  now asserts the loop's own message and that the engine was never handed a
+  prompt at all.
+- **Moving the tool-start event to *after* `dispatch` killed nothing**, because
+  the Started → Completed *ordering* is unchanged by it. What that mutation
+  breaks is the timing, and an ordered list of events cannot see timing. The
+  event exists so a UI can show "checking inventory…" while the query is in
+  flight, so the replacement test blocks a tool on a completer and requires
+  Started to have arrived while Completed has not.
+
+**After both fixes, all 29 die** — re-measured by running the whole set again
+against the tree at the last commit, not carried over from the first pass.
+
 ### Not wired into the app
 
 Same position as 1.3, 1.4, 1.5 and 1.6: a library with tests and no production
