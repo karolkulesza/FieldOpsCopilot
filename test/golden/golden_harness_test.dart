@@ -21,6 +21,8 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:field_ops_copilot/services/ai/agent_loop.dart';
+import 'package:field_ops_copilot/services/rag/retrieval_router.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'golden_file.dart';
@@ -136,6 +138,40 @@ void main() {
       final decoded =
           jsonDecode(encodeSnapshot(snapshotWith(raw))) as Map<String, Object?>;
       expect(decoded['value'], raw);
+    });
+
+    test('set-typed retrieval hits are sorted, not insertion-ordered', () {
+      // No committed scenario retrieves two hits whose insertion order differs
+      // from sorted order, so this is the only place the rule can be bound —
+      // which is exactly why `sortedHits` is public. Built by hand with a
+      // `LinkedHashSet` that disagrees: without the sort, the snapshot inherits
+      // whatever order the router happened to insert in, and a golden would then
+      // depend on an implementation detail of a `Set`.
+      final insertionOrdered = <String>{'zzz_last', 'aaa_first'};
+      expect(insertionOrdered.toList(), ['zzz_last', 'aaa_first']);
+      expect(sortedHits(insertionOrdered), ['aaa_first', 'zzz_last']);
+
+      final snapshot = transcriptSnapshot(
+        scenario: 'probe',
+        retrieval: const RetrievalResult(
+          rawQuery: 'two hits',
+          entries: [],
+          codeHitIds: {'zzz_last', 'aaa_first'},
+          ftsHitIds: {'zzz_last', 'aaa_first'},
+          resolvedCodes: [],
+          unresolvedCodes: [],
+          searchedTerms: [],
+        ),
+        events: const [],
+        result: const AgentRunResult(
+          answer: 'x',
+          stopReason: AgentStopReason.answered,
+          turns: [],
+        ),
+      );
+      final retrieval = snapshot['retrieval']! as Map<String, Object?>;
+      expect(retrieval['codeHitIds'], ['aaa_first', 'zzz_last']);
+      expect(retrieval['ftsHitIds'], ['aaa_first', 'zzz_last']);
     });
 
     test('keeps the indentation newlines it must not escape', () {
@@ -343,15 +379,59 @@ void main() {
       expect(goldenPathFor('probe'), '$goldenDirectory/probe.json');
     });
 
-    test('the update flag is off unless the environment says otherwise', () {
-      // `flutter test` without `UPDATE_GOLDENS` must assert. If this ever fails,
-      // the whole suite has been silently rewriting itself.
+    test(
+      'verifyGolden fails the test when a committed golden disagrees',
+      () {
+        // The `fail()` in `verifyGolden` is what makes all six scenario tests mean
+        // anything, and nothing else in this repo exercises it: TC-GOLD-02 goes
+        // through `reconcileGolden` directly, precisely because it needs a value
+        // rather than an abort. Delete the `fail` and every golden passes forever.
+        //
+        // Skipped under `UPDATE_GOLDENS`, where this call would *rewrite* a
+        // committed golden with the nonsense below rather than reject it.
+        expect(
+          () => verifyGolden(
+            scenario: 'e102_native_tool_call',
+            snapshot: const {'scenario': 'e102_native_tool_call', 'turns': []},
+          ),
+          throwsA(isA<TestFailure>()),
+        );
+        // And the committed file is untouched — a failing comparison must not
+        // write.
+        expect(
+          File(goldenPathFor('e102_native_tool_call')).readAsStringSync(),
+          contains('"in_stock": 2'),
+        );
+      },
+      skip: _skipWhenUpdating,
+    );
+
+    test('updateRequested accepts only the two documented spellings', () {
+      // The predicate, not the ambient environment. Inline this into
+      // `goldensAreBeingUpdated` and widening it to `value != null` leaves every
+      // test green in a normal run, because the variable is unset there.
+      expect(updateRequested('1'), isTrue);
+      expect(updateRequested('true'), isTrue);
+      expect(updateRequested(null), isFalse);
+      expect(updateRequested(''), isFalse);
+      expect(updateRequested('0'), isFalse);
+      expect(updateRequested('false'), isFalse);
+      expect(updateRequested('yes'), isFalse);
+      // Case-sensitive, deliberately: two spellings are enough, and a
+      // case-folding rule nobody asked for is a rule nobody tested.
+      expect(updateRequested('TRUE'), isFalse);
+    });
+
+    test('the update flag is off in an ordinary run', () {
+      // `flutter test` without `UPDATE_GOLDENS` must assert rather than rewrite.
+      // If this fails, the suite has been silently regenerating itself.
+      expect(goldensAreBeingUpdated, isFalse, skip: _skipWhenUpdating);
+      // Stated as a derivation too, so the test says *why* it is false rather
+      // than only that it is.
       expect(
         goldensAreBeingUpdated,
-        Platform.environment[updateEnvironmentVariable] == '1' ||
-            Platform.environment[updateEnvironmentVariable] == 'true',
+        updateRequested(Platform.environment[updateEnvironmentVariable]),
       );
-      expect(goldensAreBeingUpdated, isFalse, skip: _skipWhenUpdating);
     });
   });
 }

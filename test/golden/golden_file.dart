@@ -43,15 +43,21 @@ const String goldenDirectory = 'test/golden/snapshots';
 /// Environment variable that switches the suite from asserting to rewriting.
 const String updateEnvironmentVariable = 'UPDATE_GOLDENS';
 
-/// Whether this process was asked to rewrite the goldens.
+/// Whether [value] — the raw environment string — asks for a rewrite.
 ///
-/// Accepts `1` and `true`; anything else — including the empty string an unset
-/// variable would produce if it were read carelessly — means "assert", because
-/// the default must be the safe one.
-bool get goldensAreBeingUpdated {
-  final value = Platform.environment[updateEnvironmentVariable];
-  return value == '1' || value == 'true';
-}
+/// Accepts `1` and `true`; anything else, `null` and the empty string included,
+/// means "assert", because the default must be the safe one.
+///
+/// Split out from [goldensAreBeingUpdated] so it is testable at all. Inline, the
+/// predicate can only ever be exercised with whatever the ambient environment
+/// happens to hold, so widening it to `value != null` would leave every test
+/// green in a normal run — an unbindable line, which is the defect class this
+/// repo keeps paying for.
+bool updateRequested(String? value) => value == '1' || value == 'true';
+
+/// Whether this process was asked to rewrite the goldens.
+bool get goldensAreBeingUpdated =>
+    updateRequested(Platform.environment[updateEnvironmentVariable]);
 
 /// What [reconcileGolden] concluded.
 enum GoldenVerdict {
