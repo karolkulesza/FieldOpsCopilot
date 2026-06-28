@@ -1704,8 +1704,11 @@ never ran**, while the rest of the suite carries on passing. The reporter's
 `loading <path>` lines are then captured by the harness's parser as though they were
 failing tests, so the row arrives with a non-zero exit and a failing set containing
 nothing the mutation's behaviour caused — and before this was fixed it was recorded
-as `KILLED`, i.e. a mutation that would have *survived* filed as killed with several
-pieces of apparent evidence. Nor is the captured set an enumeration of what broke: 3
+as `KILLED`: a row about which **nothing was learned**, filed as a kill, with several
+pieces of apparent evidence. At worst that hides a mutation that would have
+*survived*; some non-compiling mutations would have been killed and were filed
+correctly by accident. Which of the two it was is exactly what cannot be known, since
+the tests that would have decided it are the ones that did not run. Nor is the captured set an enumeration of what broke: 3
 `loading` names were captured against **2** actual `Failed to load` failures, the
 extra one an unrelated suite file, so it is a reporter artefact rather than a list.
 
