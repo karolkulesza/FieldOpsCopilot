@@ -96,10 +96,18 @@ void main() {
 
     test('escapes every code unit outside printable ASCII', () {
       // The four `jsonEncode` leaves raw (Task 1.9's R0-F1 measured them), an em
-      // dash — `AgentLoop.continueAfterResults` contains one, so every committed
-      // golden exercises this case — and an astral-plane character. Spelled by
-      // code point for the same reason as the list above: this test's entire
-      // subject is characters you cannot see in a source file.
+      // dash, and an astral-plane character. Spelled by code point for the same
+      // reason as the list above: this test's entire subject is characters you
+      // cannot see in a source file.
+      //
+      // The em dash is the one that also occurs in real data:
+      // `AgentLoop.continueAfterResults` contains one, so **five of the six**
+      // committed goldens carry a `\u2014` (counted: 1, 1, 6, 0, 7, 3). The
+      // exception is `no_manual_match`, which is a single turn with no tool call
+      // — the loop never appends a `[CONTINUE]` block, so that golden has no
+      // escape of any kind in it. The first version of this comment said "every
+      // committed golden exercises this case", which was one `grep -c` from being
+      // checked (review finding R0-F3).
       final raw = [
         'nel:${String.fromCharCode(0x0085)}',
         'ls:${String.fromCharCode(0x2028)}',
@@ -356,23 +364,92 @@ void main() {
       if (tempDir.existsSync()) await tempDir.delete(recursive: true);
     });
 
-    test('a written golden is exactly what encodeSnapshot produced', () {
-      // `verifyGolden` writes `actual` and the next run compares against it, so
-      // any transformation on the way to disk would make the first re-run fail.
-      final snapshot = {'scenario': 'probe', 'value': 'dash — here'};
-      final file = File('${tempDir.path}/probe.json')
-        ..writeAsStringSync(encodeSnapshot(snapshot));
+    test('a rewrite lands exactly what encodeSnapshot produced', () {
+      // The write, exercised through the shipped function. The previous version
+      // of this test claimed to bind it and did not: it wrote the file itself
+      // with `..writeAsStringSync(encodeSnapshot(snapshot))` and never called
+      // `verifyGolden`, so the comment asserting the property was the only thing
+      // holding it (review finding R0-F2). Deleting both statements of the write
+      // left all 552 tests green.
+      final snapshot = {
+        'scenario': 'probe',
+        'value': 'dash ${String.fromCharCode(0x2014)} here',
+      };
+      final file = File('${tempDir.path}/nested/probe.json');
+      expect(file.existsSync(), isFalse);
 
-      expect(file.readAsStringSync(), encodeSnapshot(snapshot));
-      expect(
-        reconcileGolden(
-          scenario: 'probe',
-          path: file.path,
-          actual: encodeSnapshot(snapshot),
-          committed: file.readAsStringSync(),
-        ).verdict,
-        GoldenVerdict.match,
+      final first = applyGolden(
+        scenario: 'probe',
+        snapshot: snapshot,
+        file: file,
+        update: true,
       );
+
+      expect(first.verdict, GoldenVerdict.rewrite);
+      expect(first.passes, isFalse, reason: 'a generator is not an approval');
+      // The parent directory did not exist: `createSync(recursive: true)` is part
+      // of the write and a fresh scenario is exactly when it is needed.
+      expect(file.existsSync(), isTrue);
+      // Byte-for-byte, because the *next* run compares against these bytes — any
+      // transformation on the way to disk makes a regenerated golden fail
+      // immediately, which reads as a broken suite rather than a broken write.
+      expect(file.readAsStringSync(), encodeSnapshot(snapshot));
+      // The em dash proves the ASCII escaping survives the round trip to disk —
+      // and it is asserted in its *escaped* form, because that is what a golden
+      // holds. The first version of this line looked for the raw character and
+      // failed immediately, which is the third time in this task that a literal
+      // non-ASCII character in a fixture has been wrong where the escape was
+      // right.
+      expect(file.readAsStringSync(), contains(r'\u2014'));
+      expect(file.readAsStringSync(), isNot(contains('\u2014')));
+
+      // And the second pass over an unchanged golden matches, through the same
+      // function — which is the property a regeneration workflow depends on.
+      final second = applyGolden(
+        scenario: 'probe',
+        snapshot: snapshot,
+        file: file,
+        update: true,
+      );
+      expect(second.verdict, GoldenVerdict.match);
+      expect(second.passes, isTrue);
+    });
+
+    test('a drift writes nothing when not updating', () {
+      // The other half, and the one that matters for CI: an ordinary run must
+      // never touch the committed snapshots. Without this, a write condition
+      // widened to `if (!reconciliation.passes)` would silently accept every
+      // regression by overwriting the evidence — which is precisely what the
+      // mutation harness's M29 does, and precisely why its run has to revert the
+      // whole `test/golden` surface rather than the file it edited.
+      final file = File(
+        '${tempDir.path}/probe.json',
+      )..writeAsStringSync(encodeSnapshot({'scenario': 'probe', 'value': 'a'}));
+      final before = file.readAsStringSync();
+
+      final result = applyGolden(
+        scenario: 'probe',
+        snapshot: {'scenario': 'probe', 'value': 'CHANGED'},
+        file: file,
+        update: false,
+      );
+
+      expect(result.verdict, GoldenVerdict.drift);
+      expect(file.readAsStringSync(), before);
+    });
+
+    test('an absent golden writes nothing when not updating', () {
+      final file = File('${tempDir.path}/never_written.json');
+
+      final result = applyGolden(
+        scenario: 'never_written',
+        snapshot: const {'scenario': 'never_written'},
+        file: file,
+        update: false,
+      );
+
+      expect(result.verdict, GoldenVerdict.absent);
+      expect(file.existsSync(), isFalse);
     });
 
     test('goldenPathFor lands in the committed snapshot directory', () {

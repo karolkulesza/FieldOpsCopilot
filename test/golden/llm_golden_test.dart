@@ -19,13 +19,21 @@
 /// **What a golden cannot buy, stated so its silence is not read as coverage:**
 ///
 /// * **It cannot notice a field the serializer never recorded.** Deleting a key
-///   from `transcript_snapshot.dart` breaks all six goldens at once (the
-///   committed files are the regression guard for the serializer's
-///   completeness), but *adding* a field to `AgentTurn` and forgetting to
-///   serialise it is invisible here. Dart has no mirrors in Flutter, so there is
-///   no mechanical guard for that; the honest mitigation is that this file lists
-///   what is covered and `transcript_snapshot.dart` lists what is deliberately
-///   left out.
+///   from `transcript_snapshot.dart` breaks a golden — the committed files are
+///   the regression guard for the serializer's completeness — but *adding* a
+///   field to `AgentTurn` and forgetting to serialise it is invisible here. Dart
+///   has no mirrors in Flutter, so there is no mechanical guard for that; the
+///   honest mitigation is that this file lists what is covered and
+///   `transcript_snapshot.dart` lists what is deliberately left out.
+///
+///   **And that guard is not uniform**, which the first version of this sentence
+///   glossed as "breaks all six goldens at once" (review finding R0-F7). It holds
+///   for the top-level and per-turn keys, which every golden has. Below them it
+///   thins out with coverage: invocations per golden are 1, 1, 4, **0**, 2, 2, so
+///   the invocation and outcome keys are guarded by five of six; rejections are
+///   0, 0, 0, 0, **1**, 0, so `_rejection`'s two keys are guarded by
+///   `recovery_ladder` **alone**. That is the thin spot, and it is named rather
+///   than averaged away.
 /// * **It cannot tell a good transcript from a bad one.** A golden says "this is
 ///   what the code does", never "this is what the code should do" — which is why
 ///   each scenario below carries a handful of semantic assertions *beside* the
@@ -253,8 +261,15 @@ void main() {
       // Each turn calls a *different* SKU, so the repeat short circuit is not
       // what ends this run — the cap is. (1.9's TC-AGENT-LOOP-02 makes the same
       // distinction; a golden that conflated them would pin the wrong bound.)
-      // This is also the widest prompt the shipped `maxTurns` permits, so the
-      // golden records the context ceiling as an artefact rather than a figure.
+      // Four turns is also what makes this one of the two widest transcripts in
+      // the suite — though **not the widest**, which the first version of this
+      // comment claimed while calling it "the context ceiling" (review finding
+      // R0-F4). Measured over the committed goldens, widest prompt in characters:
+      // e102 1485, e305 1363, iteration_cap **2347**, no_manual_match 620,
+      // recovery_ladder **2363**, unknown_tool_repeated 2012. `recovery_ladder`
+      // wins because a rejection block plus three tool blocks outweigh four tool
+      // blocks. Neither is a ceiling: 1.9 measured ~2900 for a *two*-document
+      // prompt and every scenario here retrieves exactly one document.
       final run = await runScenario(
         scenario: 'iteration_cap',
         inquiry: 'cabin vibrating, E-102',
