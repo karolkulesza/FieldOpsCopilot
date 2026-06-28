@@ -1609,7 +1609,7 @@ reason about, and none of them fails a single other test in this repo.
 | `e305_degraded_text_call` | The guard's text path, a name the model misspelled and the guard canonicalised, a zero-stock payload, and `escapeQuotes` over 1.2's hostile inquiry. |
 | `no_manual_match` | Retrieval empty → the no-match notice → no tool called. |
 | `iteration_cap` | Four turns with a *different* SKU each time, so the cap is what stops it rather than the repeat short circuit. |
-| `recovery_ladder` | A guard refusal, then a `missing_parameter` from the registry, then a good call, then the answer — exactly `maxTurns` turns *and* an answer. Holds the suite's widest prompt at 2363 characters (measured; `iteration_cap` is 2347). |
+| `recovery_ladder` | A guard refusal, then a `missing_parameter` from the registry, then a good call, then the answer — exactly `maxTurns` turns *and* an answer. Holds the suite's widest prompt at 2363 characters — effectively tied with `iteration_cap`'s 2347. |
 | `unknown_tool_repeated` | An unresolvable name reaching `dispatch` as `unknown_tool` (not a guard failure), then the same call replayed rather than re-executed. |
 
 ### Why the snapshots look the way they do
@@ -1660,22 +1660,35 @@ golden that can be edited with the suite still green is decoration.
 
 Every row failed at least one test; the widest is `reconcileGolden` always
 returning `match`, at 13. Exactly one row — the mutation that makes the golden
-write fire on any mismatch — dirties a file it did not edit, and the harness
-**detects** that rather than relying on anyone to remember it.
+write fire on any mismatch — causes a write to a file it did not edit, and the
+harness detects that by mtime, which sees it whether or not the write persists.
 
-**The first version of these numbers was measured over corrupted data, and that
-is the most useful thing this task learned.** The harness reverted the file it had
-edited, not the surface a mutation can damage. One mutation makes the suite
-overwrite a committed golden, so the golden stayed corrupted, nine later rows
-carried collateral failures, and five rows never ran at all. Two runs of the
-*identical* harness then disagreed about it: in one, a later scenario test hit the
-corrupted golden, failed, and — because that mutation's whole point is that the
-write fires on any mismatch — **rewrote it correctly**, so the run self-healed and
-reported a clean 44/44 over dirty data; in the other it stayed corrupted and the
-run crashed. A harness that can silently repair its own damage is worse than one
-that crashes, because only the crash tells you. The fix is mechanical, not
-attentional: revert the whole surface, assert the whole surface is clean before
-each row, and record `git status` per row.
+Per-row counts are a reading of one run rather than an invariant: a 1.7
+provisioning test flakes occasionally under `--concurrency=8`, so a row can carry
+±1 unrelated failure. The 0-survivor result does not depend on it — a survivor is
+a row with *no* failures — but a specific count might.
+
+**The first version of these numbers came from a harness that could corrupt its
+own inputs, and that is the most useful thing this task learned.** It reverted the
+file it had *edited*, not the surface a mutation can *damage* — and one mutation
+makes the suite overwrite a committed golden.
+
+What that cost depends on a race, which is the point. Under `--concurrency=8` the
+corrupting test and the scenario test that reads the same golden run in either
+order, and the mutated write fires on any mismatch — so the scenario test *repairs*
+the golden as a side effect if it runs second. Two runs of the identical harness
+landed on opposite sides: one self-healed and reported a clean 44/44 (only the
+corrupting row itself saw a dirty tree), and one did not, so nine later rows
+carried collateral failures and the last five never ran at all. **A harness that
+can silently repair its own damage is worse than one that crashes, because only the
+crash tells you.**
+
+The fix is mechanical, not attentional: revert the whole surface, assert the whole
+surface is clean before each row, and detect per-row collateral **by mtime** rather
+than by `git status` or a content hash — neither of which can see a
+damage-then-repair pair, since the repair restores the original bytes. That last
+part is itself a corrected claim: the first version checked `git status` after the
+run and therefore reported nothing on the run that self-healed.
 
 Four properties had **correct code and nothing holding it there** — three found
 while designing the mutation set, and one the review found afterwards:

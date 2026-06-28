@@ -261,15 +261,28 @@ void main() {
       // Each turn calls a *different* SKU, so the repeat short circuit is not
       // what ends this run — the cap is. (1.9's TC-AGENT-LOOP-02 makes the same
       // distinction; a golden that conflated them would pin the wrong bound.)
-      // Four turns is also what makes this one of the two widest transcripts in
-      // the suite — though **not the widest**, which the first version of this
-      // comment claimed while calling it "the context ceiling" (review finding
-      // R0-F4). Measured over the committed goldens, widest prompt in characters:
-      // e102 1485, e305 1363, iteration_cap **2347**, no_manual_match 620,
-      // recovery_ladder **2363**, unknown_tool_repeated 2012. `recovery_ladder`
-      // wins because a rejection block plus three tool blocks outweigh four tool
-      // blocks. Neither is a ceiling: 1.9 measured ~2900 for a *two*-document
-      // prompt and every scenario here retrieves exactly one document.
+      // Four turns also makes this one of the two widest transcripts in the suite
+      // — though **not the widest**, which the first version of this comment
+      // claimed while calling it "the context ceiling" (review finding R0-F4).
+      // Measured over the committed goldens, widest prompt in characters: e102
+      // 1485, e305 1363, iteration_cap **2347**, no_manual_match 620,
+      // recovery_ladder **2363**, unknown_tool_repeated 2012.
+      //
+      // The two leaders are 16 characters apart — 0.7% — so they are effectively
+      // tied, and **no causal account of the margin is offered here**, because the
+      // first attempt at one was wrong twice over (R1-F1): it said "a rejection
+      // block plus three tool blocks outweigh four tool blocks" when the widest
+      // prompts (turn 3 in both) carry *one rejection plus two* tool blocks against
+      // *three*, and the direction does not follow from block composition anyway —
+      // `iteration_cap`'s is 47 lines against 45 and has the extra tool block while
+      // being the shorter of the two. The transcripts differ in several dimensions
+      // at once (block counts, which `[CONTINUE]` instruction each turn earns,
+      // scripted assistant text), and attributing 16 characters to one of them
+      // would be a third guess. The figures are the result; the explanation was
+      // never needed.
+      //
+      // Neither is a ceiling either: 1.9 measured ~2900 for a *two*-document prompt
+      // and every scenario here retrieves exactly one document.
       final run = await runScenario(
         scenario: 'iteration_cap',
         inquiry: 'cabin vibrating, E-102',
