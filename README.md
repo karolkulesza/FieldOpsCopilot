@@ -726,10 +726,11 @@ logs "Tools will be ignored".
 ### What the engine does not do yet
 
 Each `generate()` call is one **stateless** turn: a fresh chat, no history from
-the previous call. That is what the fake does and what the golden suite will
-depend on. Feeding a tool *result* back for a second model turn is the agent
-loop's job (Task 1.9) and will extend the interface rather than quietly inherit
-an accumulated conversation.
+the previous call. That is what the fake does and what the golden suite depends
+on — every committed transcript's second prompt contains the first turn in full,
+because there is nowhere else for it to live. Feeding a tool *result* back for a
+second model turn is the agent loop's job (Task 1.9), and it extends the
+interface rather than quietly inheriting an accumulated conversation.
 
 ### Measured on the demo device (iPad Air M4, iOS 26.5, 2026-06-14)
 
