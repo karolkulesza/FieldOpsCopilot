@@ -1691,15 +1691,28 @@ case is detected instead of assumed away.
 Two more rows are refused the same way, on the same principle — a kill is a failure
 the mutation *caused*, so a row with nothing attributable to point at is not one. A
 non-zero exit that names no test at all is `INCONCLUSIVE`. And a mutation that does
-not **compile** is `COMPILE_ERROR`: no test runs, the reporter emits one
-`loading <path>` line per suite file, and those lines look exactly like failing tests
-to the harness's parser — so before this was fixed, a mutation that would have
-*survived* was recorded as killed with several pieces of apparent evidence. That is
-the strongest false confidence the harness could produce, and it was unreachable-by-
-accident rather than by design: the old detector required two substrings on one line
-that the runner prints on separate lines (review finding R3-F1). It changes none of
-the numbers above — no row in any completed run has a `loading` entry — but it was
-live for the next mutation anyone wrote.
+not **compile** is `COMPILE_ERROR`.
+
+That last case is worth describing accurately, because two earlier attempts at it
+here were wrong in the same direction (review finding R4-F1). Measured, by breaking
+`transcript_snapshot.dart` and running the harness's own command: **499 of the 554
+tests execute and pass.** What fails is the *loading* of the files that import the
+mutated library — `llm_golden_test.dart` and `golden_harness_test.dart` — which
+loses exactly their 55 tests, and 554 − 55 = 499. So it is not "no test runs"; it is
+that **the tests which could have judged this mutation are precisely the ones that
+never ran**, while the rest of the suite carries on passing. The reporter's
+`loading <path>` lines are then captured by the harness's parser as though they were
+failing tests, so the row arrives with a non-zero exit and a failing set containing
+nothing the mutation's behaviour caused — and before this was fixed it was recorded
+as `KILLED`, i.e. a mutation that would have *survived* filed as killed with several
+pieces of apparent evidence. Nor is the captured set an enumeration of what broke: 3
+`loading` names were captured against **2** actual `Failed to load` failures, the
+extra one an unrelated suite file, so it is a reporter artefact rather than a list.
+
+The bug was unreachable-by-accident rather than by design — the old detector wanted
+two substrings on one line that the runner prints on separate lines (R3-F1). It
+changes none of the numbers above, since no row in any completed sweep has a
+`loading` entry, but it was live for the next mutation anyone wrote.
 
 **The first version of these numbers came from a harness that could corrupt its
 own inputs, and that is the most useful thing this task learned.** It reverted the
