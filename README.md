@@ -1886,8 +1886,25 @@ code that has to be true for it. It is the same rule
 `ModelProvisioningController` already writes down for a download that failed its
 digest: "a retry moves the same gigabytes and fails the same way."
 
-Bound by a test that counts provider builds, so deleting the policy fails rather
-than merely slows down.
+**How much of that is bound by a test, stated exactly.** Two of the eleven sites
+have a guard that fails when the policy is deleted, and they were chosen because
+they carry the load: `seedOutcomeProvider` (a build counter over a malformed asset)
+and `modelInstallStatusProvider` (a build counter over a `MissingPluginException`
+from `modelStorageProvider`, which is the failure every host widget test actually
+hits, and the site whose own doc makes the strongest behavioural claim — that the
+banner would otherwise sit on "Checking model…" for half a minute before reporting a
+status it says must be distinguishable from ready and absent). `agentEngineProvider`
+is bound incidentally, by two tests that would time out without it.
+
+The remaining sites — `appDatabaseProvider`, `seededDatabaseProvider`,
+`retrievalRouterProvider`, `toolRegistryProvider`, `modelStorageProvider`,
+`inferenceConfigProvider`, `deviceLlmEngineProvider` — are **not** individually
+bound: deleting `retry: noRetry` from any one of them leaves the suite green,
+because each is either upstream or downstream of a site that is bound and its own
+failure path has no test that reaches it. Measured one site at a time, not assumed.
+The first version of this paragraph said "bound by a test that counts provider
+builds" without qualification, which was true of one site out of eleven — review
+finding R0-F4.
 
 ### Two things a host test cannot tell you, found by watching tests fail
 
@@ -2022,8 +2039,15 @@ flutter pub get
 flutter run
 ```
 
-Tap **Run self-test** on the home screen to stream a scripted response through
-the `LlmEngine` contract.
+Without the model defines the app still runs: the banner reports that the model
+source is not configured and **Diagnose** stays disabled, which is the correct
+behaviour rather than a degraded one. To run the real thing, pass the defines shown
+under *The demo screen → Running it*, then type a fault (`cabin vibrating, E-102`)
+and tap **Diagnose**.
+
+(This paragraph used to say "Tap **Run self-test** on the home screen". Task 1.11
+deleted that screen and its button, and left this instruction pointing at a control
+that no longer exists — review finding R0-F8.)
 
 ## Testing
 

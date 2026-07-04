@@ -304,6 +304,63 @@ void main() {
         throwsA(isA<StateError>()),
       );
     });
+
+    // **And it must not leave the state claiming a load is in progress**, which was
+    // a non-blocking review note with a real consequence: `warmUp` returns early on
+    // `EngineLoading`, so an escaped `Error` made every later call a no-op and the
+    // screen read "Loading model weights — this takes a few seconds" forever. The
+    // outer `on Object` sets a terminal state and **rethrows**, so the `Error` still
+    // surfaces as the defect it is — only the lie is removed.
+    //
+    // The message deliberately does not quote the `Error`: putting a defect's text
+    // on screen is what the `on Exception` rule exists to prevent.
+    test(
+      'an Error leaves a terminal state, not a permanent EngineLoading',
+      () async {
+        final container = containerWith(
+          _GatedEngine(initializeError: StateError('broken wiring')),
+        );
+        final controller = controllerOf(container);
+
+        await expectLater(controller.warmUp(), throwsA(isA<StateError>()));
+
+        final state = container.read(engineWarmupControllerProvider);
+        expect(state, isA<EngineFailed>());
+        expect(state, isNot(isA<EngineLoading>()));
+        expect((state as EngineFailed).message, contains('internal error'));
+        expect(
+          state.message,
+          isNot(contains('broken wiring')),
+          reason: "an Error's own text must not reach the screen",
+        );
+      },
+    );
+
+    // The corollary, and the reason the state matters at all: a later attempt has to
+    // be possible. Without the terminal state this returns immediately forever.
+    test('warming up again after an Error is not a no-op', () async {
+      var attempt = 0;
+      final good = _GatedEngine();
+      final container = ProviderContainer(
+        overrides: [
+          agentEngineProvider.overrideWith((ref) async {
+            if (attempt++ == 0) throw StateError('broken wiring');
+            return good;
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = controllerOf(container);
+
+      await expectLater(controller.warmUp(), throwsA(isA<StateError>()));
+      container.invalidate(agentEngineProvider);
+      await controller.warmUp();
+
+      expect(
+        container.read(engineWarmupControllerProvider),
+        isA<EngineReady>(),
+      );
+    });
   });
 }
 

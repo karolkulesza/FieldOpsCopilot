@@ -39,7 +39,10 @@ import '../services/ai/tools/get_parts_inventory_tool.dart';
 import '../services/database/providers.dart';
 import '../services/database/tables.dart' show normalizeSku;
 import '../services/inference/engine_warmup_controller.dart';
+import '../services/models/model_storage.dart';
+import '../services/models/providers.dart';
 import '../viewmodels/field_job_viewmodel.dart';
+import 'components/answer_markdown.dart';
 import 'components/model_readiness_banner.dart';
 
 /// Keys the widget tests find things by, so an assertion names a role rather than
@@ -94,6 +97,36 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
       if (mounted) {
         ref.read(engineWarmupControllerProvider.notifier).warmUp();
       }
+    });
+
+    // **And again whenever weights become ready, which is the fix for review
+    // finding R0-F1.** The callback above is one-shot, and this screen is
+    // `MaterialApp.home` under a `StatelessWidget`, so `initState` never runs
+    // twice. Without this listener an operator who used the download button
+    // `ModelReadinessBanner` offers got a screen showing "Model ready" from the
+    // banner directly above "No verified weights on this device — the agent cannot
+    // run" from the status row, with Diagnose dead until the app was restarted:
+    // `provision()` invalidates `modelInstallStatusProvider` on success, but
+    // nothing re-ran `warmUp`, and neither this widget nor the controller had any
+    // edge to that provider.
+    //
+    // `EngineWarmupController` already documented this recovery and a unit test
+    // already bound it by calling `warmUp()` twice by hand. The capability, the
+    // doc and the test existed; the caller did not.
+    //
+    // `listenManual` rather than a `ref.watch` in `build`, because this is an
+    // *effect* and not something the render depends on. It is safe to fire on
+    // every transition into `ready`: `warmUp` returns immediately when the state is
+    // already `EngineLoading` or `EngineReady`, so the common path — weights
+    // already present at launch — costs one early return.
+    ref.listenManual(modelInstallStatusProvider, (previous, next) {
+      // `next.value`, not the `valueOrNull` the review's suggested fix used —
+      // Riverpod 3's `AsyncValue` exposes a nullable `value` and no `valueOrNull`,
+      // so the suggestion as written does not compile. `ModelReadinessBanner`
+      // already reads `status.value`, which is how the shape was confirmed rather
+      // than guessed.
+      if (next.value != ModelInstallStatus.ready) return;
+      ref.read(engineWarmupControllerProvider.notifier).warmUp();
     });
   }
 
@@ -278,14 +311,60 @@ class _StartupFailure extends StatelessWidget {
 
 /// Everything about the current diagnosis: what grounded it, what the agent did,
 /// and the answer.
-class _ResultPanel extends StatelessWidget {
+///
+/// **Stateful only to follow the stream, which is review finding R0-F6.** The panel
+/// was a bare `SingleChildScrollView` pinned at offset 0 while the content extent
+/// grew, so a long answer streamed *below the fold*: the measured device answer is
+/// 1401 characters in a panel that also carries the grounding line, a divider and a
+/// completed-lookup line. That breaks the claim this whole screen rests on — "the
+/// live token stream is the progress indicator" — precisely when the answer gets
+/// long enough to be worth reading, and TC-UI-DEMO-01 could not see it either,
+/// because `find.text` matches a scrolled-out `Text` (clipped, not offstage).
+class _ResultPanel extends StatefulWidget {
   const _ResultPanel({required this.job});
 
   final FieldJobState job;
 
   @override
+  State<_ResultPanel> createState() => _ResultPanelState();
+}
+
+class _ResultPanelState extends State<_ResultPanel> {
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(_ResultPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Follow the text only while the run is in flight and only while it is
+    // *growing*. Two deliberate limits: a finished answer is left where the reader
+    // put it, and scrolling on any rebuild would fight a technician who has
+    // scrolled up to re-read the procedure mid-generation.
+    if (!widget.job.isBusy) return;
+    if (widget.job.displayText.length <= oldWidget.job.displayText.length) {
+      return;
+    }
+
+    // After the frame, because the extent this jumps to does not exist until the
+    // new text has been laid out. `jumpTo` rather than `animateTo`: an animation
+    // during generation is the thing this screen refuses to do — Task 1.8 measured
+    // frames being dropped while tokens stream, and a smooth-scroll through that
+    // stutters visibly in a recording.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      _scroll.jumpTo(_scroll.position.maxScrollExtent);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final job = widget.job;
 
     return Container(
       key: DiagnoseKeys.resultPanel,
@@ -296,6 +375,7 @@ class _ResultPanel extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: SingleChildScrollView(
+        controller: _scroll,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -540,27 +620,35 @@ class _Body extends StatelessWidget {
     final reason = job.stopReason;
     if (reason == null) {
       // Still generating. The text itself is the progress indicator.
-      return Text(job.displayText, style: theme.textTheme.bodyLarge);
+      // Formatted while streaming too, not only once finished: a half-arrived
+      // `**Isolate` would otherwise show its asterisks and then lose them when the
+      // run ended, which is a visible flicker in the recording. `answerSpans`
+      // leaves an unpaired `**` literal, so the partial state is stable.
+      return _AnswerText(job.displayText);
     }
 
-    // Finished. The three endings are three different things to say, and the
-    // header is what stops a report of failure being read as advice.
-    final (IconData icon, String header, Color color) = switch (reason) {
-      AgentStopReason.answered => (
-        Icons.check_circle,
-        'Repair plan',
-        theme.colorScheme.primary,
-      ),
-      AgentStopReason.emptyResponse => (
-        Icons.help_outline,
-        'No answer produced',
-        theme.colorScheme.error,
-      ),
-      AgentStopReason.iterationCapReached => (
-        Icons.report_problem_outlined,
-        'Diagnosis stopped',
-        theme.colorScheme.error,
-      ),
+    // Finished. **The advice-vs-failure decision is [FieldJobState.isDiagnosis]
+    // and nothing else**, which is review finding R0-F2: four documents claimed
+    // this screen branched on that getter while `_Body` in fact re-derived the
+    // decision from `stopReason` on its own. Two representations of one fact is
+    // exactly what `FieldJobState.activeTool` refuses to allow one layer down, so
+    // the duplication is removed rather than the claim softened — the colour and
+    // the icon, which are what actually stop a report of failure reading as
+    // advice, come from the one question.
+    final color = job.isDiagnosis
+        ? theme.colorScheme.primary
+        : theme.colorScheme.error;
+    final icon = job.isDiagnosis
+        ? Icons.check_circle
+        : Icons.report_problem_outlined;
+
+    // The *wording* still needs all three, because "no answer produced" and
+    // "diagnosis stopped" are different sentences. Kept exhaustive and unmapped by
+    // `isDiagnosis`, so a fourth `AgentStopReason` fails to compile here.
+    final header = switch (reason) {
+      AgentStopReason.answered => 'Repair plan',
+      AgentStopReason.emptyResponse => 'No answer produced',
+      AgentStopReason.iterationCapReached => 'Diagnosis stopped',
     };
 
     return Column(
@@ -578,8 +666,27 @@ class _Body extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        Text(job.displayText, style: theme.textTheme.bodyLarge),
+        _AnswerText(job.displayText),
       ],
     );
   }
+}
+
+/// The model's answer, with the little Markdown it emits rendered rather than
+/// shown.
+///
+/// See `components/answer_markdown.dart` for what "the little Markdown it emits"
+/// means and why the scope is exactly that. This widget is the only consumer, and
+/// exists so the two call sites — streaming and finished — cannot drift apart in how
+/// they render the same string.
+class _AnswerText extends StatelessWidget {
+  const _AnswerText(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Text.rich(
+    TextSpan(children: answerSpans(text)),
+    style: Theme.of(context).textTheme.bodyLarge,
+  );
 }

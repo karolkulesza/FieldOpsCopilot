@@ -109,29 +109,55 @@ void main() {
   ///
   /// `seedOutcomeProvider` is overridden to a resolved value so the startup-failure
   /// banner stays out of the way; the test that wants it overrides it back.
-  Future<void> pumpState(
+  /// Returns the container, so a test that needs the state to *change* can push a
+  /// new one through the stub notifier.
+  ///
+  /// **Pumping a second `ProviderScope` with different `overrideWith` closures does
+  /// not re-apply them** — the provider is already initialised, so the new create
+  /// function is ignored and the tree keeps the first state. That silently broke
+  /// three tests here (an outcome-panel loop, an icon loop and both scroll tests):
+  /// each looked like a production defect and was a fixture defect. Changing state
+  /// now goes through [pushJob], which is also the more faithful path, since a real
+  /// screen sees a state change rather than a new tree.
+  Future<ProviderContainer> pumpState(
     WidgetTester tester, {
     FieldJobState job = const FieldJobState(),
     EngineWarmupState warmup = const EngineReady(_InertEngine()),
     Object? startupError,
   }) async {
+    final container = ProviderContainer(
+      overrides: [
+        modelInstallStatusProvider.overrideWith(
+          (ref) async => ModelInstallStatus.ready,
+        ),
+        seedOutcomeProvider.overrideWith((ref) async {
+          if (startupError != null) throw startupError;
+          return const SeedSkipped(storedRevision: 1, assetRevision: 1);
+        }),
+        engineWarmupControllerProvider.overrideWith(() => _StubWarmup(warmup)),
+        fieldJobViewModelProvider.overrideWith(() => _StubViewModel(job)),
+      ],
+    );
+    addTearDown(container.dispose);
     await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          modelInstallStatusProvider.overrideWith(
-            (ref) async => ModelInstallStatus.ready,
-          ),
-          seedOutcomeProvider.overrideWith((ref) async {
-            if (startupError != null) throw startupError;
-            return const SeedSkipped(storedRevision: 1, assetRevision: 1);
-          }),
-          engineWarmupControllerProvider.overrideWith(
-            () => _StubWarmup(warmup),
-          ),
-          fieldJobViewModelProvider.overrideWith(() => _StubViewModel(job)),
-        ],
+      UncontrolledProviderScope(
+        container: container,
         child: const FieldOpsApp(),
       ),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+    return container;
+  }
+
+  /// Pushes a new [FieldJobState] into an already-pumped screen and rebuilds.
+  Future<void> pushJob(
+    WidgetTester tester,
+    ProviderContainer container,
+    FieldJobState job,
+  ) async {
+    (container.read(fieldJobViewModelProvider.notifier) as _StubViewModel).push(
+      job,
     );
     await tester.pump();
     await tester.pumpAndSettle();
@@ -670,6 +696,353 @@ void main() {
     });
   });
 
+  group('R0-F1: weights becoming ready re-triggers the warm-up', () {
+    // **The screen's only production `warmUp` call used to be a one-shot post-frame
+    // callback**, and this screen is `MaterialApp.home` under a `StatelessWidget`,
+    // so `initState` never runs twice. An operator who used the download button
+    // `ModelReadinessBanner` offers got "Model ready" from the banner directly above
+    // "No verified weights on this device — the agent cannot run" from the status
+    // row, with Diagnose dead until restart.
+    //
+    // Driven the way it actually happens: `modelInstallStatusProvider` flips to
+    // `ready` (which is what `provision()` causes by invalidating it), and nothing
+    // else is touched.
+    testWidgets('a status flip to ready loads the weights and enables Diagnose', (
+      tester,
+    ) async {
+      final engine = _InertEngine();
+      var status = ModelInstallStatus.absent;
+      final container = ProviderContainer(
+        overrides: [
+          modelInstallStatusProvider.overrideWith((ref) async => status),
+          seedOutcomeProvider.overrideWith(
+            (ref) async =>
+                const SeedSkipped(storedRevision: 1, assetRevision: 1),
+          ),
+          // Mirrors `deviceLlmEngineProvider`: an engine only exists once the
+          // weights are verified. Overriding it to hand one back unconditionally
+          // — the first version of this test — made the precondition unreachable,
+          // so it passed on an already-ready screen and proved nothing.
+          agentEngineProvider.overrideWith((ref) async {
+            final installed = await ref.watch(
+              modelInstallStatusProvider.future,
+            );
+            return installed == ModelInstallStatus.ready ? engine : null;
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const FieldOpsApp(),
+        ),
+      );
+      await tester.pump();
+      await settleRealAsync(tester);
+
+      // Precondition: no weights, so nothing loaded and nothing to tap.
+      expect(
+        container.read(engineWarmupControllerProvider),
+        isA<EngineUnavailable>(),
+      );
+      await tester.enterText(
+        find.byKey(DiagnoseKeys.inquiryField),
+        'cabin vibrating, E-102',
+      );
+      await tester.pump();
+      expect(_button(tester).onPressed, isNull);
+
+      // What a successful in-app provision does: install, then invalidate.
+      status = ModelInstallStatus.ready;
+      container.invalidate(modelInstallStatusProvider);
+      await settleRealAsync(tester);
+
+      expect(
+        container.read(engineWarmupControllerProvider),
+        isA<EngineReady>(),
+        reason: 'nothing else re-runs warmUp, so the listener has to',
+      );
+      expect(find.text('On-device model ready'), findsOneWidget);
+      expect(
+        find.text('No verified weights on this device — the agent cannot run'),
+        findsNothing,
+        reason: 'the two rows must not contradict each other',
+      );
+      expect(_button(tester).onPressed, isNotNull);
+    });
+
+    // The listener fires on every transition into `ready`, including the ordinary
+    // launch where weights were already installed. That must not cost a second load.
+    testWidgets('it does not reload weights that were ready at launch', (
+      tester,
+    ) async {
+      final engine = _CountingEngine();
+      final container = ProviderContainer(
+        overrides: [
+          modelInstallStatusProvider.overrideWith(
+            (ref) async => ModelInstallStatus.ready,
+          ),
+          seedOutcomeProvider.overrideWith(
+            (ref) async =>
+                const SeedSkipped(storedRevision: 1, assetRevision: 1),
+          ),
+          agentEngineProvider.overrideWith((ref) async => engine),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const FieldOpsApp(),
+        ),
+      );
+      await tester.pump();
+      await settleRealAsync(tester);
+
+      expect(
+        container.read(engineWarmupControllerProvider),
+        isA<EngineReady>(),
+      );
+      expect(engine.initializeCalls, 1);
+    });
+  });
+
+  group('R0-F2: the advice-vs-failure decision is isDiagnosis', () {
+    // Four documents claimed the screen branched on `isDiagnosis` while `_Body`
+    // re-derived the decision from `stopReason` itself. The duplication is gone;
+    // this binds that the *treatment* follows the one question by checking the icon,
+    // which is what carries it visually, across all three endings.
+    testWidgets('the icon follows isDiagnosis, not the individual reason', (
+      tester,
+    ) async {
+      await pumpState(
+        tester,
+        job: _doneWith(stopReason: AgentStopReason.answered),
+      );
+      expect(find.byIcon(Icons.check_circle), findsOneWidget);
+      expect(find.byIcon(Icons.report_problem_outlined), findsNothing);
+
+      for (final failing in [
+        AgentStopReason.emptyResponse,
+        AgentStopReason.iterationCapReached,
+      ]) {
+        await pumpState(tester, job: _doneWith(stopReason: failing));
+        expect(
+          find.byIcon(Icons.report_problem_outlined),
+          findsOneWidget,
+          reason: failing.name,
+        );
+        expect(
+          find.byIcon(Icons.check_circle),
+          findsNothing,
+          reason: failing.name,
+        );
+      }
+    });
+  });
+
+  group('R0-F6: the panel follows a streaming answer', () {
+    // A bare `SingleChildScrollView` stays pinned at offset 0 while its content
+    // grows, so the measured 1401-character device answer streamed below the fold —
+    // which breaks "the live token stream is the progress indicator" exactly when
+    // the answer is long enough to matter. `find.text` could not catch it: a
+    // scrolled-out `Text` is clipped, not offstage.
+    testWidgets('a long streaming answer scrolls itself into view', (
+      tester,
+    ) async {
+      // Deliberately taller than any plausible panel on a phone-sized test surface.
+      final long = List.generate(80, (i) => 'Procedure step $i.').join('\n');
+
+      // The state is *pushed* rather than re-pumped: streaming is a state change on
+      // a live screen, and that is the path `didUpdateWidget` is written for.
+      final container = await pumpState(
+        tester,
+        job: const FieldJobState(
+          phase: FieldJobPhase.thinking,
+          inquiry: 'cabin vibrating, E-102',
+          streamedText: 'Isolate the main power bus.',
+        ),
+      );
+      expect(
+        _panelScrollController(tester).offset,
+        0,
+        reason: 'nothing to scroll yet',
+      );
+
+      await pushJob(
+        tester,
+        container,
+        FieldJobState(
+          phase: FieldJobPhase.thinking,
+          inquiry: 'cabin vibrating, E-102',
+          streamedText: long,
+        ),
+      );
+
+      final after = _panelScrollController(tester);
+      expect(
+        after.position.maxScrollExtent,
+        greaterThan(0),
+        reason: 'the fixture must actually overflow, or this proves nothing',
+      );
+      // Within a line of the bottom rather than exactly at it, and the tolerance is
+      // a property of the design rather than a fudge: the jump runs in a post-frame
+      // callback, so it targets the extent as measured *by the frame that grew the
+      // text*. Measured lag on this fixture is 16px against a ~1690px extent. While
+      // tokens stream that self-corrects on the next one; the residue is only ever
+      // the final growth, which leaves the end of the answer on screen.
+      expect(after.offset, closeTo(after.position.maxScrollExtent, 24));
+      expect(
+        after.offset,
+        greaterThan(after.position.maxScrollExtent * 0.5),
+        reason: 'a token gesture toward the bottom is not following the stream',
+      );
+    });
+
+    // The two limits on the follow, both deliberate: a finished answer is left where
+    // the reader put it, so they can scroll up to re-read without being yanked back.
+    testWidgets('a finished answer is not scrolled', (tester) async {
+      final long = List.generate(80, (i) => 'Procedure step $i.').join('\n');
+
+      final container = await pumpState(
+        tester,
+        job: _doneWith(answer: 'short'),
+      );
+      await pushJob(tester, container, _doneWith(answer: long));
+
+      final controller = _panelScrollController(tester);
+      expect(controller.position.maxScrollExtent, greaterThan(0));
+      expect(controller.offset, 0);
+    });
+  });
+
+  // ------------------------------------------ guards the review found unbound
+
+  group('R0-F9: guards with correct code and nothing holding them', () {
+    // The doc says "One line per refusal, counted rather than iterated", and the
+    // README argues the count is the point — "silently hiding them would make a
+    // four-turn run look like an inexplicably slow two-turn one". Every earlier test
+    // used a single failure, so replacing the loop with `if (isNotEmpty)` survived
+    // the whole suite.
+    testWidgets('two refusals render two lines, not one', (tester) async {
+      const refusal = GuardFailure(
+        reason: GuardFailureReason.argumentsUnreadable,
+        message: 'arguments were not a JSON object',
+      );
+      await pumpState(
+        tester,
+        job: const FieldJobState(
+          phase: FieldJobPhase.thinking,
+          rejectedCalls: [refusal, refusal],
+        ),
+      );
+
+      expect(
+        find.text(
+          'The assistant sent a malformed lookup and was asked to retry.',
+        ),
+        findsNWidgets(2),
+      );
+    });
+
+    // The sibling of the "null: null in stock" defect fixed one function away in
+    // `8ca9e6c`: dropping the null guard rendered "…in stock at null." All five
+    // seeded rows have a location, so only a synthetic row reaches this.
+    testWidgets('a row with no location omits the location, not renders null', (
+      tester,
+    ) async {
+      await pumpState(
+        tester,
+        job: _doneWith(
+          invocations: [
+            _invocation(const {
+              'sku': 'BRK-990-XP',
+              'in_stock': 3,
+              'aisle': null,
+            }),
+          ],
+        ),
+      );
+
+      expect(find.text('BRK-990-XP: 3 in stock.'), findsOneWidget);
+      expect(find.textContaining('null'), findsNothing);
+      expect(find.textContaining(' at '), findsNothing);
+    });
+
+    // `_labelFor`'s `sku.trim().isNotEmpty` half: a blank SKU must fall back to the
+    // unqualified label rather than announcing a lookup for nothing.
+    testWidgets('a blank SKU falls back to the unqualified tool label', (
+      tester,
+    ) async {
+      await pumpState(
+        tester,
+        job: const FieldJobState(
+          phase: FieldJobPhase.thinking,
+          activeTool: AgentToolCallStarted(
+            call: LlmToolCall(
+              name: GetPartsInventoryTool.toolName,
+              arguments: {GetPartsInventoryTool.skuParameter: '   '},
+            ),
+            source: GuardSource.nativeEvent,
+            repeated: false,
+          ),
+        ),
+      );
+
+      expect(find.text('Checking local inventory…'), findsOneWidget);
+    });
+
+    // `_notReadyMessage`'s remaining two branches. The doc's whole argument is that
+    // naming *which* state matters ("'the model is not ready' without saying whether
+    // that is loading, absent or failed is the least useful sentence available"), so
+    // each branch needs its own words.
+    testWidgets('diagnosing mid-load says the model is still loading', (
+      tester,
+    ) async {
+      final container = ProviderContainer(
+        overrides: [
+          engineWarmupControllerProvider.overrideWith(
+            () => _StubWarmup(const EngineLoading()),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(fieldJobViewModelProvider.notifier)
+          .diagnose('cabin vibrating, E-102');
+
+      expect(
+        container.read(fieldJobViewModelProvider).failure,
+        'The on-device model is still loading.',
+      );
+    });
+
+    testWidgets('diagnosing after a load failure quotes the load failure', (
+      tester,
+    ) async {
+      final container = ProviderContainer(
+        overrides: [
+          engineWarmupControllerProvider.overrideWith(
+            () => _StubWarmup(const EngineFailed('no Metal device')),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(fieldJobViewModelProvider.notifier)
+          .diagnose('cabin vibrating, E-102');
+
+      final failure = container.read(fieldJobViewModelProvider).failure;
+      expect(failure, contains('unavailable'));
+      expect(failure, contains('no Metal device'));
+    });
+  });
+
   // ------------------------------------------------------------------- wiring
 
   /// Pumps the app over the **real** graph: real seeded database, real router,
@@ -828,6 +1201,20 @@ void main() {
 FilledButton _button(WidgetTester tester) =>
     tester.widget<FilledButton>(find.byKey(DiagnoseKeys.diagnoseButton));
 
+/// The result panel's own `ScrollController`, read off the live widget.
+///
+/// Reaching for the widget rather than a test-owned controller on purpose: the
+/// property under test is that *the screen* scrolls itself, and a controller the
+/// test supplied would only prove the test can scroll.
+ScrollController _panelScrollController(WidgetTester tester) => tester
+    .widget<SingleChildScrollView>(
+      find.descendant(
+        of: find.byKey(DiagnoseKeys.resultPanel),
+        matching: find.byType(SingleChildScrollView),
+      ),
+    )
+    .controller!;
+
 /// A finished run, for rendering tests.
 ///
 /// `turns` is a single real [AgentTurn] rather than an empty list, because
@@ -927,6 +1314,10 @@ class _StubViewModel extends FieldJobViewModel {
 
   @override
   Future<void> diagnose(String rawInquiry) async {}
+
+  /// Publishes [next], the way a real run would. See `pumpState`'s doc for why a
+  /// second `pumpWidget` cannot do this.
+  void push(FieldJobState next) => state = next;
 }
 
 /// Returns a fixed [EngineWarmupState], and does not load anything.
@@ -940,6 +1331,30 @@ class _StubWarmup extends EngineWarmupController {
 
   @override
   Future<void> warmUp() async {}
+}
+
+/// An engine that counts its loads, for the "already ready at launch" case.
+class _CountingEngine implements LlmEngine {
+  bool _ready = false;
+  int initializeCalls = 0;
+
+  @override
+  bool get isReady => _ready;
+
+  @override
+  Future<void> initialize() async {
+    initializeCalls++;
+    _ready = true;
+  }
+
+  @override
+  Stream<LlmEvent> generate({
+    required String prompt,
+    List<ToolDefinition> tools = const [],
+  }) => const Stream<LlmEvent>.empty();
+
+  @override
+  Future<void> dispose() async {}
 }
 
 /// Stands in for a loaded engine in an [EngineReady] the screen only reads the
