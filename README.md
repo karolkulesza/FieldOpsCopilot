@@ -2046,9 +2046,17 @@ Four things worth stating at the width they were actually measured:
 the gap is named rather than left to be inferred. Review round 0 produced changes
 after them, and the demo iPad then dropped to wireless tethering, where
 `flutter test` cannot launch (`Cannot start app on wirelessly tethered iOS device`)
-and `flutter run --publish-port` fails at mDNS VM-service discovery. A cable is
-needed and was not available, so a third run is **owed**. What that costs, split by
-what the figures actually depend on:
+and `flutter run --publish-port` fails at mDNS VM-service discovery. A cable was
+needed and was not available at the time, so a third run was **owed** — and it has
+since been made (2026-08-07, iPad Air M4 / iOS 26.5, cabled): warm-up 8540ms with a
+worst gap of **2151ms**, flow 13247ms with a worst in-flow gap of **233ms**, 1401
+chars at ~106 chars/s, `stop=answered`, 71 loading frames asserted. Two things to
+carry from it. The **2151ms warm-up gap is a new worst**, above Task 1.8's
+1445–1728ms band — that run was a first launch, so seeding shared the window, but it
+is worth re-checking on a warm start. The **233ms in-flow gap is the best of the
+three**, which is the figure the recording depends on.
+
+What the third run settled, and what it did not:
 
 * **Still valid, because nothing in the change touches them.** Every number in the
   table above comes from the model, the inference isolate and the database — the
@@ -2056,11 +2064,24 @@ what the figures actually depend on:
   and its length, the seed outcome, the stop reason. None of the round-0 changes
   goes near the isolate, the runtime, the prompt or the database. Run 2 also
   exercised the per-frame no-animation guard as it ships (60 frames).
-* **Unrun on device, and this is what a third run is for.** Three of the round-0
-  changes are *rendering* and only a device shows them under a real answer: the
-  Markdown formatter, the streaming auto-scroll, and the outcome panel's colour and
-  icon coming from `isDiagnosis`. Plus TC-UI-DEMO-01's own new assertion — that the
-  panel shows the *formatted* answer and no raw `**` — has never executed.
+* **Confirmed on device by the third run and by a screen recording of the shipped
+  app.** The Markdown formatter renders bold headings and `•` bullets with no raw
+  `**` in the finished answer; TC-UI-DEMO-01's formatted-answer assertion executed
+  and matched; the outcome panel shows its green ✓ *Repair plan*. Auto-scroll
+  *following* is confirmed visually — the panel tracks the growing answer and jumps
+  rather than glides.
+* **What the third run did *not* settle, and what a fourth is for.** Auto-scroll
+  **release** — a reader dragging up mid-generation — was the one thing the run
+  could not assert and the recording did not exercise, and driving the real app by
+  hand then found it broken (**R12-F0**: the panel was *unscrollable* during
+  generation, because `jumpTo` disposes the active drag). Fixed and bound on the
+  host under both platforms' physics, but the fix itself has not run on hardware.
+* **The error-path colour and icon cannot be reached from the UI at all.**
+  `isDiagnosis` is `stopReason == answered`, and a no-match retrieval still ends
+  *answered* — the model declines and asks for a fault code, so the panel is
+  correctly green. The red ⚠ needs `emptyResponse` or `iterationCapReached`, neither
+  reachable by typing. It stays bound by host tests, and this is recorded because
+  the obvious manual test for it does not test it.
 * **The one thing that would have failed on device and was caught by reading
   instead.** The Markdown fix broke the old `find.text(job.displayText)` assertion:
   `find.text` matches a `Text.rich` by `textSpan.toPlainText()`, i.e. the text after
@@ -2069,9 +2090,16 @@ what the figures actually depend on:
   Fixed on both sides and bound by a host test carrying the real answer shape — but
   it is the clearest evidence that a rendering change wants a rendering run.
 
-One consistency check fell out of it: the answer was **1401 characters in both
+One consistency check fell out of it: the answer was **1401 characters in all three
 runs, and 1401 characters in Task 1.9's hand-built device harness** for the same
-inquiry. Decoding is greedy, so identical output is expected from an identical
+inquiry. That figure also resolved a scare: run 3's log shows `**Repair Prure:**`
+where the screen recording of the same build shows `Repair Procedure:` rendered
+correctly. A dropped token would have been a real defect in the streaming
+accumulation — but the length is identical across runs, decoding is greedy, and the
+*rendered* text is intact, so the corruption is in the **log transport**, not the
+app: the answer is emitted through a single `debugPrint` of 1401 characters, and
+`debugPrint` chunks and rate-limits long lines. Read answers off the screen, not off
+the console. Decoding is greedy, so identical output is expected from an identical
 prompt — which makes this evidence that the composition through the viewmodel and
 the composition in 1.9's harness build the same prompt. Equal *length* is not proof
 of equal text; it is consistent with it, which is as far as this observation goes.
