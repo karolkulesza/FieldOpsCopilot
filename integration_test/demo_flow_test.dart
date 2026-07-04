@@ -8,6 +8,7 @@ import 'package:field_ops_copilot/services/models/model_descriptor.dart';
 import 'package:field_ops_copilot/services/models/model_provisioner.dart';
 import 'package:field_ops_copilot/services/models/model_storage.dart';
 import 'package:field_ops_copilot/viewmodels/field_job_viewmodel.dart';
+import 'package:field_ops_copilot/views/components/answer_markdown.dart';
 import 'package:field_ops_copilot/views/diagnose_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -244,7 +245,33 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('Repair plan'), findsOneWidget);
-      expect(find.text(job.displayText), findsOneWidget);
+
+      // **The panel renders the answer with its Markdown applied, not raw.** This
+      // used to be `find.text(job.displayText)`, and the R0-F5 fix silently broke
+      // it: the widget is now a `Text.rich`, and `find.text` matches such a widget
+      // by `textSpan.toPlainText()` (`flutter_test/src/finders.dart`,
+      // `_matchesNonRichText`), which is the text *after* the delimiters were
+      // consumed. Comparing that against the raw `displayText` can never match once
+      // the model emits any `**`.
+      //
+      // The host suite could not have caught it, and that is worth recording: every
+      // rendering fixture there used markup-free answer text, so raw and formatted
+      // were the same string. Found by reading the finder's source, since this
+      // device could not be run at the time.
+      //
+      // Asserted at the width that matters: the rendered text is the formatted
+      // form, and the artefact being screen-recorded contains no raw `**`.
+      final renderedAnswer = answerSpans(
+        job.displayText,
+      ).map((span) => (span as TextSpan).text ?? '').join();
+      expect(find.text(renderedAnswer), findsOneWidget);
+      expect(
+        renderedAnswer,
+        isNot(contains('**')),
+        reason:
+            'the recording must not show raw Markdown; the model emits it '
+            'unprompted (14 bold runs in the run-2 answer)',
+      );
 
       // Grounded in the entry the *device's* FTS index retrieved.
       expect(job.retrieval, isNotNull);
