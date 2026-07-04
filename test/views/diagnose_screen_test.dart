@@ -431,6 +431,41 @@ void main() {
       expect(find.textContaining('(already answered)'), findsOneWidget);
     });
 
+    // `_ToolActivity` had a generic fallback for an unrecognised tool and
+    // `_summarise` did not, so the first of the spec's §2.2 tools would have
+    // rendered as "null: null in stock" — worse than useless, because it looks
+    // like data.
+    testWidgets(
+      'an unrecognised tool is summarised generically, not as stock',
+      (tester) async {
+        await pumpState(
+          tester,
+          job: _doneWith(
+            invocations: [
+              const AgentToolInvocation(
+                call: LlmToolCall(
+                  name: 'raise_safety_hazard_alert',
+                  arguments: {'severity': 'high'},
+                ),
+                source: GuardSource.nativeEvent,
+                outcome: ToolSuccess(
+                  toolName: 'raise_safety_hazard_alert',
+                  payload: {'logged': true},
+                ),
+              ),
+            ],
+          ),
+        );
+
+        expect(
+          find.text('raise_safety_hazard_alert completed.'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('in stock'), findsNothing);
+        expect(find.textContaining('null'), findsNothing);
+      },
+    );
+
     testWidgets('a failed lookup does not report a stock level', (
       tester,
     ) async {
