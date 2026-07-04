@@ -886,9 +886,14 @@ void main() {
   // These two tests ask where an engine goes *to*, and that question has an answer
   // that does not depend on a fake's name or location. **Every one of the seven
   // demonstrated exploits ends in the same statement** — an override of
-  // `agentEngineProvider` inside `lib/` — and every fake has to implement `LlmEngine`
-  // to be usable at all. Both are closed by construction over the property, and both
-  // are satisfied by the real tree today with no allow-list to maintain.
+  // `agentEngineProvider` inside `lib/`.
+  //
+  // **This used to continue "and every fake has to implement `LlmEngine` to be usable
+  // at all", and R9-F1 falsified it by compiling one that does not.** A scripted
+  // `InferenceHost` answers through the *real* `GemmaLlmEngine`, because that engine
+  // is a state machine over an injected collaborator. So the guarded surface is
+  // [scriptableContracts] — the whole token path — and the honest claim is narrower:
+  // an implementation of *any* contract on that path must live in an approved file.
   group('the sink: how an engine reaches the running app', () {
     /// Every `.dart` under `lib/`, as path → source.
     Map<String, String> productionSources() {
@@ -941,17 +946,6 @@ void main() {
       );
     });
 
-    // The interface is a far smaller and more stable surface than the fake's name.
-    // `LlmEngine` cannot be renamed without a compile error at every call site,
-    // whereas `FakeLlmEngine` was only ever a convention — which is exactly how R5-F1
-    // and R6-F1 got through.
-    //
-    // **Keyed on `(file, declaration)`, not on file — R7-F1.** A set of *files* while
-    // the property is per-*declaration* means appending a second class to an
-    // already-approved file is invisible: `declarations.keys` is unchanged, so even
-    // the anti-rot equality below still passed. A scripted engine appended to
-    // `gemma_llm_engine.dart` and returned from `agentEngineProvider` needed no
-    // override, no new file and no new import, and the suite stayed 654 green.
     // **Every interface a scripted answer can enter through, not just the top one —
     // R9-F1.** The guard watched `LlmEngine` for four rounds while the actual seam
     // was one interface down. `GemmaLlmEngine` is a state machine over an *injected*
@@ -1083,6 +1077,30 @@ void main() {
       return declared;
     }
 
+    // **A tripwire, and it is worth being exact about what it is not.** Deriving the
+    // corpus from [scriptableContracts] stops a contract being added without being
+    // probed — but it also means *removing* one removes its probe, so the corpus can
+    // never catch a narrowing. That is the pairwise weakness R9's note N3 identified,
+    // and I made it worse before I made it better: dropping `'InferenceRuntime'`
+    // together with its approved pair is one coherent edit that left every other test
+    // green.
+    //
+    // Nothing computable defends against that, because "which contracts can script an
+    // answer" is a judgement about this app rather than a property of the code. So
+    // this asserts the judgement literally. It does not make narrowing impossible; it
+    // makes narrowing *loud* — you must delete a test whose name says what you are
+    // giving up, which is the difference between a decision and a slip.
+    test('the guarded contract set is the whole token path', () {
+      expect(
+        scriptableContracts,
+        {'LlmEngine', 'InferenceHost', 'InferenceRuntime'},
+        reason:
+            'narrowing this set is exactly how R9-F1 shipped: the guard watched '
+            'LlmEngine while a scripted InferenceHost answered through the real '
+            'engine. Removing a name here needs an argument, not an edit.',
+      );
+    });
+
     test(
       'every implementation of a scriptable contract lives in an approved file',
       () async {
@@ -1153,11 +1171,23 @@ void main() {
         () async {
           final dir = Directory.systemTemp.createTempSync('fieldops_sink');
           addTearDown(() => dir.deleteSync(recursive: true));
-          File(
-            '${dir.path}/llm_engine.dart',
-          ).writeAsStringSync('abstract interface class LlmEngine {}\n');
+          // **Every guarded contract, derived from the set rather than named here —
+          // R9-F1's note N3.** The corpus used to declare `LlmEngine` alone, so only
+          // that entry was bound independently. The rest were bound *pairwise*:
+          // dropping `'InferenceRuntime'` from [scriptableContracts] together with
+          // its approved pair is one coherent edit that left the guard green and
+          // silently narrowed it back to where R9-F1 lived. Generating the corpus
+          // from the set closes that — a contract added to the set is probed
+          // automatically, and one removed fails here whatever else is edited.
+          File('${dir.path}/contracts.dart').writeAsStringSync(
+            [
+              for (final contract in scriptableContracts)
+                'abstract interface class $contract {}',
+            ].join('\n'),
+          );
           File('${dir.path}/offenders.dart').writeAsStringSync(
-            "import 'llm_engine.dart';\n"
+            "import 'contracts.dart';\n"
+            "${[for (final c in scriptableContracts) 'class Probe$c implements $c {}'].join('\n')}\n"
             // direct
             'class AsImplements implements LlmEngine {}\n'
             // two hops, and three — a single sweep declared child-first misses these
@@ -1183,6 +1213,7 @@ void main() {
           final declared = await engineDeclarations(dir.path);
 
           expect(declared.map((d) => d.$2).toSet(), {
+            for (final contract in scriptableContracts) 'Probe$contract',
             'AsImplements',
             'AsExtends',
             'AsExtendsDeeper',
