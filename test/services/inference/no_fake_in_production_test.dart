@@ -73,6 +73,48 @@ void main() {
     );
   });
 
+  // **The scan above has a hole, and the mutation that found it is why this second
+  // test exists.** `lib/engines/providers.dart` is allow-listed wholesale, because
+  // binding fakes is its job for the three engine seams with no real backend yet.
+  // So a fake could be bound *there* under a new name and consumed from the
+  // inference path without the string `FakeLlmEngine` ever appearing in a
+  // non-allow-listed file — mutation M36 did exactly that and survived.
+  //
+  // The real boundary is therefore the **import**: nothing on the path from the
+  // demo screen to the engine may reach the seam that binds fakes at all. Nothing
+  // does today (deleting the Tier 0 home screen removed the last consumer), which
+  // is what makes this checkable rather than aspirational.
+  test('the production path does not import the fake-binding seam', () {
+    const productionPaths = [
+      'lib/services/inference/',
+      'lib/services/ai/',
+      'lib/services/rag/',
+      'lib/viewmodels/',
+      'lib/views/',
+    ];
+    final offenders = <String>[];
+
+    for (final entity in Directory('lib').listSync(recursive: true)) {
+      if (entity is! File || !entity.path.endsWith('.dart')) continue;
+      final path = entity.path.replaceAll(r'\', '/');
+      if (!productionPaths.any(path.startsWith)) continue;
+
+      for (final line in entity.readAsLinesSync()) {
+        final trimmed = line.trimLeft();
+        if (!trimmed.startsWith('import ')) continue;
+        if (trimmed.contains('engines/providers.dart')) offenders.add(path);
+      }
+    }
+
+    expect(
+      offenders,
+      isEmpty,
+      reason:
+          'these files can reach a fake-bound provider without naming a fake, '
+          'which the scan above cannot see: $offenders',
+    );
+  });
+
   // The guard above is worthless if its allow-list has quietly grown to cover the
   // file it is meant to protect. Named explicitly, so widening it is a visible edit
   // rather than a silent one.
