@@ -67,27 +67,48 @@ void main() {
   bool namesAFake(String line) =>
       line.contains('FakeLlmEngine') || line.contains('engines/fakes/');
 
-  /// The URI of an `import` / `export` / `part` directive, or `null`.
+  /// Every file an `import` / `export` / `part` directive on [line] can reach.
+  ///
+  /// **A list, not one URI, because a conditional import carries several** — review
+  /// finding R3-F1: `import 'stub.dart' if (dart.library.io) '…/providers.dart';`
+  /// has two, and the earlier version captured only the first. That is the worst
+  /// possible direction to miss in, because `dart.library.io` is the branch taken on
+  /// iOS and Android — the miss would be on the device and the hit on a platform
+  /// this app does not ship to.
   ///
   /// `export` is here because omitting it was R2-F1's Evidence B: a one-line barrel
   /// re-exporting the seam defeated a check that only looked for `import `.
-  final directive = RegExp('''^(?:import|export|part)\\s+['"]([^'"]+)['"]''');
-  String? directiveTarget({
+  final directiveStart = RegExp(r'^(?:import|export|part)\s');
+  final quotedUri = RegExp('''['"]([^'"]+)['"]''');
+  Iterable<String> directiveTargets({
     required String line,
     required String fromFile,
     required String root,
   }) {
-    final uri = directive.firstMatch(line)?.group(1);
-    if (uri == null) return null;
-    // This package's own `package:` form addresses the scan root — `lib/` for the
-    // real tree. Resolved against [root] rather than a hard-coded `lib/` so a probe
-    // tree can exercise this branch at all; the first version hard-coded it and the
-    // probe silently tested nothing.
-    const self = 'package:field_ops_copilot/';
-    if (uri.startsWith(self)) return '$root/${uri.substring(self.length)}';
-    // Anything else absolute is someone else's code.
-    if (uri.startsWith('dart:') || uri.startsWith('package:')) return null;
-    return p.normalize(p.join(p.dirname(fromFile), uri)).replaceAll(r'\', '/');
+    if (!directiveStart.hasMatch(line)) return const [];
+    return quotedUri
+        .allMatches(line)
+        .map((match) => match.group(1)!)
+        .map((uri) {
+          // This package's own `package:` form addresses the scan root — `lib/` for
+          // the real tree. Resolved against [root] rather than a hard-coded `lib/`
+          // so a probe tree can exercise this branch at all; the first version
+          // hard-coded it and the probe silently tested nothing (R2-F3).
+          const self = 'package:field_ops_copilot/';
+          if (uri.startsWith(self)) {
+            // Normalised like the relative branch. Not normalising it was the third
+            // gap in R3-F1: `package:…/./engines/providers.dart` resolved to a path
+            // with the `./` still in it and missed the set.
+            return p.normalize('$root/${uri.substring(self.length)}');
+          }
+          // Anything else absolute is someone else's code.
+          if (uri.startsWith('dart:') || uri.startsWith('package:')) {
+            return null;
+          }
+          return p.normalize(p.join(p.dirname(fromFile), uri));
+        })
+        .whereType<String>()
+        .map((path) => path.replaceAll(r'\', '/'));
   }
 
   /// Comments are where the *reason* for this rule is written down, so they must be
@@ -108,28 +129,65 @@ void main() {
 
     bool isExempt(String path) => exempt.isNotEmpty && path.startsWith(exempt);
 
-    // Pass 1 — which exempt files bear a fake.
-    final fakeBearing = <String>{
-      for (final entry in lines.entries)
-        if (isExempt(entry.key))
-          if (entry.value.any((l) => !isComment(l.trimLeft()) && namesAFake(l)))
-            entry.key,
-    };
+    /// Code lines of [path], comments dropped.
+    Iterable<String> codeLines(String path) =>
+        lines[path]!.map((l) => l.trimLeft()).where((l) => !isComment(l));
 
-    // Pass 2 — who names a fake, or reaches one of pass 1's files.
+    // **Pass 1 — the exempt files that bear a fake, to closure.**
+    //
+    // A *fixed point*, not a single sweep, and that is review finding R3-F1. The
+    // single-sweep version asked only "does this exempt file name a fake", which
+    // left an exempt file that *reaches* one invisible to both passes: pass 2 skips
+    // it for being exempt, and pass 1 declined to flag it for not naming a fake. So
+    // a two-line wrapper inside `lib/engines/` — `import 'providers.dart'; final
+    // demoEngineProvider = llmEngineProvider;` — laundered the reference, and
+    // everything downstream inherited the blind spot. My non-transitivity argument
+    // assumed the laundering file was non-exempt; it need not be.
+    //
+    // Iterating to closure is what makes that argument true rather than nearly
+    // true: every path out of the exemption now terminates at a pass-1 file. The
+    // exemption is eleven files, so the cost is nil.
+    final fakeBearing = <String>{
+      for (final path in lines.keys)
+        if (isExempt(path) && codeLines(path).any(namesAFake)) path,
+    };
+    for (var changed = true; changed;) {
+      changed = false;
+      for (final path in lines.keys) {
+        if (!isExempt(path) || fakeBearing.contains(path)) continue;
+        final reachesOne = codeLines(path).any(
+          (line) => directiveTargets(
+            line: line,
+            fromFile: path,
+            root: root,
+          ).any(fakeBearing.contains),
+        );
+        if (reachesOne) {
+          fakeBearing.add(path);
+          changed = true;
+        }
+      }
+    }
+
+    // **Pass 2 — who names a fake, or reaches one of pass 1's files.**
+    //
+    // Non-transitive *outside* the exemption, and that is sound now that pass 1 is
+    // closed: any chain from production code into the exemption must cross the
+    // boundary at some non-exempt file, and that file's directive resolves to a
+    // pass-1 member. A barrel does not launder the reference, it becomes the
+    // offender.
     final offenders = <String, List<int>>{};
     for (final entry in lines.entries) {
       if (isExempt(entry.key)) continue;
       for (var i = 0; i < entry.value.length; i++) {
         final line = entry.value[i].trimLeft();
         if (isComment(line)) continue;
-        final target = directiveTarget(
+        final reachesOne = directiveTargets(
           line: line,
           fromFile: entry.key,
           root: root,
-        );
-        if (namesAFake(line) ||
-            (target != null && fakeBearing.contains(target))) {
+        ).any(fakeBearing.contains);
+        if (namesAFake(line) || reachesOne) {
           offenders.putIfAbsent(entry.key, () => []).add(i + 1);
         }
       }
@@ -229,6 +287,83 @@ void main() {
         'engines/providers.dart': 'final p = FakeLlmEngine();\n',
         'main.dart':
             "import 'package:field_ops_copilot/engines/providers.dart';\n",
+      });
+
+      expect(scan(root: root, exempt: '$root/engines/')['$root/main.dart'], [
+        1,
+      ]);
+    });
+
+    // **R3-F1's wrapper — the shape that broke the transitivity argument.** An
+    // exempt file that *reaches* a fake without naming one. Pass 2 skips it for being
+    // exempt; the single-sweep pass 1 declined to flag it for not naming a fake, so
+    // the reference was laundered and the consumer was invisible.
+    test(
+      'it reports a consumer of an exempt file that only reaches a fake',
+      () {
+        final root = probeTree('wrapper', {
+          'engines/providers.dart':
+              'final llmEngineProvider = Provider((ref) => FakeLlmEngine());\n',
+          'engines/demo_seam.dart':
+              "import 'providers.dart';\n"
+              'final demoEngineProvider = llmEngineProvider;\n',
+          'main.dart': "import 'engines/demo_seam.dart';\n",
+        });
+
+        final found = scan(root: root, exempt: '$root/engines/');
+
+        expect(
+          found['$root/main.dart'],
+          [1],
+          reason:
+              'the wrapper names no fake, so only a closed pass 1 catches this',
+        );
+      },
+    );
+
+    // The closure has to iterate, not just look one hop. Two wrappers in a chain.
+    test('pass 1 closes over a chain of exempt wrappers', () {
+      final root = probeTree('chain', {
+        'engines/providers.dart': 'final p = FakeLlmEngine();\n',
+        'engines/hop1.dart': "export 'providers.dart';\n",
+        'engines/hop2.dart': "export 'hop1.dart';\n",
+        'main.dart': "import 'engines/hop2.dart';\n",
+      });
+
+      expect(
+        scan(root: root, exempt: '$root/engines/')['$root/main.dart'],
+        [1],
+        reason:
+            'two hops inside the exemption, so a single sweep is not enough',
+      );
+    });
+
+    // **R3-F1's conditional import.** The regex captured only the first URI, and
+    // `dart.library.io` is the branch taken on iOS and Android — so the miss was on
+    // the device and the hit on a platform this app does not ship to.
+    test('it reads every URI of a conditional import', () {
+      final root = probeTree('conditional', {
+        'engines/providers.dart': 'final p = FakeLlmEngine();\n',
+        'stub.dart': 'const stub = 0;\n',
+        'main.dart':
+            "import 'stub.dart'"
+            " if (dart.library.io) 'engines/providers.dart';\n",
+      });
+
+      expect(
+        scan(root: root, exempt: '$root/engines/')['$root/main.dart'],
+        [1],
+        reason: 'the fake-bearing URI is the second one on the line',
+      );
+    });
+
+    // **R3-F1's normalisation gap.** Relative URIs were normalised and `package:`
+    // ones were not, so a `./` in the middle slipped past the set membership check.
+    test('it normalises this package\'s package: URIs too', () {
+      final root = probeTree('normalise', {
+        'engines/providers.dart': 'final p = FakeLlmEngine();\n',
+        'main.dart':
+            "import 'package:field_ops_copilot/./engines/providers.dart';\n",
       });
 
       expect(scan(root: root, exempt: '$root/engines/')['$root/main.dart'], [
