@@ -952,11 +952,61 @@ void main() {
     // the anti-rot equality below still passed. A scripted engine appended to
     // `gemma_llm_engine.dart` and returned from `agentEngineProvider` needed no
     // override, no new file and no new import, and the suite stayed 654 green.
+    // **Every interface a scripted answer can enter through, not just the top one —
+    // R9-F1.** The guard watched `LlmEngine` for four rounds while the actual seam
+    // was one interface down. `GemmaLlmEngine` is a state machine over an *injected*
+    // collaborator — its own doc says it "takes an `InferenceHost` rather than
+    // building one", `initialize()` is `_host.start(config)` and `generate()` is
+    // `return _host.generate(…)` verbatim. So an `InferenceHost` returning canned
+    // tokens produces a scripted demo through the **real** `GemmaLlmEngine`, and
+    // `InferenceHost` is not an `LlmEngine`, so nothing here saw it. The reviewer ran
+    // it end to end: with no verified weights the real `agentEngineProvider` returned
+    // a ready engine reporting a `gpu` backend and answered from a script.
+    //
+    // The lesson is the one this file keeps relearning at a new level: *dependency
+    // injection means every injected interface is a seam*, so the guarded set is the
+    // set of contracts an answer can be scripted through, not the one at the top.
+    //
+    // **So this is the whole token path, not just the one the reviewer named** —
+    // adding only `InferenceHost` would be patching the instance instead of asking
+    // the question, which is the move that has bought exactly one round, five times.
+    // `InferenceRuntime` is the same seam one level further down, injected at
+    // `inference_isolate.dart:462` and `:547`, and its own doc says the host can be
+    // "driven on the host against a scripted [InferenceRuntime]" — the evasion is
+    // written in the source as an intended capability.
+    //
+    // **What is deliberately *not* here, and why.** `SeedSource` and `AgentTool` can
+    // both feed the model false input, but the model still generates the answer, so
+    // they break "the corpus is genuine" rather than "a model ran" — a real property
+    // and a different one. `VisionEngine`, `SttEngine`, `PlatformTelemetry`,
+    // `ModelDownloader` and `BackupExclusion` are not on the answer path at all.
+    // If a future feature puts one of them there, it belongs here.
+    const scriptableContracts = {
+      'LlmEngine',
+      'InferenceHost',
+      'InferenceRuntime',
+    };
+
+    // The interface is a far smaller and more stable surface than the fake's name.
+    // `LlmEngine` cannot be renamed without a compile error at every call site,
+    // whereas `FakeLlmEngine` was only ever a convention — which is exactly how R5-F1
+    // and R6-F1 got through.
+    //
+    // **Keyed on `(file, declaration)`, not on file — R7-F1.** A set of *files* while
+    // the property is per-*declaration* means appending a second class to an
+    // already-approved file is invisible: `declarations.keys` is unchanged, so even
+    // the anti-rot equality below still passed. A scripted engine appended to
+    // `gemma_llm_engine.dart` and returned from `agentEngineProvider` needed no
+    // override, no new file and no new import, and the suite stayed 654 green.
     const approvedImplementations = {
       // The device engine — the implementation production is *supposed* to reach.
       ('lib/engines/impl/gemma_llm_engine.dart', 'GemmaLlmEngine'),
       // The fake, which lives inside the exemption where the scan above confines it.
       ('lib/engines/fakes/fake_llm_engine.dart', 'FakeLlmEngine'),
+      // The real host `GemmaLlmEngine` delegates to — R9-F1. The only one in `lib/`.
+      ('lib/services/inference/inference_isolate.dart', 'IsolateInferenceHost'),
+      // The real runtime the host drives, one seam further down.
+      ('lib/services/inference/gemma_runtime.dart', 'GemmaRuntime'),
     };
 
     /// Every `(file, declaration)` under [root] whose type reaches `LlmEngine`,
@@ -1017,7 +1067,7 @@ void main() {
           ];
           for (final element in interfaces) {
             final isEngine = element.allSupertypes.any(
-              (type) => type.element.name == 'LlmEngine',
+              (type) => scriptableContracts.contains(type.element.name),
             );
             if (isEngine) {
               declared.add((
@@ -1034,7 +1084,7 @@ void main() {
     }
 
     test(
-      'every LlmEngine implementation lives in an approved file',
+      'every implementation of a scriptable contract lives in an approved file',
       () async {
         final declared = await engineDeclarations('lib');
 
