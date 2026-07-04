@@ -133,22 +133,31 @@ void main() {
   /// 'providers.dart'` into one URI, which R4-F2 showed the extraction never could.
   /// This is the same move R2-F1's fix made one level up: compute the answer rather
   /// than enumerate the ways of getting it wrong.
+  /// The narrowing is [UriBasedDirective], **not a list of the two subtypes that
+  /// happen to implement it today.** Raised as a non-blocking review note after
+  /// round 5, and taken because it is the same mistake as R5-F1 one level down:
+  /// `is NamespaceDirective || is PartDirective` is exhaustive by *inspection of one
+  /// package version*, so a future `UriBasedDirective` subtype would be skipped in
+  /// silence — this file's signature failure. Asking the supertype is closed by
+  /// construction. Checked against `analyzer-12.1.0`'s own hierarchy rather than
+  /// assumed: `NamespaceDirectiveImpl` and `PartDirectiveImpl` both extend
+  /// `UriBasedDirectiveImpl`, and `PartOfDirectiveImpl` extends `DirectiveImpl`
+  /// directly — so this covers exactly what the enumeration did, and keeps covering
+  /// whatever is added.
   Iterable<(int, String)> directiveUris(String source) sync* {
     final unit = parseString(content: source, throwIfDiagnostics: false).unit;
     for (final directive in unit.directives) {
+      if (directive is! UriBasedDirective) continue;
       final line = unit.lineInfo.getLocation(directive.offset).lineNumber;
+      final uri = directive.uri.stringValue;
+      if (uri != null) yield (line, uri);
+      // Every `if (…)` configuration too — which is where R3-F1's fake-bearing URI
+      // hid. Only `import`/`export` can carry them, so the narrowing stays here.
       if (directive is NamespaceDirective) {
-        // `import` and `export`, including every `if (…)` configuration — which is
-        // where R3-F1's fake-bearing URI hid.
-        final uri = directive.uri.stringValue;
-        if (uri != null) yield (line, uri);
         for (final configuration in directive.configurations) {
           final conditional = configuration.uri.stringValue;
           if (conditional != null) yield (line, conditional);
         }
-      } else if (directive is PartDirective) {
-        final uri = directive.uri.stringValue;
-        if (uri != null) yield (line, uri);
       }
     }
   }
@@ -776,6 +785,47 @@ void main() {
         fakeBearing,
         contains('lib/engines/fakes/fake_llm_engine.dart'),
         reason: 'the fake itself must be discovered',
+      );
+    });
+
+    // **`throwIfDiagnostics: false` fails open, and nothing used to notice.** Raised
+    // as a non-blocking review note after round 5 and taken, because the failure mode
+    // it describes is the one this file specialises in: a file the parser cannot read
+    // yields whatever `unit.directives` survived recovery, and the scan reports it
+    // clean — silently, with the suite green.
+    //
+    // It is not reachable today (syntax garbage still recovers directives, and
+    // `flutter analyze` gates malformed source anyway), which is why it was a note
+    // and not a finding. But `analyzer` is pinned `^12.1.0` against an SDK constraint
+    // of `^3.12.2` and those move independently: a language feature the bundled front
+    // end accepts and analyzer 12 does not would degrade this guard to silence. This
+    // converts that degradation into a failing test.
+    //
+    // Kept as a separate assertion rather than a throw inside [directiveUris],
+    // deliberately — the probe trees deliberately feed it malformed source (P2/P2b
+    // are *about* recovery), so the parse must stay tolerant. What must not be
+    // tolerant is the parse of the **real tree**, which is what this asserts.
+    test('the parser reads every real production file without recovering', () {
+      final unreadable = <String, List<String>>{};
+      for (final entity in Directory('lib').listSync(recursive: true)) {
+        if (entity is! File || !entity.path.endsWith('.dart')) continue;
+        final result = parseString(
+          content: entity.readAsStringSync(),
+          throwIfDiagnostics: false,
+        );
+        if (result.errors.isNotEmpty) {
+          unreadable[entity.path.replaceAll(r'\', '/')] = result.errors
+              .map((e) => e.message)
+              .toList();
+        }
+      }
+
+      expect(
+        unreadable,
+        isEmpty,
+        reason:
+            'a file the parser cannot read is scanned from a recovered AST, so its '
+            'directives are whatever survived — the guard would pass in silence',
       );
     });
   });
