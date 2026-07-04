@@ -1886,25 +1886,45 @@ code that has to be true for it. It is the same rule
 `ModelProvisioningController` already writes down for a download that failed its
 digest: "a retry moves the same gigabytes and fails the same way."
 
-**How much of that is bound by a test, stated exactly.** Two of the eleven sites
-have a guard that fails when the policy is deleted, and they were chosen because
-they carry the load: `seedOutcomeProvider` (a build counter over a malformed asset)
-and `modelInstallStatusProvider` (a build counter over a `MissingPluginException`
-from `modelStorageProvider`, which is the failure every host widget test actually
-hits, and the site whose own doc makes the strongest behavioural claim — that the
-banner would otherwise sit on "Checking model…" for half a minute before reporting a
-status it says must be distinguishable from ready and absent). `agentEngineProvider`
-is bound incidentally, by two tests that would time out without it.
+**How much of that is bound by a test, measured site by site.** Every one of the
+eleven `retry: noRetry` sites was mutated individually — the policy deleted, the
+whole relevant suite run — at the tree this paragraph ships with. Six die, five
+survive:
 
-The remaining sites — `appDatabaseProvider`, `seededDatabaseProvider`,
-`retrievalRouterProvider`, `toolRegistryProvider`, `modelStorageProvider`,
-`inferenceConfigProvider`, `deviceLlmEngineProvider` — are **not** individually
-bound: deleting `retry: noRetry` from any one of them leaves the suite green,
-because each is either upstream or downstream of a site that is bound and its own
-failure path has no test that reaches it. Measured one site at a time, not assumed.
-The first version of this paragraph said "bound by a test that counts provider
-builds" without qualification, which was true of one site out of eleven — review
-finding R0-F4.
+| bound (deleting `noRetry` fails a test) | unbound (deleting it leaves the suite green) |
+|---|---|
+| `seedOutcomeProvider` (4 tests) | `appDatabaseProvider` |
+| `seededDatabaseProvider` (1) | `retrievalRouterProvider` |
+| `modelStorageProvider` (1) | `toolRegistryProvider` |
+| `modelProvisionerProvider` (1) | `inferenceConfigProvider` |
+| `modelInstallStatusProvider` (1) | `deviceLlmEngineProvider` |
+| `agentEngineProvider` (2) | |
+
+The two that matter most are bound deliberately, by build counters:
+`seedOutcomeProvider` over a malformed asset, and `modelInstallStatusProvider` over
+a `MissingPluginException` from `modelStorageProvider` — the failure every host
+widget test actually hits, and the site whose own doc makes the strongest claim in
+the set (that the banner would otherwise sit on "Checking model…" for half a minute
+before reporting a status it says must be distinguishable from ready and absent).
+The other four die as a side effect of those two counters and of tests that would
+time out without the policy.
+
+The five survivors are recorded rather than engineered around: each is upstream or
+downstream of a bound site, and no test reaches its own failure path. They are not
+*wrong* — the policy is right at every site, for the reason above — they are
+**unguarded**, which is a different and smaller claim than the one this paragraph
+first made. The first version said "bound by a test that counts provider builds"
+with no qualifier, which was true of exactly one site out of eleven (review finding
+R0-F4).
+
+One methodological note, because it nearly produced a false table. Seven of these
+eleven mutations initially came back **`NO_OP`** — a bug in the script that
+generated them meant the edit did not change the file at all. The harness reports
+that as its own status rather than as `SURVIVED`, which is the distinction Task 1.9
+built it for: *a survivor is evidence about the tests only once the edit is
+confirmed to change something.* Filed as survivors, they would have produced a
+published claim that nine of eleven sites were unbound, from seven measurements
+that never ran.
 
 ### Two things a host test cannot tell you, found by watching tests fail
 
