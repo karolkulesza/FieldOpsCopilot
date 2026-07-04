@@ -2042,6 +2042,33 @@ Four things worth stating at the width they were actually measured:
   therefore remains formally unmeasured**, and closing it needs a token count from
   the runtime rather than another run.
 
+**These two runs are of the code as it stood at `8ca9e6c`, not as it ships**, and
+the gap is named rather than left to be inferred. Review round 0 produced changes
+after them, and the demo iPad then dropped to wireless tethering, where
+`flutter test` cannot launch (`Cannot start app on wirelessly tethered iOS device`)
+and `flutter run --publish-port` fails at mDNS VM-service discovery. A cable is
+needed and was not available, so a third run is **owed**. What that costs, split by
+what the figures actually depend on:
+
+* **Still valid, because nothing in the change touches them.** Every number in the
+  table above comes from the model, the inference isolate and the database — the
+  load time and its stall, the flow's elapsed time and worst gap, the answer text
+  and its length, the seed outcome, the stop reason. None of the round-0 changes
+  goes near the isolate, the runtime, the prompt or the database. Run 2 also
+  exercised the per-frame no-animation guard as it ships (60 frames).
+* **Unrun on device, and this is what a third run is for.** Three of the round-0
+  changes are *rendering* and only a device shows them under a real answer: the
+  Markdown formatter, the streaming auto-scroll, and the outcome panel's colour and
+  icon coming from `isDiagnosis`. Plus TC-UI-DEMO-01's own new assertion — that the
+  panel shows the *formatted* answer and no raw `**` — has never executed.
+* **The one thing that would have failed on device and was caught by reading
+  instead.** The Markdown fix broke the old `find.text(job.displayText)` assertion:
+  `find.text` matches a `Text.rich` by `textSpan.toPlainText()`, i.e. the text after
+  the delimiters were consumed, so it compared formatted against raw. The host suite
+  could not see it, because every rendering fixture used markup-free answer text.
+  Fixed on both sides and bound by a host test carrying the real answer shape — but
+  it is the clearest evidence that a rendering change wants a rendering run.
+
 One consistency check fell out of it: the answer was **1401 characters in both
 runs, and 1401 characters in Task 1.9's hand-built device harness** for the same
 inquiry. Decoding is greedy, so identical output is expected from an identical
