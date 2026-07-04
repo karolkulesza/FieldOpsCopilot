@@ -923,8 +923,11 @@ void main() {
     // Production wires its graph by *declaring* providers, never by overriding them.
     // Overriding is a test's tool, and the doc has said so in prose since round 0 —
     // "the fake is still exactly one line away from any *test* that wants it … a
-    // deliberate act in a test file". It had simply never been asserted, and it is the
-    // single statement every exploit needed.
+    // deliberate act in a test file". It had simply never been asserted, and it was
+    // the statement all seven exploits *known at the time* went through — not, as an
+    // earlier version of this line said, the one every exploit needs. See the group
+    // doc above: a scripted engine returned from `agentEngineProvider`'s own body
+    // needs no override at all, and is caught by the contract sink instead.
     //
     // No allow-list, deliberately: there is nothing to allow today, and the first
     // production override should be a conversation rather than an entry in a set.
