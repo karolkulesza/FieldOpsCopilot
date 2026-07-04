@@ -15,9 +15,11 @@ import 'package:flutter_test/flutter_test.dart';
 /// branch. It cannot bind the property the whole design exists for — that the UI
 /// isolate's 1445–1728ms stall lands while a *static* row is on screen rather than
 /// an animated one — because there is no stall on the host. That splits two ways
-/// and both halves are covered somewhere: the widget half (nothing animates in the
-/// loading subtree) is in `test/views/diagnose_screen_test.dart`, and the device
-/// half is `integration_test/demo_flow_test.dart`.
+/// and both halves are covered somewhere: the widget half (no `ProgressIndicator`
+/// anywhere in the tree while the loading state is injected) is in
+/// `test/views/diagnose_screen_test.dart`, and the device half — the same check on
+/// every frame of the real 7.8-second load — is
+/// `integration_test/demo_flow_test.dart`.
 ///
 /// The engines here wrap `FakeLlmEngine` rather than replacing it, for the reason
 /// Task 1.9's `_RecordingEngine` gives: Task 1.8 made the fake enforce every rule

@@ -142,6 +142,10 @@ void main() {
       // timer on the UI isolate across the wait is what turns Task 1.8's stall
       // measurement into a statement about *this* flow: the stall is the same
       // stall, but here it lands while the static "loading" row is on screen.
+      // Counted so the per-frame assertion below cannot pass by never running — a
+      // guard that was never evaluated is not a guard, and this one is checked on
+      // every frame of a multi-second wait.
+      var loadingFrames = 0;
       final loadProbe = await _UiIsolateProbe.measure(() async {
         await _pumpUntil(
           tester,
@@ -150,6 +154,23 @@ void main() {
                   is! EngineLoading &&
               container.read(engineWarmupControllerProvider) is! EngineIdle,
           const Duration(minutes: 4),
+          onFrame: () {
+            if (container.read(engineWarmupControllerProvider)
+                is! EngineLoading) {
+              return;
+            }
+            loadingFrames++;
+            // The load is where Task 1.8 measured 1445-1728ms of blocked UI
+            // isolate. The whole design is that it lands behind a *static* row, so
+            // this is asserted on the device, while the stall is happening, rather
+            // than inferred from the state afterwards: a frozen indicator reads as
+            // a crashed app.
+            expect(
+              find.byWidgetPredicate((widget) => widget is ProgressIndicator),
+              findsNothing,
+              reason: 'frame $loadingFrames of the load must not animate',
+            );
+          },
         );
       });
       final warmup = container.read(engineWarmupControllerProvider);
@@ -162,13 +183,14 @@ void main() {
       await tester.pump();
       expect(find.text('On-device model ready'), findsOneWidget);
 
-      // The load is where Task 1.8 measured 1445-1728ms of blocked UI isolate. The
-      // point of the design is that it lands behind a *static* row, so assert the
-      // structural property here too — on the device, where the stall is real.
+      // The per-frame assertion above is worthless if it never ran. A load that took
+      // 7822ms on the demo device cannot have produced zero loading frames, so a
+      // zero here means the probe missed the state, not that the screen was clean.
+      debugPrint('[TC-UI-DEMO-01] asserted over $loadingFrames loading frames');
       expect(
-        find.byWidgetPredicate((widget) => widget is ProgressIndicator),
-        findsNothing,
-        reason: 'a frozen indicator reads as a crash; nothing here may animate',
+        loadingFrames,
+        greaterThan(0),
+        reason: 'the no-animation guard must have been evaluated while loading',
       );
 
       // --- the demo itself ------------------------------------------------------
@@ -255,22 +277,33 @@ void main() {
   );
 }
 
-/// Pumps until [condition] holds, or fails after [limit].
+/// Pumps until [condition] holds, or fails after [limit], running [onFrame] after
+/// every pumped frame.
 ///
 /// `pumpAndSettle` cannot be used: tokens arriving keep scheduling frames for
 /// seconds, so it would either return early or run to its own deadline. This polls
 /// the condition between frames, which is what "wait for the model" actually means.
+///
+/// [onFrame] exists so an assertion can be made about frames *during* the wait
+/// rather than about the state after it. That distinction is the whole reason it is
+/// here: the first version of this file asserted "no `ProgressIndicator` while the
+/// weights load" *after* the wait returned, i.e. once the state was already
+/// `EngineReady` — a correct check described at the wrong width, which is the
+/// failure mode this project keeps recording. The stall is only observable while it
+/// is happening.
 Future<void> _pumpUntil(
   WidgetTester tester,
   bool Function() condition,
-  Duration limit,
-) async {
+  Duration limit, {
+  void Function()? onFrame,
+}) async {
   final deadline = Stopwatch()..start();
   while (!condition()) {
     if (deadline.elapsed > limit) {
       fail('timed out after ${limit.inSeconds}s waiting for the condition');
     }
     await tester.pump(const Duration(milliseconds: 50));
+    onFrame?.call();
     // Real work — the isolate handshake, sqlite3, the token stream — needs the real
     // event loop, which a pumped frame alone does not give it.
     await tester.runAsync(

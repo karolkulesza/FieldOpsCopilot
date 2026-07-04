@@ -27,8 +27,14 @@
 ///    implementation, and it is worth stating because a spinner is the reflex:
 ///    what stalls is the UI isolate, so a progress indicator displayed *during*
 ///    the load freezes with it, and a frozen indicator reads as a crash. So
-///    [EngineLoading] is rendered as a static row — see `diagnose_screen.dart`,
-///    where a test asserts no `ProgressIndicator` is in that subtree.
+///    [EngineLoading] is rendered as a static row — see `diagnose_screen.dart`.
+///    Bound in two places, at the width each can actually reach:
+///    `diagnose_screen_test.dart` asserts no `ProgressIndicator` exists anywhere in
+///    the tree while this state is injected, and `demo_flow_test.dart` asserts the
+///    same on **every frame of the real load** on the device, where the stall is
+///    real. (Both say "anywhere in the tree", not "in that subtree" as this comment
+///    first did — scoping the search would exempt whatever widget acquired an
+///    indicator by accident.)
 ///
 /// The state below is set to [EngineLoading] *before* the load is awaited, so the
 /// frame showing the static row is scheduled and painted on the other side of an
