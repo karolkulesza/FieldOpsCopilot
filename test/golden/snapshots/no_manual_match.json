@@ -1,0 +1,62 @@
+{
+  "scenario": "no_manual_match",
+  "inquiry": "escalator handrail torn",
+  "retrieval": {
+    "entryIds": [],
+    "codeHitIds": [],
+    "ftsHitIds": [],
+    "resolvedCodes": [],
+    "unresolvedCodes": [],
+    "searchedTerms": [
+      "escalator",
+      "handrail",
+      "torn"
+    ]
+  },
+  "result": {
+    "stopReason": "answered",
+    "turnCount": 1,
+    "isComplete": true,
+    "answer": [
+      "The offline manual has no entry for an escalator handrail fault. Please read the exact fault code from the controller so I can look it up."
+    ]
+  },
+  "turns": [
+    {
+      "index": 0,
+      "prompt": [
+        "You are an offline Field Service Assistant.",
+        "Based ONLY on the verified technical manual document below, answer the user's inquiry and formulate a repair plan.",
+        "If parts are required, you MUST call the \"get_local_parts_inventory(sku)\" tool to check warehouse stock.",
+        "",
+        "[MANUAL DOCUMENT]",
+        "No matching entry was found in the local service manual for this inquiry.",
+        "Do not invent a procedure, a part number, a tool or a fault code, and do not call any tool. Tell the technician that the offline manual has no entry for this fault and ask for the exact fault code shown on the controller.",
+        "",
+        "[USER INQUIRY]",
+        "\"escalator handrail torn\""
+      ],
+      "text": [
+        "The offline manual has no entry for an escalator handrail fault. Please read the exact fault code from the controller so I can look it up."
+      ],
+      "textScannedForCall": true,
+      "requestedWork": false,
+      "invocations": [],
+      "rejectedCalls": []
+    }
+  ],
+  "events": [
+    {
+      "event": "turnStarted",
+      "index": 0
+    },
+    {
+      "event": "token",
+      "text": "The offline manual has no entry for an escalator handrail fault. Please read the exact fault code from the controller so I can look it up."
+    },
+    {
+      "event": "completed",
+      "stopReason": "answered"
+    }
+  ]
+}
