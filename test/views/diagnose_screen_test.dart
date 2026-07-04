@@ -977,18 +977,127 @@ void main() {
         greaterThan(0),
         reason: 'the fixture must actually overflow, or this proves nothing',
       );
-      // Within a line of the bottom rather than exactly at it, and the tolerance is
-      // a property of the design rather than a fudge: the jump runs in a post-frame
-      // callback, so it targets the extent as measured *by the frame that grew the
-      // text*. Measured lag on this fixture is 16px against a ~1690px extent. While
-      // tokens stream that self-corrects on the next one; the residue is only ever
-      // the final growth, which leaves the end of the answer on screen.
-      expect(after.offset, closeTo(after.position.maxScrollExtent, 24));
+      // **Exact equality**, which is review finding R1-F4. This was
+      // `closeTo(…, 24)`, justified by a "measured lag on this fixture of 16px" —
+      // and the reviewer showed the assertion holds exactly, so the tolerance was
+      // 24px of slack guarding nothing. The 16px was real when I saw it but was an
+      // artefact of the fixture at the time, which re-pumped the whole tree instead
+      // of pushing state through the notifier; that fixture no longer exists, so
+      // neither does the lag. A tolerance justified by an unreproducible number is
+      // the species of claim round 0 was about.
+      expect(after.offset, after.position.maxScrollExtent);
+    });
+
+    // **The property the code claimed and did not have** — review finding R1-F1.
+    // The reviewer's probe: scroll to the top mid-generation, push one more token,
+    // and the panel returned to exactly `maxScrollExtent`. A technician re-reading a
+    // procedure while the answer is still arriving was yanked back on every token.
+    testWidgets('a reader who scrolls up mid-generation is not yanked back', (
+      tester,
+    ) async {
+      final long = List.generate(80, (i) => 'Procedure step $i.').join('\n');
+      // Started short and *grown*, because the follow triggers on an update rather
+      // than a first build — a panel that opens with long text has nothing that grew
+      // and correctly stays put. My first version asserted the precondition on a
+      // first build and failed on it.
+      final container = await pumpState(
+        tester,
+        job: const FieldJobState(
+          phase: FieldJobPhase.thinking,
+          inquiry: 'cabin vibrating, E-102',
+          streamedText: 'Isolate the main power bus.',
+        ),
+      );
+      await pushJob(
+        tester,
+        container,
+        FieldJobState(
+          phase: FieldJobPhase.thinking,
+          inquiry: 'cabin vibrating, E-102',
+          streamedText: long,
+        ),
+      );
+
+      // Following, as it should be.
+      final atBottom = _panelScrollController(tester);
+      expect(atBottom.position.maxScrollExtent, greaterThan(0));
+      expect(atBottom.offset, atBottom.position.maxScrollExtent);
+
+      // The technician scrolls up to re-read the earlier steps.
+      atBottom.jumpTo(0);
+      await tester.pump();
+      expect(_panelScrollController(tester).offset, 0);
+
+      // One more token arrives.
+      await pushJob(
+        tester,
+        container,
+        FieldJobState(
+          phase: FieldJobPhase.thinking,
+          inquiry: 'cabin vibrating, E-102',
+          streamedText: '$long\nProcedure step 80.',
+        ),
+      );
+
+      final after = _panelScrollController(tester);
       expect(
         after.offset,
-        greaterThan(after.position.maxScrollExtent * 0.5),
-        reason: 'a token gesture toward the bottom is not following the stream',
+        0,
+        reason:
+            'the reader scrolled deliberately; the stream must not overrule it',
       );
+      expect(
+        after.position.maxScrollExtent,
+        greaterThan(0),
+        reason:
+            'the content still grew, so the follow was skipped rather than '
+            'having nothing to do',
+      );
+    });
+
+    // And the follow resumes once the reader returns to the bottom — otherwise the
+    // guard above would be a one-way door out of following the stream.
+    testWidgets('scrolling back to the bottom resumes the follow', (
+      tester,
+    ) async {
+      final long = List.generate(80, (i) => 'Procedure step $i.').join('\n');
+      final container = await pumpState(
+        tester,
+        job: const FieldJobState(
+          phase: FieldJobPhase.thinking,
+          inquiry: 'cabin vibrating, E-102',
+          streamedText: 'Isolate the main power bus.',
+        ),
+      );
+      await pushJob(
+        tester,
+        container,
+        FieldJobState(
+          phase: FieldJobPhase.thinking,
+          inquiry: 'cabin vibrating, E-102',
+          streamedText: long,
+        ),
+      );
+
+      _panelScrollController(tester).jumpTo(0);
+      await tester.pump();
+      _panelScrollController(
+        tester,
+      ).jumpTo(_panelScrollController(tester).position.maxScrollExtent);
+      await tester.pump();
+
+      await pushJob(
+        tester,
+        container,
+        FieldJobState(
+          phase: FieldJobPhase.thinking,
+          inquiry: 'cabin vibrating, E-102',
+          streamedText: '$long\nProcedure step 80.',
+        ),
+      );
+
+      final after = _panelScrollController(tester);
+      expect(after.offset, after.position.maxScrollExtent);
     });
 
     // The two limits on the follow, both deliberate: a finished answer is left where

@@ -38,10 +38,21 @@
 /// renderer that silently drops a construct is worse than one that shows it, because
 /// the dropped text is invisible.
 ///
-/// The invariant that makes this safe, asserted directly by a test rather than
-/// argued here: **no character survives except a Markdown delimiter this function
-/// consumed.** Concatenating the spans' text yields the input with paired `**`
-/// removed and leading bullet markers rewritten, and nothing else changed.
+/// The invariant that makes this safe, **stated at the width the test actually
+/// asserts it** — review finding R1-F5: *no non-marker character is lost.* The test
+/// deletes every `*`, `-` and `•` from both the input and the rendered output and
+/// requires equality, so it is blind to *which* delimiters were consumed or
+/// rewritten and sensitive only to text going missing.
+///
+/// The wider sentence this used to carry — "the input with paired `**` removed and
+/// leading bullet markers rewritten, **and nothing else changed**" — does appear to
+/// be true of the code, but it is not what any test says, and the gap is reachable:
+/// making [_rewriteBullet] strip every `-` from the rest of a bullet line (so
+/// `*   BRK-990-XP` renders as `•   BRK990XP`) survived the whole suite, because
+/// hyphens are stripped from both sides of that comparison. There is now a
+/// marker-preserving case for exactly that, so the narrower statement above is the
+/// honest one *and* the hyphen hole is closed. Which delimiters get consumed is
+/// bound by the per-construct tests rather than by the invariant.
 library;
 
 import 'package:flutter/painting.dart';

@@ -338,17 +338,45 @@ class _ResultPanelState extends State<_ResultPanel> {
     super.dispose();
   }
 
+  /// A reader within this many pixels of the bottom counts as still following the
+  /// stream. Roughly two lines of `bodyLarge`, which is the smallest gap that is
+  /// plainly a deliberate scroll rather than a rounding artefact of the previous
+  /// jump.
+  static const double _followSlack = 48;
+
   @override
   void didUpdateWidget(_ResultPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Follow the text only while the run is in flight and only while it is
-    // *growing*. Two deliberate limits: a finished answer is left where the reader
-    // put it, and scrolling on any rebuild would fight a technician who has
-    // scrolled up to re-read the procedure mid-generation.
+    // Three conditions, and the third one is review finding **R1-F1**.
+    //
+    // The first two — the run is in flight, and the text actually *grew* — were
+    // here already. The comment also claimed a third property it did not
+    // implement: that a technician who scrolls up mid-generation is not yanked
+    // back. It was not true, and the review proved it rather than arguing it: with
+    // the panel scrolled to offset 0 mid-generation, one more token returned it to
+    // 1716.0, exactly `maxScrollExtent`. During generation the text grows on every
+    // token, so "grew" is satisfied constantly and the reader loses the scroll
+    // immediately.
+    //
+    // **At-bottom-ness has to be sampled here, before layout, and that is the whole
+    // subtlety.** The obvious guard — checking `offset` against `maxScrollExtent`
+    // inside the post-frame callback — is wrong and is caught by this file's own
+    // scroll test: by then the extent has already grown by the new text, so a reader
+    // sitting legitimately at the bottom *before* the update measures as one who has
+    // scrolled away, and the panel stops following at all. Sampled at this point the
+    // extent is still the pre-growth one, so the question asked is the right one:
+    // "was the reader at the bottom of what they could see?"
     if (!widget.job.isBusy) return;
     if (widget.job.displayText.length <= oldWidget.job.displayText.length) {
       return;
     }
+
+    // Nothing scrollable yet (the first tokens of a short answer) counts as at the
+    // bottom, which is what makes the panel follow from the start.
+    final wasAtBottom =
+        !_scroll.hasClients ||
+        _scroll.offset >= _scroll.position.maxScrollExtent - _followSlack;
+    if (!wasAtBottom) return;
 
     // After the frame, because the extent this jumps to does not exist until the
     // new text has been laid out. `jumpTo` rather than `animateTo`: an animation
