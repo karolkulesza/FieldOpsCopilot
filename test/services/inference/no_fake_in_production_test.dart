@@ -63,6 +63,11 @@ void main() {
   /// list it cannot acquire a hole by omission.
   const exemptPrefix = 'lib/engines/';
 
+  /// Comments are where the *reason* for this rule is written down, so they must be
+  /// able to name the class. Only code counts — and this is `startsWith`, not
+  /// `contains`, so a trailing `// …` cannot hide a live line (R2-F3).
+  bool isComment(String line) => line.startsWith('//');
+
   /// A code line that names a fake engine directly.
   bool namesAFake(String line) =>
       line.contains('FakeLlmEngine') || line.contains('engines/fakes/');
@@ -80,6 +85,43 @@ void main() {
   /// re-exporting the seam defeated a check that only looked for `import `.
   final directiveStart = RegExp(r'^(?:import|export|part)\s');
   final quotedUri = RegExp('''['"]([^'"]+)['"]''');
+
+  /// Every directive in [lines] as `(startIndex, wholeText)`, with continuation
+  /// lines joined.
+  ///
+  /// **Line-based matching is not enough, and this is review round 4's finding.**
+  /// A directive can wrap, and the fake-bearing URI then sits on a continuation
+  /// line that does not start with `import`:
+  ///
+  /// ```dart
+  /// import 'seam_stub.dart'
+  ///     if (dart.library.io) 'package:field_ops_copilot/engines/providers.dart';
+  /// ```
+  ///
+  /// The first line yields only the stub; the second is not a directive start, so a
+  /// per-line scan never sees the second URI at all. That is not a contrived
+  /// evasion — **`dart format` produces exactly this wrap**, and reports the file
+  /// above as already formatted, so it is what the toolchain does to any conditional
+  /// import with a long `package:` URI. Combined with `dart.library.io` being the
+  /// branch taken on iOS and Android, the miss was again on the device.
+  Iterable<(int, String)> directivesIn(List<String> lines) sync* {
+    for (var i = 0; i < lines.length; i++) {
+      final head = lines[i].trimLeft();
+      if (isComment(head) || !directiveStart.hasMatch(head)) continue;
+      final buffer = StringBuffer(head);
+      var j = i;
+      // Directives end at the first `;`. Bounded by the file, so a malformed
+      // source cannot spin.
+      while (!buffer.toString().contains(';') && j + 1 < lines.length) {
+        j++;
+        buffer
+          ..write(' ')
+          ..write(lines[j].trimLeft());
+      }
+      yield (i, buffer.toString());
+    }
+  }
+
   Iterable<String> directiveTargets({
     required String line,
     required String fromFile,
@@ -110,11 +152,6 @@ void main() {
         .whereType<String>()
         .map((path) => path.replaceAll(r'\', '/'));
   }
-
-  /// Comments are where the *reason* for this rule is written down, so they must be
-  /// able to name the class. Only code counts — and this is `startsWith`, not
-  /// `contains`, so a trailing `// …` cannot hide a live line (R2-F3).
-  bool isComment(String line) => line.startsWith('//');
 
   /// Offenders under [root], as `path -> [line numbers]`.
   ///
@@ -155,9 +192,9 @@ void main() {
       changed = false;
       for (final path in lines.keys) {
         if (!isExempt(path) || fakeBearing.contains(path)) continue;
-        final reachesOne = codeLines(path).any(
-          (line) => directiveTargets(
-            line: line,
+        final reachesOne = directivesIn(lines[path]!).any(
+          (directive) => directiveTargets(
+            line: directive.$2,
             fromFile: path,
             root: root,
           ).any(fakeBearing.contains),
@@ -179,18 +216,27 @@ void main() {
     final offenders = <String, List<int>>{};
     for (final entry in lines.entries) {
       if (isExempt(entry.key)) continue;
+      // Naming a fake is a per-line property.
       for (var i = 0; i < entry.value.length; i++) {
         final line = entry.value[i].trimLeft();
-        if (isComment(line)) continue;
+        if (isComment(line) || !namesAFake(line)) continue;
+        offenders.putIfAbsent(entry.key, () => []).add(i + 1);
+      }
+      // Reaching one is a per-*directive* property, because a directive can wrap.
+      // Reported at the line the directive starts on.
+      for (final directive in directivesIn(entry.value)) {
         final reachesOne = directiveTargets(
-          line: line,
+          line: directive.$2,
           fromFile: entry.key,
           root: root,
         ).any(fakeBearing.contains);
-        if (namesAFake(line) || reachesOne) {
-          offenders.putIfAbsent(entry.key, () => []).add(i + 1);
+        if (reachesOne) {
+          final at = directive.$1 + 1;
+          final found = offenders.putIfAbsent(entry.key, () => []);
+          if (!found.contains(at)) found.add(at);
         }
       }
+      offenders[entry.key]?.sort();
     }
     return offenders;
   }
@@ -355,6 +401,50 @@ void main() {
         [1],
         reason: 'the fake-bearing URI is the second one on the line',
       );
+    });
+
+    // **The wrapped directive — round 4's finding, and the one that matters most of
+    // these because the *formatter* produces it.** A conditional import with a long
+    // `package:` URI does not fit on one line, so `dart format` wraps it; the
+    // fake-bearing URI then sits on a continuation line that does not start with
+    // `import`, and a per-line scan never sees it. Verified against the real
+    // `lib/main.dart`, where `dart format` reported the wrapped file as *already
+    // formatted*.
+    test('it reads a directive that wraps across lines', () {
+      final root = probeTree('wrapped', {
+        'engines/providers.dart': 'final p = FakeLlmEngine();\n',
+        'seam_stub.dart': 'const stub = 0;\n',
+        // Exactly the shape `dart format` emits.
+        'main.dart':
+            "import 'seam_stub.dart'\n"
+            "    if (dart.library.io) "
+            "'package:field_ops_copilot/engines/providers.dart';\n",
+      });
+
+      expect(
+        scan(root: root, exempt: '$root/engines/')['$root/main.dart'],
+        [1],
+        reason:
+            'reported at the line the directive starts on, not the '
+            'continuation line that happens to carry the URI',
+      );
+    });
+
+    // The same wrap one level in: a *pass 1* file whose own directive wraps. If the
+    // closure read lines rather than directives, the chain would break here instead.
+    test('a wrapped directive inside the exemption still feeds pass 1', () {
+      final root = probeTree('wrapped_exempt', {
+        'engines/providers.dart': 'final p = FakeLlmEngine();\n',
+        'engines/stub.dart': 'const stub = 0;\n',
+        'engines/seam.dart':
+            "export 'stub.dart'\n"
+            "    if (dart.library.io) 'providers.dart';\n",
+        'main.dart': "import 'engines/seam.dart';\n",
+      });
+
+      expect(scan(root: root, exempt: '$root/engines/')['$root/main.dart'], [
+        1,
+      ]);
     });
 
     // **R3-F1's normalisation gap.** Relative URIs were normalised and `package:`
