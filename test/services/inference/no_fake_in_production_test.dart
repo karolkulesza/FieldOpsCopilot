@@ -61,9 +61,40 @@ import 'package:flutter_test/flutter_test.dart';
 /// *exemption* never acquired a hole — both R1-F3 and R2-F1 came from the other side
 /// of the boundary, which is the sentence the earlier version of this doc got wrong.
 void main() {
-  /// The one subtree allowed to name a fake. A closed set, and unlike an inclusion
-  /// list it cannot acquire a hole by omission.
+  /// The subtree production may not reach into, except for [openFiles].
   const exemptPrefix = 'lib/engines/';
+
+  /// **The only files inside the exemption production is allowed to reach**, each
+  /// with the reason it is allowed.
+  ///
+  /// This is the fix for review finding **R5-F1**, and it inverts the seed the same
+  /// way R2-F1 inverted the scanned set. Pass 1 used to ask *"does this exempt file
+  /// name a fake?"* — two string literals matched against line text. That found **2
+  /// of the 11 files** in `lib/engines/`, missed three of the four fakes outright,
+  /// and worked at all only because the seam happens to contain the literal
+  /// `FakeLlmEngine`. A fifth fake under any other name — the reviewer used
+  /// `ScriptedLlmEngine` — was invisible, and a `main.dart` binding it into
+  /// `agentEngineProvider` passed the whole suite with a scripted engine answering
+  /// every inquiry.
+  ///
+  /// So the question is no longer "which of these is a fake" (an open set, guessed
+  /// by name) but **"which of these may production touch"** (a closed set, three
+  /// files, each justified). Everything else under `lib/engines/` is off-limits
+  /// whether or not it names a fake, whether or not it is a fake at all.
+  ///
+  /// **It fails closed, which is the whole point.** Add a file to `lib/engines/` and
+  /// it is restricted by default: a new fake is covered automatically, and a new
+  /// *interface* produces a test failure telling you to justify it here. The old
+  /// seed failed open — forget the naming convention and the guard went quiet.
+  const openFiles = {
+    // The `LlmEngine` interface itself. Eleven production files import it; it
+    // declares no implementation.
+    'lib/engines/llm_engine.dart',
+    // `ToolDefinition` / `objectSchema`, which the registry and the tools need.
+    'lib/engines/tool_schema.dart',
+    // The device engine — the one implementation production is *supposed* to reach.
+    'lib/engines/impl/gemma_llm_engine.dart',
+  };
 
   /// Comments are where the *reason* for this rule is written down, so they must be
   /// able to name the class. Only code counts — and this is `startsWith`, not
@@ -147,7 +178,11 @@ void main() {
   ///
   /// Takes its root and exemption as parameters so the positive path is testable: a
   /// detector that has only ever returned empty is not a detector (R1-F2).
-  Map<String, List<int>> scan({required String root, required String exempt}) {
+  Map<String, List<int>> scan({
+    required String root,
+    required String exempt,
+    Set<String> open = const {},
+  }) {
     final sources = <String, String>{};
     for (final entity in Directory(root).listSync(recursive: true)) {
       if (entity is! File || !entity.path.endsWith('.dart')) continue;
@@ -156,41 +191,36 @@ void main() {
 
     bool isExempt(String path) => exempt.isNotEmpty && path.startsWith(exempt);
 
-    /// Lines of [path] that are code, for the names-a-fake check. Still a string
-    /// scan, because naming a fake is a lexical property and a comment mentioning
-    /// the class by name is legitimate — this file is full of them.
-    Iterable<String> codeLines(String path) => sources[path]!
-        .split('\n')
-        .map((line) => line.trimLeft())
-        .where((line) => !isComment(line));
-
     Iterable<String> reachedBy(String path) => directiveUris(sources[path]!)
         .map((d) => resolveUri(uri: d.$2, fromFile: path, root: root))
         .whereType<String>();
 
-    // **Pass 1 — the exempt files that bear a fake, to closure.**
+    // **Pass 1 — what inside the exemption production may not reach.**
     //
-    // A *fixed point*, not a single sweep (R3-F1): an exempt file that merely
-    // *reaches* a fake was invisible to both passes, because pass 2 skips it for
-    // being exempt and a one-sweep pass 1 only looked for a direct mention. Closure
-    // is what makes pass 2's non-transitivity sound — every path out of the
-    // exemption now terminates at a pass-1 member. Eleven files, so the cost is nil.
-    final fakeBearing = <String>{
+    // Everything under the exemption except [open], rather than "whatever names a
+    // fake" (R5-F1). Closed by construction and failing closed: a new file is
+    // restricted until someone justifies it.
+    final restricted = <String>{
       for (final path in sources.keys)
-        if (isExempt(path) && codeLines(path).any(namesAFake)) path,
+        if (isExempt(path) && !open.contains(path)) path,
     };
+
+    // The closure R3-F1 bought, applied to what remains: an *open* file that reaches
+    // a restricted one is itself restricted, so the three exceptions cannot be used
+    // as a doorway. Iterated, because an open file could reach another open file
+    // that later becomes restricted.
     for (var changed = true; changed;) {
       changed = false;
       for (final path in sources.keys) {
-        if (!isExempt(path) || fakeBearing.contains(path)) continue;
-        if (reachedBy(path).any(fakeBearing.contains)) {
-          fakeBearing.add(path);
+        if (!isExempt(path) || restricted.contains(path)) continue;
+        if (reachedBy(path).any(restricted.contains)) {
+          restricted.add(path);
           changed = true;
         }
       }
     }
 
-    // **Pass 2 — who names a fake, or reaches one of pass 1's files.**
+    // **Pass 2 — who names a fake, or reaches something restricted.**
     final offenders = <String, List<int>>{};
     void report(String path, int line) {
       final at = offenders.putIfAbsent(path, () => []);
@@ -199,17 +229,14 @@ void main() {
 
     for (final path in sources.keys) {
       if (isExempt(path)) continue;
-      // Naming a fake is a per-line property.
       final lines = sources[path]!.split('\n');
       for (var i = 0; i < lines.length; i++) {
         final line = lines[i].trimLeft();
         if (!isComment(line) && namesAFake(line)) report(path, i + 1);
       }
-      // Reaching one is a per-*directive* property, reported at the directive's
-      // own line, which the parser supplies rather than the scan guessing.
       for (final (line, uri) in directiveUris(sources[path]!)) {
         final target = resolveUri(uri: uri, fromFile: path, root: root);
-        if (target != null && fakeBearing.contains(target)) report(path, line);
+        if (target != null && restricted.contains(target)) report(path, line);
       }
       offenders[path]?.sort();
     }
@@ -231,7 +258,7 @@ void main() {
 
   test('no production file names a fake or reaches one', () {
     expect(
-      scan(root: 'lib', exempt: exemptPrefix),
+      scan(root: 'lib', exempt: exemptPrefix, open: openFiles),
       isEmpty,
       reason:
           'a production reference to a fake engine — directly, or through any '
@@ -258,6 +285,13 @@ void main() {
     // rather than being told about it.
     test('it reports a consumer of any fake-bearing exempt file', () {
       final root = probeTree('evidence_a', {
+        // The fake has to *exist* for the closure to have a restricted file to
+        // reach. Under the old name-based seed it did not — `demo_seam.dart` was
+        // seeded by containing the word — so this probe passed without the target
+        // being present. Inverting the seed to location made that latent
+        // incompleteness in the fixture visible, which is a better outcome than the
+        // seed staying name-based.
+        'engines/fakes/fake_llm_engine.dart': 'class FakeLlmEngine {}\n',
         'engines/demo_seam.dart':
             "import 'fakes/fake_llm_engine.dart';\n"
             'final demoEngineProvider = Provider((ref) => FakeLlmEngine());\n',
@@ -266,7 +300,12 @@ void main() {
             'void main() {}\n',
       });
 
-      final found = scan(root: root, exempt: '$root/engines/');
+      // `demo_seam.dart` declared **open**, so only the closure can flag it.
+      final found = scan(
+        root: root,
+        exempt: '$root/engines/',
+        open: {'$root/engines/demo_seam.dart'},
+      );
 
       expect(
         found['$root/main.dart'],
@@ -310,9 +349,16 @@ void main() {
             "import 'package:field_ops_copilot/engines/providers.dart';\n",
       });
 
-      expect(scan(root: root, exempt: '$root/engines/')['$root/main.dart'], [
-        1,
-      ]);
+      // `seam.dart` open, so the wrapped directive *inside* it is what has to be
+      // read for the closure to fire at all.
+      expect(
+        scan(
+          root: root,
+          exempt: '$root/engines/',
+          open: {'$root/engines/seam.dart', '$root/engines/stub.dart'},
+        )['$root/main.dart'],
+        [1],
+      );
     });
 
     // **R3-F1's wrapper — the shape that broke the transitivity argument.** An
@@ -351,8 +397,17 @@ void main() {
         'main.dart': "import 'engines/hop2.dart';\n",
       });
 
+      // Both hops declared **open**, so the location seed does not flag them and
+      // only an *iterating* closure reaches `providers.dart` and drags them back
+      // in. Without this the test flags by location and says nothing about the
+      // closure — which is what it did for one commit after the seed was inverted,
+      // caught by disabling the closure and finding this test still green.
       expect(
-        scan(root: root, exempt: '$root/engines/')['$root/main.dart'],
+        scan(
+          root: root,
+          exempt: '$root/engines/',
+          open: {'$root/engines/hop1.dart', '$root/engines/hop2.dart'},
+        )['$root/main.dart'],
         [1],
         reason:
             'two hops inside the exemption, so a single sweep is not enough',
@@ -532,13 +587,134 @@ void main() {
 
     // A non-fake-bearing file inside the exemption may be imported freely — the
     // real graph does exactly this for `llm_engine.dart` and `gemma_llm_engine.dart`.
-    test('importing an exempt file that bears no fake is not an offence', () {
+    test('importing an OPEN exempt file is not an offence', () {
       final root = probeTree('innocent', {
         'engines/llm_engine.dart': 'abstract class LlmEngine {}\n',
         'main.dart': "import 'engines/llm_engine.dart';\n",
       });
 
-      expect(scan(root: root, exempt: '$root/engines/'), isEmpty);
+      expect(
+        scan(
+          root: root,
+          exempt: '$root/engines/',
+          open: {'$root/engines/llm_engine.dart'},
+        ),
+        isEmpty,
+        reason: 'the interface is what production is supposed to import',
+      );
+    });
+
+    // …and the same file, *not* declared open, is off-limits. This is R5-F1's
+    // inversion in one pair: membership of the open set is the whole question, and
+    // nothing about the file's name or contents enters into it.
+    test('the same import IS an offence when the file is not open', () {
+      final root = probeTree('not_open', {
+        'engines/llm_engine.dart': 'abstract class LlmEngine {}\n',
+        'main.dart': "import 'engines/llm_engine.dart';\n",
+      });
+
+      expect(scan(root: root, exempt: '$root/engines/')['$root/main.dart'], [
+        1,
+      ]);
+    });
+  });
+
+  group('R5-F1: the seed is a closed set, and it fails closed', () {
+    // The reviewer's shape: a fifth engine that never contains the word the old
+    // seed looked for, outside `fakes/`, bound into `agentEngineProvider` from
+    // `main.dart`. Under the name-matching seed this passed the entire suite with a
+    // scripted engine answering every technician inquiry.
+    test('a fake under a novel name, outside fakes/, is still restricted', () {
+      final root = probeTree('novel_name', {
+        'engines/llm_engine.dart': 'abstract class LlmEngine {}\n',
+        'engines/scripted_engine.dart':
+            "import 'llm_engine.dart';\n"
+            'class ScriptedLlmEngine implements LlmEngine {}\n',
+        'main.dart': "import 'engines/scripted_engine.dart';\n",
+      });
+
+      expect(
+        scan(
+          root: root,
+          exempt: '$root/engines/',
+          open: {'$root/engines/llm_engine.dart'},
+        )['$root/main.dart'],
+        [1],
+        reason:
+            'nothing here spells "Fake"; membership of the open set is what '
+            'decides, not the name',
+      );
+    });
+
+    // **Fails closed.** A new file in the exemption is restricted before anyone has
+    // looked at it, so forgetting to classify one makes the guard *stricter*. The
+    // old seed failed open: forget the naming convention and it went quiet.
+    test('a brand-new exempt file is restricted by default', () {
+      final root = probeTree('newcomer', {
+        'engines/llm_engine.dart': 'abstract class LlmEngine {}\n',
+        'engines/newcomer.dart': 'const somethingHarmless = 0;\n',
+        'main.dart': "import 'engines/newcomer.dart';\n",
+      });
+
+      expect(
+        scan(
+          root: root,
+          exempt: '$root/engines/',
+          open: {'$root/engines/llm_engine.dart'},
+        )['$root/main.dart'],
+        [1],
+        reason: 'nothing suspicious in the file at all — that is the point',
+      );
+    });
+
+    // The open set is a doorway only for itself: an open file that reaches a
+    // restricted one becomes restricted, which is R3-F1's closure surviving the
+    // seed's inversion.
+    test('an open file that reaches a restricted one loses its exemption', () {
+      final root = probeTree('open_doorway', {
+        'engines/secret.dart': 'class ScriptedLlmEngine {}\n',
+        'engines/llm_engine.dart':
+            "export 'secret.dart';\n"
+            'abstract class LlmEngine {}\n',
+        'main.dart': "import 'engines/llm_engine.dart';\n",
+      });
+
+      expect(
+        scan(
+          root: root,
+          exempt: '$root/engines/',
+          open: {'$root/engines/llm_engine.dart'},
+        )['$root/main.dart'],
+        [1],
+        reason: 'declaring a file open cannot launder what it re-exports',
+      );
+    });
+
+    // The real tree's classification, asserted rather than assumed — the old seed
+    // found 2 of 11 and missed three of the four fakes, and nothing said so.
+    test('every fake in the real tree is restricted', () {
+      final fakes = Directory('lib/engines/fakes')
+          .listSync()
+          .whereType<File>()
+          .map((f) => f.path.replaceAll(r'\', '/'))
+          .where((path) => path.endsWith('.dart'))
+          .toList();
+
+      expect(fakes, hasLength(4), reason: 'four fakes ship today');
+      for (final fake in fakes) {
+        expect(openFiles, isNot(contains(fake)), reason: fake);
+      }
+      expect(openFiles, isNot(contains('lib/engines/providers.dart')));
+    });
+
+    // The open set is three files and growing it must be a deliberate, visible
+    // edit — each entry carries its justification in the constant's doc.
+    test('the open set is exactly the three production needs', () {
+      expect(openFiles, {
+        'lib/engines/llm_engine.dart',
+        'lib/engines/tool_schema.dart',
+        'lib/engines/impl/gemma_llm_engine.dart',
+      });
     });
   });
 
