@@ -54,6 +54,37 @@ void main() {
       expect(provisioned.last.id, ModelCatalog.sttZipformerId);
     });
 
+    test('pinFingerprint moves when any member pin moves', () {
+      // The controller's sticky-rejection rule compares this string; a
+      // fingerprint that ignored a member would keep a set blocked after the
+      // operator corrected exactly the pin that was wrong.
+      ModelDescriptor withPins(List<String> pins) => ModelDescriptor.fileSet(
+        id: 'set',
+        displayName: 'Set',
+        licensePage: 'https://example.invalid',
+        files: [
+          for (final (i, pin) in pins.indexed)
+            ModelArtifactFile(fileName: 'f$i', sha256Hex: pin),
+        ],
+      );
+
+      final base = withPins(['a' * 64, 'b' * 64, 'c' * 64]);
+      expect(
+        base.pinFingerprint,
+        withPins(['a' * 64, 'b' * 64, 'c' * 64]).pinFingerprint,
+      );
+      // Each member participates — including the last.
+      for (var i = 0; i < 3; i++) {
+        final pins = ['a' * 64, 'b' * 64, 'c' * 64];
+        pins[i] = 'd' * 64;
+        expect(
+          withPins(pins).pinFingerprint,
+          isNot(base.pinFingerprint),
+          reason: 'member $i must be part of the fingerprint',
+        );
+      }
+    });
+
     test('every STT download URL points at the repository the licence page '
         'names', () {
       final stt = ModelCatalog.byId(ModelCatalog.sttZipformerId)!;
