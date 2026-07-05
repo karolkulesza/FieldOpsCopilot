@@ -151,6 +151,7 @@ void main() {
       () async {
         final descriptor = descriptorWith();
         await storage.prepare();
+        await storage.installDir(descriptor).create(recursive: true);
         await storage.installedFile(descriptor).writeAsBytes(fixtureBytes);
 
         final downloader = _ScriptedDownloader(body: fixtureBytes);
@@ -176,6 +177,7 @@ void main() {
     test('a side-loaded file that does not match the pin is deleted', () async {
       final descriptor = descriptorWith();
       await storage.prepare();
+      await storage.installDir(descriptor).create(recursive: true);
       await storage
           .installedFile(descriptor)
           .writeAsBytes(utf8.encode('truncated copy'));
@@ -270,13 +272,18 @@ void main() {
     });
 
     test('a truncated-looking hash is not accepted as a pin', () {
-      expect(descriptorWith(sha256Hex: 'abc123').hasPinnedHash, isFalse);
       expect(
-        descriptorWith(sha256Hex: fixtureDigest.toUpperCase()).hasPinnedHash,
+        descriptorWith(sha256Hex: 'abc123').soleFile.hasPinnedHash,
+        isFalse,
+      );
+      expect(
+        descriptorWith(
+          sha256Hex: fixtureDigest.toUpperCase(),
+        ).soleFile.hasPinnedHash,
         isFalse,
         reason: 'callers normalize with ModelDescriptor.normalizeHash first',
       );
-      expect(descriptorWith().hasPinnedHash, isTrue);
+      expect(descriptorWith().soleFile.hasPinnedHash, isTrue);
     });
 
     test('normalizeHash accepts what the shasum tools actually print', () {
@@ -292,10 +299,11 @@ void main() {
 
     test('catalog resolution overlays the build-time source and hash', () {
       final base = ModelCatalog.byId(ModelCatalog.gemma4E2bId)!;
-      // Shipped catalog entries carry no URL and no hash: both are deployment
-      // inputs, so the artifact is unprovisionable until they are supplied.
-      expect(base.downloadUri, isNull);
-      expect(base.hasPinnedHash, isFalse);
+      // Shipped Gemma catalog entries carry no URL and no hash: both are
+      // deployment inputs, so the artifact is unprovisionable until they are
+      // supplied.
+      expect(base.soleFile.downloadUri, isNull);
+      expect(base.soleFile.hasPinnedHash, isFalse);
       expect(base.configurationIssue, ModelConfigurationIssue.missingSource);
 
       final resolved = ModelCatalog.resolve(
@@ -304,14 +312,14 @@ void main() {
         sha256Hex: fixtureDigest.toUpperCase(),
       );
       expect(
-        resolved.downloadUri,
+        resolved.soleFile.downloadUri,
         Uri.parse('https://example.invalid/gemma.litertlm'),
       );
-      expect(resolved.sha256Hex, fixtureDigest);
+      expect(resolved.soleFile.sha256Hex, fixtureDigest);
       expect(resolved.configurationIssue, isNull);
       // Identity and layout survive the overlay.
       expect(resolved.id, base.id);
-      expect(resolved.fileName, base.fileName);
+      expect(resolved.soleFile.fileName, base.soleFile.fileName);
     });
   });
 
@@ -483,7 +491,9 @@ void main() {
       await storage.prepare();
       // A directory sitting where the artifact belongs makes the atomic rename
       // fail — the stand-in for a full disk or a permissions change.
-      await Directory(storage.installedFile(descriptor).path).create();
+      await Directory(
+        storage.installedFile(descriptor).path,
+      ).create(recursive: true);
 
       final provisioner = ModelProvisioner(
         storage: storage,
@@ -695,6 +705,7 @@ void main() {
       () async {
         final descriptor = descriptorWith();
         await storage.prepare();
+        await storage.installDir(descriptor).create(recursive: true);
         await storage
             .installedFile(descriptor)
             .writeAsBytes(utf8.encode('rotted bytes'));
@@ -763,6 +774,7 @@ void main() {
       () async {
         final descriptor = descriptorWith();
         await storage.prepare();
+        await storage.installDir(descriptor).create(recursive: true);
         await storage.installedFile(descriptor).writeAsBytes(fixtureBytes);
         // Same digest and size, different model id — e.g. a renamed catalog entry.
         await storage
@@ -900,15 +912,17 @@ void main() {
       () async {
         final descriptor = descriptorWith();
         await storage.prepare();
-        // What a killed process leaves behind: a partial body under the bare
-        // suffix (an older build) and under a nonce (this one). Neither carries
-        // resumable state.
-        await storage
-            .stagingFile(descriptor)
-            .writeAsBytes(utf8.encode('leftover partial body'));
-        await storage
-            .stagingFile(descriptor, nonce: '999-0')
-            .writeAsBytes(utf8.encode('another abandoned transfer'));
+        // What a killed process leaves behind: a partial staging directory
+        // under the bare suffix (an older build) and under a nonce (this one).
+        // Neither carries resumable state.
+        await storage.stagingDir(descriptor).create(recursive: true);
+        await File(
+          '${storage.stagingDir(descriptor).path}/partial.litertlm',
+        ).writeAsBytes(utf8.encode('leftover partial body'));
+        await storage.stagingDir(descriptor, nonce: '999-0').create();
+        await File(
+          '${storage.stagingDir(descriptor, nonce: '999-0').path}/w.litertlm',
+        ).writeAsBytes(utf8.encode('another abandoned transfer'));
         expect(await _stagingLeftovers(storage, descriptor), hasLength(2));
 
         final provisioner = ModelProvisioner(
@@ -1008,6 +1022,7 @@ void main() {
       () async {
         final descriptor = descriptorWith();
         await storage.prepare();
+        await storage.installDir(descriptor).create(recursive: true);
         await storage.installedFile(descriptor).writeAsBytes(fixtureBytes);
 
         final provisioner = ModelProvisioner(
@@ -1077,6 +1092,7 @@ void main() {
       () async {
         final descriptor = descriptorWith();
         await storage.prepare();
+        await storage.installDir(descriptor).create(recursive: true);
         await storage.installedFile(descriptor).writeAsBytes(fixtureBytes);
         await storage.receiptFile(descriptor).writeAsString('{not json');
 
@@ -1125,10 +1141,10 @@ const _sourceUrl = 'https://example.invalid/gemma.litertlm';
 List<String> _nonceBatch(int count) =>
     List.generate(count, (_) => ModelProvisioner.stagingNonce());
 
-/// Every staging file left in the model directory for [descriptor], whatever its
-/// nonce.
+/// Every staging directory left in the models root for [descriptor], whatever
+/// its nonce.
 ///
-/// Asserting on `storage.stagingFile(descriptor)` alone would be checking a path
+/// Asserting on `storage.stagingDir(descriptor)` alone would be checking a path
 /// nothing writes any more — transfers stage under `.part.<nonce>` — which is
 /// exactly the "green for an unrelated reason" trap.
 Future<List<String>> _stagingLeftovers(
@@ -1136,11 +1152,11 @@ Future<List<String>> _stagingLeftovers(
   ModelDescriptor descriptor,
 ) async {
   if (!await storage.root.exists()) return const [];
-  final prefix = '${descriptor.fileName}${ModelStorage.stagingSuffix}';
+  final prefix = '${descriptor.id}${ModelStorage.stagingSuffix}';
   return storage.root
       .listSync()
-      .whereType<File>()
-      .map((f) => f.uri.pathSegments.last)
+      .whereType<Directory>()
+      .map((d) => d.uri.pathSegments.where((s) => s.isNotEmpty).last)
       .where((name) => name.startsWith(prefix))
       .toList();
 }
