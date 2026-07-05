@@ -19,19 +19,36 @@ enum ModelProvisionPhase {
 }
 
 /// A progress sample from a provisioning run.
+///
+/// [processedBytes] and [totalBytes] are aggregated **across the whole file
+/// set** — the UI's bar describes the model, not whichever file happens to be in
+/// flight. [fileIndex]/[fileCount] say which file that is, so a multi-file
+/// download can be labelled "file 2 of 4" without a second callback shape.
 class ModelProvisionProgress {
   const ModelProvisionProgress({
     required this.phase,
     required this.processedBytes,
     this.totalBytes,
+    this.fileIndex = 1,
+    this.fileCount = 1,
   });
 
   final ModelProvisionPhase phase;
+
+  /// Bytes finished so far across the set: every completed file plus the bytes
+  /// of the file in flight.
   final int processedBytes;
 
-  /// Expected total, or `null` when it is genuinely unknown (a server that
-  /// declared no `Content-Length` and a descriptor with no documented size).
+  /// Expected total for the set, or `null` when it is genuinely unknown for any
+  /// file (a server that declared no `Content-Length` and a descriptor with no
+  /// documented size — one such file makes the whole total a guess).
   final int? totalBytes;
+
+  /// 1-based position of the file in flight within the set.
+  final int fileIndex;
+
+  /// Number of files in the set.
+  final int fileCount;
 
   /// Completed share of the phase in `0.0..1.0`, or `null` when [totalBytes] is
   /// unknown — the UI then shows an indeterminate indicator rather than a
@@ -44,7 +61,8 @@ class ModelProvisionProgress {
 
   @override
   String toString() =>
-      'ModelProvisionProgress(${phase.name}, $processedBytes/$totalBytes)';
+      'ModelProvisionProgress(${phase.name}, $processedBytes/$totalBytes, '
+      'file $fileIndex/$fileCount)';
 }
 
 /// Reports provisioning progress. Called synchronously, once per chunk.
@@ -58,10 +76,10 @@ sealed class ModelProvisionResult {
 
 /// How a [ModelVerified] result established its integrity.
 enum ModelVerificationSource {
-  /// A receipt from an earlier verification vouched for the file.
+  /// Receipts from an earlier verification vouched for every file.
   receipt,
 
-  /// A file that was already on disk was hashed now (side-loaded weights, or an
+  /// Files that were already on disk were hashed now (side-loaded weights, or an
   /// install whose receipt was missing).
   existingFile,
 
@@ -69,25 +87,53 @@ enum ModelVerificationSource {
   download,
 }
 
-/// The artifact is installed and its bytes hash to the pinned digest.
-final class ModelVerified extends ModelProvisionResult {
-  const ModelVerified({
+/// One installed, verified file of a model.
+final class VerifiedArtifact {
+  const VerifiedArtifact({
+    required this.fileName,
     required this.file,
     required this.sha256Hex,
     required this.sizeBytes,
+  });
+
+  final String fileName;
+  final File file;
+  final String sha256Hex;
+  final int sizeBytes;
+}
+
+/// Every file of the model is installed and hashes to its pinned digest.
+final class ModelVerified extends ModelProvisionResult {
+  const ModelVerified({
+    required this.artifacts,
     required this.source,
     required this.excludedFromBackup,
   });
 
-  final File file;
-  final String sha256Hex;
-  final int sizeBytes;
+  /// One entry per file of the set, in descriptor order.
+  final List<VerifiedArtifact> artifacts;
+
   final ModelVerificationSource source;
 
   /// Whether the storage directory is genuinely marked no-backup. Reported
   /// rather than assumed, so the app never claims a platform guarantee it did not
   /// obtain.
   final bool excludedFromBackup;
+
+  /// Total installed size across the set.
+  int get sizeBytes =>
+      artifacts.fold(0, (total, artifact) => total + artifact.sizeBytes);
+
+  /// The one artifact of a single-file model — the LLM call sites. Throws
+  /// [StateError] on a multi-file result rather than guessing which file the
+  /// caller meant.
+  VerifiedArtifact get soleArtifact => artifacts.single;
+
+  /// [soleArtifact]'s installed file. Single-file models only.
+  File get file => soleArtifact.file;
+
+  /// [soleArtifact]'s digest. Single-file models only.
+  String get sha256Hex => soleArtifact.sha256Hex;
 }
 
 /// Which bytes a result is about.
@@ -102,17 +148,25 @@ enum ModelByteOrigin {
 
 /// Bytes were obtained but do not hash to the pinned digest.
 ///
+/// Names the offending [fileName], because a set fails one file at a time and
+/// "the model is corrupt" would send the operator hashing four files to find the
+/// one this code already knows.
+///
 /// [origin] matters to whoever reads this: bytes *fetched* and failing the pin
 /// means the URL and hash disagree, while an *installed file* failing it usually
 /// means the pin moved and the old artifact is still there.
 final class ModelCorrupt extends ModelProvisionResult {
   const ModelCorrupt({
+    required this.fileName,
     required this.expectedSha256Hex,
     required this.actualSha256Hex,
     required this.sizeBytes,
     required this.origin,
     required this.quarantined,
   });
+
+  /// The file whose bytes failed the pin.
+  final String fileName;
 
   final String expectedSha256Hex;
   final String actualSha256Hex;
@@ -129,17 +183,25 @@ final class ModelCorrupt extends ModelProvisionResult {
   final bool quarantined;
 }
 
-/// The artifact could not be fetched at all — transport error or an HTTP status
+/// A file could not be fetched at all — transport error or an HTTP status
 /// that is not `200`.
 final class ModelDownloadFailed extends ModelProvisionResult {
-  const ModelDownloadFailed({required this.message, this.statusCode});
+  const ModelDownloadFailed({
+    required this.message,
+    this.statusCode,
+    this.fileName,
+  });
 
   final String message;
   final int? statusCode;
+
+  /// The file whose transfer failed, when the failure is attributable to one.
+  final String? fileName;
 }
 
 /// Provisioning was refused because the build carries no usable source or no
-/// pinned hash. Never a network or disk failure — always a configuration one.
+/// pinned hash for at least one file. Never a network or disk failure — always
+/// a configuration one.
 final class ModelNotConfigured extends ModelProvisionResult {
   const ModelNotConfigured({required this.issue, required this.descriptor});
 
@@ -147,35 +209,48 @@ final class ModelNotConfigured extends ModelProvisionResult {
   final ModelDescriptor descriptor;
 }
 
-/// Nothing is installed. Only returned by
-/// [ModelProvisioner.verifyInstalled], which checks what is there rather than
-/// fetching what is not.
+/// The set is not fully installed — at least one required file is missing. Only
+/// returned by [ModelProvisioner.verifyInstalled], which checks what is there
+/// rather than fetching what is not; `provision()` is the operation that
+/// completes an incomplete set.
 final class ModelAbsent extends ModelProvisionResult {
   const ModelAbsent();
 }
 
-/// Downloads, verifies and installs on-device model weights.
+/// Downloads, verifies and installs on-device model weights — one file or a
+/// set, all-or-nothing either way.
 ///
 /// The order of operations is the whole point of this class:
 ///
-/// 1. bytes stream to a per-transfer `.part.<nonce>` staging file, never to the
-///    final path;
-/// 2. the SHA-256 is computed **during** that stream, so a 2.6GB artifact is
-///    neither buffered in memory nor read twice;
-/// 3. only a digest matching the pinned hash earns the atomic rename into place;
+/// 1. every file streams to a per-transfer `<id>.part.<nonce>/` staging
+///    directory, never to the final path;
+/// 2. each file's SHA-256 is computed **during** its stream, so a 2.6GB artifact
+///    is neither buffered in memory nor read twice;
+/// 3. only after **every** file's digest matches its pin does anything move: the
+///    staged files are renamed into the install directory one by one, each an
+///    atomic replace, and each earns its receipt as it lands;
 /// 4. fetched bytes that fail are deleted, and operations on one model are
 ///    serialised so two callers cannot interleave into each other's files.
 ///
 /// That sequence is what makes "the model is ready" a claim about verified bytes
-/// rather than about a file that happens to exist. It is also the client half of
-/// the OTA-model-delivery design in the README: the server half (bucket layout,
-/// device-capability-based selection, staged rollout) is narrated, not built.
+/// rather than about files that happen to exist — and it is why a transfer that
+/// dies on file 3 of 4 installs *nothing*, leaving whatever was installed before
+/// untouched (TC-PROV-SET-02). The rename pass does mean a crash *between two
+/// renames* can leave a mixed set on disk; that is not a lying state — the new
+/// files have no receipts yet, so the set reads `unverified`, and the next
+/// provision re-hashes in place, keeps what matches and re-fetches what does not.
+///
+/// It is also the client half of the OTA-model-delivery design in the README:
+/// the server half (bucket layout, device-capability-based selection, staged
+/// rollout) is narrated, not built.
 class ModelProvisioner {
   ModelProvisioner({
-    required this._storage,
+    required ModelStorage storage,
     ModelDownloader? downloader,
-    this._authToken,
-  }) : _downloader = downloader ?? HttpModelDownloader();
+    String? authToken,
+  }) : _storage = storage,
+       _downloader = downloader ?? HttpModelDownloader(),
+       _authToken = authToken;
 
   final ModelStorage _storage;
   final ModelDownloader _downloader;
@@ -211,24 +286,26 @@ class ModelProvisioner {
       '$pid-${DateTime.now().microsecondsSinceEpoch}-'
       '${_stagingRandom.nextInt(1 << 32)}';
 
-  /// The current install state of [descriptor], answered from the receipt
+  /// The current install state of [descriptor], answered from the receipts
   /// without hashing — cheap enough for a startup path and for the UI's
   /// "model ready" indicator.
   Future<ModelInstallStatus> statusOf(ModelDescriptor descriptor) =>
       _storage.statusOf(descriptor);
 
   /// Ensures verified weights for [descriptor] are installed, downloading them
-  /// when what is on disk does not satisfy the pinned hash.
+  /// when what is on disk does not satisfy the pinned hashes.
   ///
-  /// Idempotent: with a valid receipt in place it does no I/O beyond the status
+  /// Idempotent: with valid receipts in place it does no I/O beyond the status
   /// check, so calling it on every launch is fine. Side-loaded weights (copied
   /// onto the device by hand for a demo) are hashed in place instead of being
   /// re-downloaded — and only if that hash *fails* is a download started, which is
-  /// also the ordinary model-upgrade path when the pin moves to a new revision.
+  /// also the ordinary model-upgrade path when a pin moves to a new revision.
   ///
   /// Calls for the same model are **serialised** (see [_serialized]); overlapping
   /// callers do not race, and the second one usually finds the first one's result
-  /// already installed.
+  /// already installed. Two *different* models do not queue behind each other —
+  /// the queue is per id — which is what lets the STT set download while the LLM
+  /// verifies.
   Future<ModelProvisionResult> provision(
     ModelDescriptor descriptor, {
     ModelProvisionProgressCallback? onProgress,
@@ -254,11 +331,18 @@ class ModelProvisioner {
 
     switch (status) {
       case ModelInstallStatus.ready:
-        final installed = _storage.installedFile(descriptor);
         return ModelVerified(
-          file: installed,
-          sha256Hex: descriptor.sha256Hex,
-          sizeBytes: await installed.length(),
+          artifacts: [
+            for (final file in descriptor.files)
+              VerifiedArtifact(
+                fileName: file.fileName,
+                file: _storage.installedFile(descriptor, file),
+                sha256Hex: file.sha256Hex,
+                sizeBytes: await _storage
+                    .installedFile(descriptor, file)
+                    .length(),
+              ),
+          ],
           source: ModelVerificationSource.receipt,
           excludedFromBackup: excludedFromBackup,
         );
@@ -273,7 +357,7 @@ class ModelProvisioner {
           // fails the current pin is that the pin moved to a new revision, and
           // deleting the working old weights before the replacement exists would
           // strip an offline device of the only model it has. The download below
-          // replaces it by atomic rename if and only if the new bytes verify.
+          // replaces them by atomic rename if and only if the new bytes verify.
           quarantineOnMismatch: false,
           onProgress: onProgress,
         );
@@ -300,7 +384,7 @@ class ModelProvisioner {
   /// the loser's still-open sink went on writing into the artifact the winner had
   /// just installed — so the digest that earned the rename described bytes that
   /// were no longer on disk, and `statusOf` reported `ready` for them. Unique
-  /// staging names (see [ModelStorage.stagingFile]) make that impossible; this
+  /// staging names (see [ModelStorage.stagingDir]) make that impossible; this
   /// queue additionally stops the redundant work, so the second caller simply sees
   /// the first one's verified install.
   ///
@@ -310,7 +394,7 @@ class ModelProvisioner {
   /// queue — a second isolate as much as a second process — still interleave. That
   /// is no longer a *corrupting* interleave, because [stagingNonce] makes their
   /// staging paths disjoint and each transfer hashes and renames its own complete
-  /// file; what remains is that the surviving receipt could describe the other
+  /// files; what remains is that a surviving receipt could describe the other
   /// run's artifact, if the two runs pinned different hashes and their bodies
   /// happened to be the same length. A lock file shared through the filesystem is
   /// the fix if that ever becomes real.
@@ -331,19 +415,20 @@ class ModelProvisioner {
     });
   }
 
-  /// Re-hashes the installed artifact, ignoring any receipt.
+  /// Re-hashes every installed file, ignoring any receipt.
   ///
-  /// This is the explicit integrity check — the receipt is a cache, and a cache
+  /// This is the explicit integrity check — a receipt is a cache, and a cache
   /// cannot detect bytes that rotted after it was written (a truncated copy, a
-  /// failing flash cell). Returns [ModelAbsent] when nothing is installed, and
-  /// quarantines the file on mismatch exactly as a fresh download would.
+  /// failing flash cell). Returns [ModelAbsent] when any required file is
+  /// missing, and quarantines an offending file on mismatch exactly as a fresh
+  /// download would.
   Future<ModelProvisionResult> verifyInstalled(
     ModelDescriptor descriptor, {
     ModelProvisionProgressCallback? onProgress,
   }) {
-    // A source URL is irrelevant here — nothing is fetched — but a pinned hash
-    // is the entire operation.
-    if (!descriptor.hasPinnedHash) {
+    // A source URL is irrelevant here — nothing is fetched — but the pinned
+    // hashes are the entire operation.
+    if (descriptor.files.any((file) => !file.hasPinnedHash)) {
       return Future.value(
         ModelNotConfigured(
           issue: ModelConfigurationIssue.unpinnedHash,
@@ -354,12 +439,16 @@ class ModelProvisioner {
     // Same queue as [provision]: hashing a file while a download is renaming over
     // it would report on bytes that no longer exist.
     return _serialized(descriptor, () async {
-      if (!await _storage.installedFile(descriptor).exists()) {
+      final excludedFromBackup = await _storage.prepare();
+      // `prepare` before the existence check, not after: `statusOf` (via
+      // `_storage`) also runs the legacy-layout migration, and checking a path
+      // the migration is about to populate would report absence over presence.
+      if (await _storage.statusOf(descriptor) == ModelInstallStatus.absent) {
         return const ModelAbsent();
       }
       return _verifyExisting(
         descriptor,
-        excludedFromBackup: await _storage.prepare(),
+        excludedFromBackup: excludedFromBackup,
         // The explicit check *is* the operation, so a mismatch is quarantined
         // here: there is no replacement download coming that might need the old
         // bytes kept.
@@ -372,224 +461,333 @@ class ModelProvisioner {
   /// Releases the downloader's transport resources.
   void dispose() => _downloader.close();
 
-  /// Hashes an artifact that is already on disk and files a receipt for it, or
-  /// reports [ModelCorrupt] when the digest does not match.
+  /// Hashes every file already on disk and files a receipt for each, or reports
+  /// [ModelCorrupt] for the first file whose digest does not match.
   ///
-  /// [quarantineOnMismatch] decides whether the offending file is deleted. The
-  /// receipt is dropped either way: whatever it once vouched for, it does not
-  /// vouch for a file that just failed the pin.
+  /// Receipts are written file-by-file as each verifies, so a set that fails on
+  /// its last file keeps the verifications it earned — the next pass re-hashes
+  /// only what is still unvouched.
+  ///
+  /// [quarantineOnMismatch] decides whether an offending file is deleted. Its
+  /// stale receipt is dropped either way: whatever it once vouched for, it does
+  /// not vouch for a file that just failed the pin.
   Future<ModelProvisionResult> _verifyExisting(
     ModelDescriptor descriptor, {
     required bool excludedFromBackup,
     required bool quarantineOnMismatch,
     ModelProvisionProgressCallback? onProgress,
   }) async {
-    final file = _storage.installedFile(descriptor);
-    final totalBytes = await file.length();
+    final files = descriptor.files;
+    final lengths = [
+      for (final file in files)
+        await _storage.installedFile(descriptor, file).length(),
+    ];
+    final totalBytes = lengths.fold(0, (a, b) => a + b);
+    var completedBytes = 0;
 
-    final digest = await _hashFile(
-      file,
-      onBytes: (processed) => onProgress?.call(
-        ModelProvisionProgress(
-          phase: ModelProvisionPhase.verifying,
-          processedBytes: processed,
-          totalBytes: totalBytes,
+    final artifacts = <VerifiedArtifact>[];
+    for (var i = 0; i < files.length; i++) {
+      final file = files[i];
+      final installed = _storage.installedFile(descriptor, file);
+
+      final digest = await _hashFile(
+        installed,
+        onBytes: (processed) => onProgress?.call(
+          ModelProvisionProgress(
+            phase: ModelProvisionPhase.verifying,
+            processedBytes: completedBytes + processed,
+            totalBytes: totalBytes,
+            fileIndex: i + 1,
+            fileCount: files.length,
+          ),
         ),
-      ),
-    );
+      );
+      completedBytes += lengths[i];
 
-    if (digest != descriptor.sha256Hex) {
-      // Whatever the receipt once described, it does not describe a file that
-      // just failed the pin.
-      await _dropReceipt(descriptor);
-      return ModelCorrupt(
-        expectedSha256Hex: descriptor.sha256Hex,
-        actualSha256Hex: digest,
-        sizeBytes: totalBytes,
-        origin: ModelByteOrigin.installedFile,
-        quarantined: quarantineOnMismatch && await _quarantine(descriptor),
+      if (digest != file.sha256Hex) {
+        final quarantined =
+            quarantineOnMismatch && await _quarantineFile(descriptor, file);
+        // Whatever this file's receipt once described, it does not describe a
+        // file that just failed the pin. The set-mates that already verified
+        // keep theirs.
+        await _dropStaleReceipts(descriptor);
+        return ModelCorrupt(
+          fileName: file.fileName,
+          expectedSha256Hex: file.sha256Hex,
+          actualSha256Hex: digest,
+          sizeBytes: lengths[i],
+          origin: ModelByteOrigin.installedFile,
+          quarantined: quarantined,
+        );
+      }
+
+      await _storage.writeReceipt(
+        descriptor,
+        file: file,
+        sha256Hex: digest,
+        sizeBytes: lengths[i],
+      );
+      artifacts.add(
+        VerifiedArtifact(
+          fileName: file.fileName,
+          file: installed,
+          sha256Hex: digest,
+          sizeBytes: lengths[i],
+        ),
       );
     }
 
-    await _storage.writeReceipt(
-      descriptor,
-      sha256Hex: digest,
-      sizeBytes: totalBytes,
-    );
     return ModelVerified(
-      file: file,
-      sha256Hex: digest,
-      sizeBytes: totalBytes,
+      artifacts: artifacts,
       source: ModelVerificationSource.existingFile,
       excludedFromBackup: excludedFromBackup,
     );
   }
 
-  /// Streams the artifact to staging while hashing it, then installs it only if
-  /// the digest matches.
+  /// Streams every file of the set to a staging directory while hashing it,
+  /// then installs the set only if every digest matches.
   Future<ModelProvisionResult> _downloadAndInstall(
     ModelDescriptor descriptor, {
     required bool excludedFromBackup,
     ModelProvisionProgressCallback? onProgress,
   }) async {
-    // A staging path unique to this transfer, so no two transfers can ever share
-    // a sink or delete each other's bytes — see [ModelStorage.stagingFile].
-    final staging = _storage.stagingFile(descriptor, nonce: stagingNonce());
+    // A staging directory unique to this transfer, so no two transfers can ever
+    // share a sink or delete each other's bytes — see [ModelStorage.stagingDir].
+    final staging = _storage.stagingDir(descriptor, nonce: stagingNonce());
     // Leftovers from an interrupted run carry no resumable state, so they are
     // swept rather than accumulated (a half-written 2.6GB file is real disk
-    // pressure). Ours is spared by name. Note this unlinks a staging file another
-    // writer may still be filling — POSIX allows that — which kills their transfer
-    // at rename time rather than sparing it; see
-    // [ModelStorage.deleteStagingFiles]. Harmless but not polite, and it cannot
+    // pressure). Ours is spared by name. Note this unlinks a staging directory
+    // another writer may still be filling — POSIX allows that — which kills their
+    // transfer at rename time rather than sparing it; see
+    // [ModelStorage.deleteStagingDirs]. Harmless but not polite, and it cannot
     // happen between two callers of this instance, which the queue serialises.
-    await _storage.deleteStagingFiles(descriptor, keep: staging);
-
-    final ModelByteStream source;
+    await _storage.deleteStagingDirs(descriptor, keep: staging);
     try {
-      source = await _downloader.open(
-        descriptor.downloadUri!,
-        authToken: _authToken,
-      );
-    } on ModelDownloadException catch (error) {
-      return ModelDownloadFailed(
-        message: error.message,
-        statusCode: error.statusCode,
-      );
-    } on SocketException catch (error) {
-      return ModelDownloadFailed(message: 'network error: ${error.message}');
-    } on HttpException catch (error) {
-      return ModelDownloadFailed(message: 'http error: ${error.message}');
-    }
-
-    final declaredTotal = source.contentLength;
-    final progressTotal = declaredTotal ?? descriptor.approximateSizeBytes;
-
-    final collector = _DigestCollector();
-    final hasher = sha256.startChunkedConversion(collector);
-    var received = 0;
-
-    try {
-      final sink = staging.openWrite();
-      try {
-        await for (final chunk in source.bytes) {
-          sink.add(chunk);
-          hasher.add(chunk);
-          received += chunk.length;
-          onProgress?.call(
-            ModelProvisionProgress(
-              phase: ModelProvisionPhase.downloading,
-              processedBytes: received,
-              totalBytes: progressTotal,
-            ),
-          );
-        }
-        await sink.flush();
-      } finally {
-        await sink.close();
-      }
-    } on Exception catch (error) {
-      await _deleteIfExists(staging);
-      return ModelDownloadFailed(message: 'transfer failed: $error');
-    }
-
-    // A body that does not match the length the server declared is a transfer
-    // fault, not corruption — naming it correctly keeps the operator from
-    // re-checking a hash that was never the problem. Short and long are named
-    // separately because they have different causes (a dropped connection versus
-    // a mis-declared or transport-encoded body).
-    if (declaredTotal != null && received != declaredTotal) {
-      await _deleteIfExists(staging);
-      return ModelDownloadFailed(
-        message: received < declaredTotal
-            ? 'truncated transfer: received $received of $declaredTotal bytes'
-            : 'over-long transfer: received $received bytes, '
-                  'server declared $declaredTotal',
-      );
-    }
-
-    hasher.close();
-    final digest = collector.digest.toString();
-
-    if (digest != descriptor.sha256Hex) {
-      // The staging file is the only thing to remove — an artifact already
-      // installed at the target path is deliberately left alone, so a device that
-      // cannot fetch a valid replacement is not stripped of the weights it has.
-      // The receipt still goes: it cannot vouch for anything now.
-      final removed = await _deleteIfExists(staging);
-      await _dropReceipt(descriptor);
-      return ModelCorrupt(
-        expectedSha256Hex: descriptor.sha256Hex,
-        actualSha256Hex: digest,
-        sizeBytes: received,
-        origin: ModelByteOrigin.download,
-        quarantined: removed,
-      );
-    }
-
-    final installed = _storage.installedFile(descriptor);
-    try {
-      // Atomic swap. Replaces a stale artifact (a pin that moved) only now that
-      // the replacement has been proven byte-for-byte.
-      await staging.rename(installed.path);
+      await staging.create(recursive: true);
     } on FileSystemException catch (error) {
-      // Disk full, a permissions change, or another process having swept our
-      // staging file. Reported through the sealed result type rather than thrown:
-      // `provision` promises a `ModelProvisionResult`, and a caller forced to also
-      // catch `FileSystemException` is a caller that will forget to.
-      await _deleteIfExists(staging);
       return ModelDownloadFailed(
         message:
-            'install failed: could not move the verified file into place '
+            'install failed: could not create the staging directory '
             '(${error.osError?.message ?? error.message})',
       );
     }
-    await _storage.writeReceipt(
-      descriptor,
-      sha256Hex: digest,
-      sizeBytes: received,
-    );
+
+    final files = descriptor.files;
+    // Expected size per file, best knowledge first: the server's declared
+    // `Content-Length` once its transfer opens, the documented size until then.
+    // The set's total is the sum — and it is only a total at all when every
+    // file has *some* expectation, otherwise the honest fraction is none.
+    final expected = [for (final file in files) file.approximateSizeBytes];
+    int? totalBytes() {
+      var total = 0;
+      for (final size in expected) {
+        if (size == null) return null;
+        total += size;
+      }
+      return total;
+    }
+
+    var completedBytes = 0;
+    final staged = <({String fileName, String digest, int sizeBytes})>[];
+
+    for (var i = 0; i < files.length; i++) {
+      final file = files[i];
+
+      final ModelByteStream source;
+      try {
+        source = await _downloader.open(
+          file.downloadUri!,
+          authToken: _authToken,
+        );
+      } on ModelDownloadException catch (error) {
+        await _deleteStaging(staging);
+        return ModelDownloadFailed(
+          message: '${file.fileName}: ${error.message}',
+          statusCode: error.statusCode,
+          fileName: file.fileName,
+        );
+      } on SocketException catch (error) {
+        await _deleteStaging(staging);
+        return ModelDownloadFailed(
+          message: '${file.fileName}: network error: ${error.message}',
+          fileName: file.fileName,
+        );
+      } on HttpException catch (error) {
+        await _deleteStaging(staging);
+        return ModelDownloadFailed(
+          message: '${file.fileName}: http error: ${error.message}',
+          fileName: file.fileName,
+        );
+      }
+
+      final declaredTotal = source.contentLength;
+      if (declaredTotal != null) expected[i] = declaredTotal;
+
+      final collector = _DigestCollector();
+      final hasher = sha256.startChunkedConversion(collector);
+      var received = 0;
+      final stagedFile = File('${staging.path}/${file.fileName}');
+
+      try {
+        final sink = stagedFile.openWrite();
+        try {
+          await for (final chunk in source.bytes) {
+            sink.add(chunk);
+            hasher.add(chunk);
+            received += chunk.length;
+            onProgress?.call(
+              ModelProvisionProgress(
+                phase: ModelProvisionPhase.downloading,
+                processedBytes: completedBytes + received,
+                totalBytes: totalBytes(),
+                fileIndex: i + 1,
+                fileCount: files.length,
+              ),
+            );
+          }
+          await sink.flush();
+        } finally {
+          await sink.close();
+        }
+      } on Exception catch (error) {
+        await _deleteStaging(staging);
+        return ModelDownloadFailed(
+          message: '${file.fileName}: transfer failed: $error',
+          fileName: file.fileName,
+        );
+      }
+
+      // A body that does not match the length the server declared is a transfer
+      // fault, not corruption — naming it correctly keeps the operator from
+      // re-checking a hash that was never the problem. Short and long are named
+      // separately because they have different causes (a dropped connection versus
+      // a mis-declared or transport-encoded body).
+      if (declaredTotal != null && received != declaredTotal) {
+        await _deleteStaging(staging);
+        return ModelDownloadFailed(
+          message: received < declaredTotal
+              ? '${file.fileName}: truncated transfer: received $received of '
+                    '$declaredTotal bytes'
+              : '${file.fileName}: over-long transfer: received $received '
+                    'bytes, server declared $declaredTotal',
+          fileName: file.fileName,
+        );
+      }
+
+      hasher.close();
+      final digest = collector.digest.toString();
+
+      if (digest != file.sha256Hex) {
+        // The staging directory is the only thing to remove — artifacts already
+        // installed at the target path are deliberately left alone, so a device
+        // that cannot fetch a valid replacement is not stripped of the weights it
+        // has. Stale receipts still go: they cannot vouch for anything now.
+        final removed = await _deleteStaging(staging);
+        await _dropStaleReceipts(descriptor);
+        return ModelCorrupt(
+          fileName: file.fileName,
+          expectedSha256Hex: file.sha256Hex,
+          actualSha256Hex: digest,
+          sizeBytes: received,
+          origin: ModelByteOrigin.download,
+          quarantined: removed,
+        );
+      }
+
+      expected[i] = received;
+      completedBytes += received;
+      staged.add((
+        fileName: file.fileName,
+        digest: digest,
+        sizeBytes: received,
+      ));
+    }
+
+    // Every file verified; only now does anything touch the install directory.
+    // Each rename is an atomic replace of that file, and each file's receipt is
+    // written as it lands — a crash mid-pass leaves new files without receipts,
+    // which reads `unverified` and re-hashes cheaply, never `ready` over bytes
+    // nothing vouched for.
+    final artifacts = <VerifiedArtifact>[];
+    try {
+      await _storage.installDir(descriptor).create(recursive: true);
+      for (var i = 0; i < files.length; i++) {
+        final file = files[i];
+        final installed = _storage.installedFile(descriptor, file);
+        await File('${staging.path}/${file.fileName}').rename(installed.path);
+        await _storage.writeReceipt(
+          descriptor,
+          file: file,
+          sha256Hex: staged[i].digest,
+          sizeBytes: staged[i].sizeBytes,
+        );
+        artifacts.add(
+          VerifiedArtifact(
+            fileName: file.fileName,
+            file: installed,
+            sha256Hex: staged[i].digest,
+            sizeBytes: staged[i].sizeBytes,
+          ),
+        );
+      }
+    } on FileSystemException catch (error) {
+      // Disk full, a permissions change, or another process having swept our
+      // staging directory. Reported through the sealed result type rather than
+      // thrown: `provision` promises a `ModelProvisionResult`, and a caller
+      // forced to also catch `FileSystemException` is a caller that will forget
+      // to. Receipts for files that did land were already written and are true;
+      // the set as a whole reads `unverified` or `absent`, never `ready`.
+      await _deleteStaging(staging);
+      await _dropStaleReceipts(descriptor);
+      return ModelDownloadFailed(
+        message:
+            'install failed: could not move the verified files into place '
+            '(${error.osError?.message ?? error.message})',
+      );
+    }
+    await _deleteStaging(staging);
 
     return ModelVerified(
-      file: installed,
-      sha256Hex: digest,
-      sizeBytes: received,
+      artifacts: artifacts,
       source: ModelVerificationSource.download,
       excludedFromBackup: excludedFromBackup,
     );
   }
 
-  /// Removes the receipt **unless it still vouches for what is on disk**.
+  /// Removes receipts that no longer vouch for what is on disk.
   ///
   /// The unconditional version of this was too broad: a failed transfer would
   /// invalidate the receipt of an artifact it never touched — say a bad mirror
   /// serving junk while a good copy is already installed — forcing a needless
-  /// re-hash of 2.6GB on the next launch. So the check is "does a valid receipt
-  /// describe the installed file right now?", which keeps the guarantee that
-  /// mattered (a receipt must never outlive the bytes it describes, or it would
-  /// bless the next same-sized file to appear at that path) without punishing an
-  /// install that is genuinely fine.
+  /// re-hash of 2.6GB on the next launch. So the check is per file, "does a
+  /// valid receipt describe this installed file right now?", which keeps the
+  /// guarantee that mattered (a receipt must never outlive the bytes it
+  /// describes, or it would bless the next same-sized file to appear at that
+  /// path) without punishing an install that is genuinely fine.
   ///
   /// Failing to delete is not worth failing provisioning over, but it does leave a
   /// stale receipt behind, so it is logged rather than swallowed.
-  Future<bool> _dropReceipt(ModelDescriptor descriptor) async {
+  Future<void> _dropStaleReceipts(ModelDescriptor descriptor) async {
     try {
-      if (await _storage.statusOf(descriptor) == ModelInstallStatus.ready) {
-        return false;
-      }
-      await _storage.deleteReceipt(descriptor);
-      return true;
+      await _storage.deleteStaleReceipts(descriptor);
     } on FileSystemException catch (error) {
-      debugPrint('could not remove stale model receipt: ${error.message}');
-      return false;
+      debugPrint('could not remove stale model receipts: ${error.message}');
     }
   }
 
-  /// Deletes every artifact of [descriptor], reporting whether the removal
-  /// actually happened.
-  Future<bool> _quarantine(ModelDescriptor descriptor) async {
+  /// Deletes one offending file (and, via the stale-receipt sweep its caller
+  /// runs, its receipt), reporting whether the removal actually happened.
+  ///
+  /// Per file rather than per model on purpose: quarantining a whole set because
+  /// one file failed would delete gigabytes of set-mates that verified fine.
+  Future<bool> _quarantineFile(
+    ModelDescriptor descriptor,
+    ModelArtifactFile file,
+  ) async {
+    final installed = _storage.installedFile(descriptor, file);
     try {
-      await _storage.deleteArtifact(descriptor);
-      return !await _storage.installedFile(descriptor).exists();
+      if (await installed.exists()) await installed.delete();
+      return !await installed.exists();
     } on FileSystemException {
       // A file we cannot delete is the one case where unverified bytes survive;
       // the caller must be able to see that.
@@ -597,9 +795,9 @@ class ModelProvisioner {
     }
   }
 
-  static Future<bool> _deleteIfExists(File file) async {
+  static Future<bool> _deleteStaging(Directory staging) async {
     try {
-      if (await file.exists()) await file.delete();
+      if (await staging.exists()) await staging.delete(recursive: true);
       return true;
     } on FileSystemException {
       return false;
