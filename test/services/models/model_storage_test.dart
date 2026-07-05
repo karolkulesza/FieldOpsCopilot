@@ -238,6 +238,30 @@ void main() {
     });
 
     test(
+      'an orphaned legacy receipt is removed rather than kept forever',
+      () async {
+        // A 1.7 receipt whose artifact is gone (freed by hand for disk space).
+        // Nothing reads the root location any more, so without cleanup it is
+        // permanent clutter — the non-blocking Round 0 review note.
+        final storage = storageWith(const NoopBackupExclusion());
+        await storage.prepare();
+        final orphan = File(
+          '${storage.root.path}/${descriptor.soleFile.fileName}.receipt.json',
+        );
+        await orphan.writeAsString('{"modelId":"gemma-test"}');
+
+        expect(await storage.statusOf(descriptor), ModelInstallStatus.absent);
+
+        expect(orphan.existsSync(), isFalse);
+        expect(
+          storage.receiptFile(descriptor).existsSync(),
+          isFalse,
+          reason: 'an orphan must be deleted, not promoted',
+        );
+      },
+    );
+
+    test(
       'a flat file never overwrites an install already in the new layout',
       () async {
         final storage = storageWith(const NoopBackupExclusion());
