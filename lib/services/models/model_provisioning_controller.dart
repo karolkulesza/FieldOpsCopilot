@@ -236,8 +236,9 @@ class ModelProvisioningController extends Notifier<ModelProvisioningState> {
 
 /// The provisioning trigger the UI reads — one per provisioned model, keyed by
 /// model id.
-final modelProvisioningControllerProvider = NotifierProvider.family<
-  ModelProvisioningController,
-  ModelProvisioningState,
-  String
->(ModelProvisioningController.new);
+final modelProvisioningControllerProvider =
+    NotifierProvider.family<
+      ModelProvisioningController,
+      ModelProvisioningState,
+      String
+    >(ModelProvisioningController.new);

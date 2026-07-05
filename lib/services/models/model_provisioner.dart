@@ -245,12 +245,10 @@ final class ModelAbsent extends ModelProvisionResult {
 /// rollout) is narrated, not built.
 class ModelProvisioner {
   ModelProvisioner({
-    required ModelStorage storage,
+    required this._storage,
     ModelDownloader? downloader,
-    String? authToken,
-  }) : _storage = storage,
-       _downloader = downloader ?? HttpModelDownloader(),
-       _authToken = authToken;
+    this._authToken,
+  }) : _downloader = downloader ?? HttpModelDownloader();
 
   final ModelStorage _storage;
   final ModelDownloader _downloader;

@@ -122,18 +122,18 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
     // The LLM's family instance specifically (Task 2.0 made the status provider
     // per-model): the STT set becoming ready changes nothing about the engine,
     // and warming up on its edge would be a no-op fired for the wrong reason.
-    ref.listenManual(modelInstallStatusProvider(ref.read(activeLlmDescriptorProvider).id), (
-      previous,
-      next,
-    ) {
-      // `next.value`, not the `valueOrNull` the review's suggested fix used —
-      // Riverpod 3's `AsyncValue` exposes a nullable `value` and no `valueOrNull`,
-      // so the suggestion as written does not compile. `ModelReadinessBanner`
-      // already reads `status.value`, which is how the shape was confirmed rather
-      // than guessed.
-      if (next.value != ModelInstallStatus.ready) return;
-      ref.read(engineWarmupControllerProvider.notifier).warmUp();
-    });
+    ref.listenManual(
+      modelInstallStatusProvider(ref.read(activeLlmDescriptorProvider).id),
+      (previous, next) {
+        // `next.value`, not the `valueOrNull` the review's suggested fix used —
+        // Riverpod 3's `AsyncValue` exposes a nullable `value` and no `valueOrNull`,
+        // so the suggestion as written does not compile. `ModelReadinessBanner`
+        // already reads `status.value`, which is how the shape was confirmed rather
+        // than guessed.
+        if (next.value != ModelInstallStatus.ready) return;
+        ref.read(engineWarmupControllerProvider.notifier).warmUp();
+      },
+    );
   }
 
   @override

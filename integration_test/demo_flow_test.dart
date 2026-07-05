@@ -95,7 +95,7 @@ void main() {
       (_, ModelInstallStatus.absent) =>
         'weights are not installed — pass '
             '--dart-define=$_provisionFlag=true to fetch them as part of this '
-            'run, or side-load ${descriptor.fileName} into '
+            'run, or side-load ${descriptor.soleFile.fileName} into '
             '<app support>/models',
       (_, ModelInstallStatus.unverified) =>
         'weights are present but unverified against the pinned SHA-256',
