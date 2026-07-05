@@ -1511,7 +1511,7 @@ class _ScriptedDownloader implements ModelDownloader {
 /// A [ModelDownloader] that serves a distinct body per URI — the shape a
 /// file-set transfer actually has — and can refuse the Nth open.
 class _SetDownloader implements ModelDownloader {
-  _SetDownloader({required this.bodies, this.failOnOpen, this.chunkSize = 64});
+  _SetDownloader({required this.bodies, this.failOnOpen});
 
   /// Body per full URI string.
   final Map<String, Uint8List> bodies;
@@ -1519,8 +1519,6 @@ class _SetDownloader implements ModelDownloader {
   /// 1-based call number of [open] that throws instead of serving, scripting
   /// "the transfer died on file N".
   final int? failOnOpen;
-
-  final int chunkSize;
 
   int openCount = 0;
   final List<Uri> opened = [];
@@ -1543,9 +1541,10 @@ class _SetDownloader implements ModelDownloader {
   }
 
   Stream<List<int>> _emit(Uint8List served) async* {
+    // Chunked like a real transport, so per-chunk progress is exercised.
     var sent = 0;
     while (sent < served.length) {
-      final end = (sent + chunkSize).clamp(0, served.length);
+      final end = (sent + 64).clamp(0, served.length);
       yield served.sublist(sent, end);
       sent = end;
     }
