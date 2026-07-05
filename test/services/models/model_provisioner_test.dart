@@ -1130,6 +1130,272 @@ void main() {
       },
     );
   });
+
+  group('file sets (Task 2.0)', () {
+    /// Deterministic per-file bodies, so any file's pin can be computed or
+    /// deliberately broken independently of its set-mates.
+    Uint8List bodyOf(String name) =>
+        Uint8List.fromList(utf8.encode('bytes of $name ' * (name.length + 1)));
+
+    const names = ['encoder.onnx', 'decoder.onnx', 'joiner.onnx', 'tokens.txt'];
+
+    ModelDescriptor setDescriptor({
+      Map<String, String> pinOverrides = const {},
+    }) => ModelDescriptor.fileSet(
+      id: 'stt-test',
+      displayName: 'STT (test fixture)',
+      licensePage: 'https://example.invalid/license',
+      files: [
+        for (final name in names)
+          ModelArtifactFile(
+            fileName: name,
+            downloadUri: Uri.parse('https://example.invalid/$name'),
+            sha256Hex:
+                pinOverrides[name] ?? sha256.convert(bodyOf(name)).toString(),
+            approximateSizeBytes: bodyOf(name).length,
+          ),
+      ],
+    );
+
+    _SetDownloader setDownloader({int? failOnOpen, String? serveInsteadOf}) =>
+        _SetDownloader(
+          bodies: {
+            for (final name in names)
+              'https://example.invalid/$name': serveInsteadOf == name
+                  ? Uint8List.fromList(utf8.encode('rolled revision'))
+                  : bodyOf(name),
+          },
+          failOnOpen: failOnOpen,
+        );
+
+    test('a four-file set installs all-or-nothing and reports per-file '
+        'artifacts', () async {
+      final descriptor = setDescriptor();
+      final downloader = setDownloader();
+      final provisioner = ModelProvisioner(
+        storage: storage,
+        downloader: downloader,
+      );
+
+      final result = await provisioner.provision(descriptor);
+
+      expect(result, isA<ModelVerified>());
+      final verified = result as ModelVerified;
+      expect(verified.artifacts, hasLength(4));
+      expect(verified.artifacts.map((a) => a.fileName), names);
+      expect(
+        verified.sizeBytes,
+        names.map((n) => bodyOf(n).length).fold(0, (a, b) => a + b),
+      );
+      for (final file in descriptor.files) {
+        expect(
+          await storage.installedFile(descriptor, file).readAsBytes(),
+          bodyOf(file.fileName),
+        );
+      }
+      expect(await storage.statusOf(descriptor), ModelInstallStatus.ready);
+      expect(await _stagingLeftovers(storage, descriptor), isEmpty);
+    });
+
+    // TC-PROV-SET-01, end to end: the readiness the storage tests pin per file
+    // is restored by a real provision after a file goes missing.
+    test(
+      'a deleted set member takes readiness down and provision restores it',
+      () async {
+        final descriptor = setDescriptor();
+        final provisioner = ModelProvisioner(
+          storage: storage,
+          downloader: setDownloader(),
+        );
+        expect(await provisioner.provision(descriptor), isA<ModelVerified>());
+
+        await storage
+            .installedFile(descriptor, descriptor.files[2])
+            .delete(); // the joiner
+        expect(await storage.statusOf(descriptor), ModelInstallStatus.absent);
+
+        expect(await provisioner.provision(descriptor), isA<ModelVerified>());
+        expect(await storage.statusOf(descriptor), ModelInstallStatus.ready);
+      },
+    );
+
+    // TC-PROV-SET-02: transfer fails on file 3 of 4 → nothing installed.
+    test('a transfer that dies on file 3 of 4 installs nothing', () async {
+      final descriptor = setDescriptor();
+      final downloader = setDownloader(failOnOpen: 3);
+      final provisioner = ModelProvisioner(
+        storage: storage,
+        downloader: downloader,
+      );
+
+      final result = await provisioner.provision(descriptor);
+
+      expect(result, isA<ModelDownloadFailed>());
+      expect((result as ModelDownloadFailed).fileName, 'joiner.onnx');
+      expect(result.message, contains('joiner.onnx'));
+      // Files 1 and 2 transferred fine — and still nothing may exist at the
+      // install path, or an engine could load half a model.
+      expect(downloader.openCount, 3);
+      expect(storage.installDir(descriptor).existsSync(), isFalse);
+      expect(await _stagingLeftovers(storage, descriptor), isEmpty);
+      expect(await storage.statusOf(descriptor), ModelInstallStatus.absent);
+    });
+
+    // TC-PROV-SET-02, second half: "previous install (if any) intact".
+    test(
+      'a failed replacing transfer leaves the previous install untouched',
+      () async {
+        // A set installed and verified under today's pins…
+        final descriptor = setDescriptor();
+        final provisioner = ModelProvisioner(
+          storage: storage,
+          downloader: setDownloader(),
+        );
+        expect(await provisioner.provision(descriptor), isA<ModelVerified>());
+
+        // …then every pin moves to a new revision, and the transfer for it dies
+        // on file 3. The old files must survive: an offline device keeps the
+        // only weights it has. The source genuinely serves the new revision —
+        // files 1 and 2 arrive and hash correctly — so what kills this transfer
+        // is transport, not a pin mismatch.
+        final moved = setDescriptor(
+          pinOverrides: {
+            for (final name in names)
+              name: sha256
+                  .convert(utf8.encode('revision 2 of $name'))
+                  .toString(),
+          },
+        );
+        final failing = ModelProvisioner(
+          storage: storage,
+          downloader: _SetDownloader(
+            bodies: {
+              for (final name in names)
+                'https://example.invalid/$name': Uint8List.fromList(
+                  utf8.encode('revision 2 of $name'),
+                ),
+            },
+            failOnOpen: 3,
+          ),
+        );
+
+        final result = await failing.provision(moved);
+
+        expect(result, isA<ModelDownloadFailed>());
+        for (final file in descriptor.files) {
+          expect(
+            await storage.installedFile(descriptor, file).readAsBytes(),
+            bodyOf(file.fileName),
+            reason: '${file.fileName} must survive the failed replacement',
+          );
+        }
+        // Not loadable as the new revision, but present: `unverified`, the state
+        // that re-hashes rather than re-downloads on the next attempt.
+        expect(await storage.statusOf(moved), ModelInstallStatus.unverified);
+      },
+    );
+
+    // TC-PROV-SET-03: a wrong pin on *any* file fails closed. The joiner is
+    // file 3, so a hash check applied only to the first file would pass — the
+    // AC names that trap explicitly.
+    test(
+      'a wrong pin on the third file fails closed with nothing installed',
+      () async {
+        final descriptor = setDescriptor(
+          pinOverrides: {'joiner.onnx': wrongDigest},
+        );
+        final downloader = setDownloader();
+        final provisioner = ModelProvisioner(
+          storage: storage,
+          downloader: downloader,
+        );
+
+        final result = await provisioner.provision(descriptor);
+
+        expect(result, isA<ModelCorrupt>());
+        final corrupt = result as ModelCorrupt;
+        expect(corrupt.fileName, 'joiner.onnx');
+        expect(corrupt.expectedSha256Hex, wrongDigest);
+        expect(
+          corrupt.actualSha256Hex,
+          sha256.convert(bodyOf('joiner.onnx')).toString(),
+        );
+        expect(corrupt.origin, ModelByteOrigin.download);
+        expect(corrupt.quarantined, isTrue);
+        // Failed at file 3: the pin is checked per file as each transfer ends,
+        // not once after the whole set.
+        expect(downloader.openCount, 3);
+        expect(storage.installDir(descriptor).existsSync(), isFalse);
+        expect(await _stagingLeftovers(storage, descriptor), isEmpty);
+        expect(await storage.statusOf(descriptor), ModelInstallStatus.absent);
+      },
+    );
+
+    test(
+      'a side-loaded complete set verifies in place without the network',
+      () async {
+        final descriptor = setDescriptor();
+        await storage.prepare();
+        await storage.installDir(descriptor).create(recursive: true);
+        for (final file in descriptor.files) {
+          await storage
+              .installedFile(descriptor, file)
+              .writeAsBytes(bodyOf(file.fileName));
+        }
+        final downloader = setDownloader();
+        final provisioner = ModelProvisioner(
+          storage: storage,
+          downloader: downloader,
+        );
+
+        final result = await provisioner.provision(descriptor);
+
+        expect(result, isA<ModelVerified>());
+        expect(
+          (result as ModelVerified).source,
+          ModelVerificationSource.existingFile,
+        );
+        expect(downloader.openCount, 0);
+        expect(await storage.statusOf(descriptor), ModelInstallStatus.ready);
+      },
+    );
+
+    test('progress aggregates across the set with file positions', () async {
+      final descriptor = setDescriptor();
+      final provisioner = ModelProvisioner(
+        storage: storage,
+        downloader: setDownloader(),
+      );
+
+      final samples = <ModelProvisionProgress>[];
+      final result = await provisioner.provision(
+        descriptor,
+        onProgress: samples.add,
+      );
+
+      expect(result, isA<ModelVerified>());
+      expect(samples, isNotEmpty);
+      final totalSize = names
+          .map((n) => bodyOf(n).length)
+          .fold(0, (a, b) => a + b);
+      // Every sample describes the whole set, not the file in flight.
+      for (final sample in samples) {
+        expect(sample.totalBytes, totalSize);
+        expect(sample.fileCount, 4);
+        expect(sample.fileIndex, inInclusiveRange(1, 4));
+      }
+      // Progress is cumulative: it never goes backwards when the next file
+      // starts, which is what "aggregated" actually buys the progress bar.
+      for (var i = 1; i < samples.length; i++) {
+        expect(
+          samples[i].processedBytes,
+          greaterThanOrEqualTo(samples[i - 1].processedBytes),
+        );
+      }
+      expect(samples.last.processedBytes, totalSize);
+      expect(samples.map((s) => s.fileIndex).toSet(), {1, 2, 3, 4});
+    });
+  });
 }
 
 const _sourceUrl = 'https://example.invalid/gemma.litertlm';
@@ -1235,6 +1501,53 @@ class _ScriptedDownloader implements ModelDownloader {
       if (cutoff != null && sent >= cutoff) {
         throw const SocketException.closed();
       }
+    }
+  }
+
+  @override
+  void close() {}
+}
+
+/// A [ModelDownloader] that serves a distinct body per URI — the shape a
+/// file-set transfer actually has — and can refuse the Nth open.
+class _SetDownloader implements ModelDownloader {
+  _SetDownloader({required this.bodies, this.failOnOpen, this.chunkSize = 64});
+
+  /// Body per full URI string.
+  final Map<String, Uint8List> bodies;
+
+  /// 1-based call number of [open] that throws instead of serving, scripting
+  /// "the transfer died on file N".
+  final int? failOnOpen;
+
+  final int chunkSize;
+
+  int openCount = 0;
+  final List<Uri> opened = [];
+
+  @override
+  Future<ModelByteStream> open(Uri uri, {String? authToken}) async {
+    openCount++;
+    opened.add(uri);
+    if (failOnOpen == openCount) {
+      throw const ModelDownloadException('connection reset by scripted fault');
+    }
+    final body = bodies['$uri'];
+    if (body == null) {
+      throw ModelDownloadException(
+        'no scripted body for $uri',
+        statusCode: 404,
+      );
+    }
+    return ModelByteStream(bytes: _emit(body), contentLength: body.length);
+  }
+
+  Stream<List<int>> _emit(Uint8List served) async* {
+    var sent = 0;
+    while (sent < served.length) {
+      final end = (sent + chunkSize).clamp(0, served.length);
+      yield served.sublist(sent, end);
+      sent = end;
     }
   }
 
