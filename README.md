@@ -2414,8 +2414,7 @@ The order is now: release first, wait for the plugin to close its own stream
 (releasing is what closes it), *then* cancel. Which needed one more piece of
 state: the window between "stop was asked for" and "no more audio will be
 accepted" is precisely where those buffers arrive, so a stream `done` inside it is
-the expected end rather than the *"the microphone went away"* fault it is
-everywhere else. The wait is bounded (`drainGrace`, 250ms) on Task 1.11's
+the expected end rather than a fault. The wait is bounded (`drainGrace`, 250ms) on Task 1.11's
 principle that a seam which hangs reports nothing and a frozen UI reads as a
 crash; a test drives a plugin that never closes its stream and asserts both halves
 — the audio still arrives, and the wait is a bound.
@@ -2437,27 +2436,79 @@ constructor — for no reader, and could not be host-tested. Tasks 1.3 through 1
 all shipped unwired for the same reason; the wiring belongs to the task that has
 something to wire it to.
 
-**A format-coercion tripwire that has been seen to fire.** `RecordAudioInput`
-registers `setOnConfigChanged` and faults the capture if the delivered sample
-rate, channel count or encoder differs from what was asked for, because 16-bit PCM
-at the wrong rate does not error — it transcribes as nonsense, and a capture that
-cannot be trusted is worse than no capture. The *decision* is a pure function and
-is fully host-tested, including the case that matters most: the plugin fires that
-callback whenever **any** of bit rate, sample rate or channel count was adjusted
+### The format-coercion tripwire, live on Android
+
+`RecordAudioInput` registers
+`setOnConfigChanged` and faults the capture if the delivered sample rate, channel
+count or encoder differs from what was asked for, because 16-bit PCM at the wrong
+rate does not error — it transcribes as nonsense, and a capture that cannot be
+trusted is worse than no capture. The *decision* is a pure function and is
+host-tested, including the case that matters most: the plugin fires that callback
+whenever **any** of bit rate, sample rate or channel count was adjusted
 (`RecordConfig.isModified`, both platforms), and bit rate does not exist for a raw
 PCM stream — neither platform's PCM encoder reads it. Faulting a good capture
 because the platform normalised an unused field would make the tripwire worse than
-not watching at all.
+not watching at all. The *wiring* is host-tested too, by impersonating the platform
+on `com.llfbandit.record/configChanged/<recorderId>`.
 
-What is **not** established is that the callback ever fires on the stream path.
-Read at these versions, neither platform's stream delegate mutates
-`sampleRate`/`numChannels` — iOS resamples to the requested format through
-`AVAudioConverter` and throws if it cannot, Android asks `AudioRecord` for that
-rate directly and throws if it refuses — so `isModified` should be false and the
-callback should never be invoked. That is a source read, not a measurement. The
-tripwire is kept as a guard against a future plugin version quietly starting to
-coerce, and TC-MIC-01's cadence assertion is the independent check that the format
-actually arrived.
+An earlier version of this section said the callback should never fire at all, on
+the reasoning that neither stream path mutates the format. **Review finding R0-F3
+refuted the Android half.** `FormatCodecSelector.findCodec` calls
+`adjustToDeviceCapabilities(config)` *before* its `MIMETYPE_AUDIO_RAW` early
+return, and that assigns `config.numChannels` from the routed input's advertised
+channel counts — so on an Android device whose default input does not advertise
+mono, a mono request is silently coerced to stereo and the tripwire is **live**.
+Such a capture is faulted rather than degraded, deliberately: interleaved stereo
+handed to a mono recogniser is every second sample from the wrong channel, and this
+app does not downmix. Downmixing is the obvious alternative and belongs with
+whoever owns the recogniser. iOS genuinely does not coerce — its stream delegate
+resamples through `AVAudioConverter` and throws if it cannot.
+
+### Two spec requirements this seam meets by not doing something
+
+§3.2 asks for recorded audio at rest to be encrypted. Capture here is
+**stream-only** — no file is ever written, no path is ever handed to the plugin —
+so there is no audio at rest to encrypt. That is a requirement satisfied by a
+design choice rather than by a mechanism, which is exactly the kind of thing that
+looks unimplemented later, so it is written down here.
+
+§3.1 names transcription as isolate work. `MicCapture`'s own per-buffer work runs
+on the UI isolate and is O(1) at roughly sixteen buffers a second — a merge, a
+remainder and a queue push — so it does not need one. The isolate boundary the spec
+asks for belongs to the recogniser, which is Task 2.2, and it consumes the stream
+this produces.
+
+### What actually goes wrong, and what does not
+
+Three fault paths existed here before review, and **two of them cannot happen**.
+This is worth its own heading because the corrected version is the opposite of the
+intuitive one, and because the comment that got it wrong was confident.
+
+`record` 7.1.1's `_startRecordStream` subscribes to the platform stream with
+`onData` and `onError` and **no `onDone`**, and neither native side ever ends its
+event channel (`endOfStream` and `FlutterEndOfEventStream` appear nowhere in
+`record_ios` 2.1.1 or `record_android` 2.1.2). So the broadcast controller the
+session listens to closes only when `_stopRecordStream` closes it — from `stop`,
+`cancel`, `dispose`, or a second `startStream`. A stream that ends *by itself* is
+not a thing the plugin does, and the three causes the code once attributed to it —
+a revoked permission, a route change, another app claiming the input — all go
+somewhere else:
+
+| What happens | What the app sees | Handled by |
+|---|---|---|
+| Android read failure | an **error** on the stream | `onError` → `MicCaptureFault` |
+| iOS audio-session interruption | **silence** — the engine pauses under `AudioInterruptionMode.pause` and never resumes, tap still installed | `stallTimeout` |
+| the plugin closing its stream | `done` **during** `stop` | the normal end, not a fault |
+| a stream ending by itself | cannot happen on either platform today | the `onDone` fault, kept as forward-defence for the seam's contract |
+
+The iOS row is the one that mattered, and it had no answer at all. Silence left the
+session `isCapturing` with `frames` open forever — and since `SttEngine.transcribe`
+consumes `frames` to completion, a phone call mid-dictation meant a transcript that
+never arrived, on the device this project is demoed from. `MicCapture.stallTimeout`
+(five seconds, `null` to disable) now faults it. It is re-armed by *any* buffer,
+including an empty one, because a quiet room is a stream of near-zero samples
+rather than an absence of buffers — so what it measures is a dead input, not a
+pause in speech.
 
 ## Getting started
 
@@ -2577,12 +2628,15 @@ Tests are split into two tiers:
     fails on a warm device is a flaky test pretending to be an NFR.
   - `mic_capture_test.dart` (TC-MIC-01) — a real microphone, for three seconds.
     Asserts the shape (non-empty buffers, whole samples), the **cadence** — 32000
-    bytes per second of wall clock, which is the only place a substituted sample
-    rate or channel count is observable at all, since 48 kHz runs ~3× and stereo
-    ~2× and neither *errors* — that at least one sample is non-zero, because a dead
+    bytes per second of wall clock, an end-to-end sanity check on the whole
+    request-to-bytes path — that at least one sample is non-zero, because a dead
     input can hand back correctly shaped silence that passes every structural
     check, and that the stream closes cleanly, which Task 2.2's `transcribe` needs
-    in order to ever emit a final transcript. Needs no `--dart-define`. It
+    in order to ever emit a final transcript. (The cadence assertion used to be
+    described as the only place a substituted rate is observable. It is not: a
+    *silent* substitution is not a state either platform reaches, and the one
+    reachable coercion faults the capture first — see _The format-coercion
+    tripwire_ above.) Needs no `--dart-define`. It
     **skips** on the first run: it raises the OS permission prompt, which no
     `WidgetTester` gesture can dismiss, because that dialog is not in the Flutter
     view hierarchy. Grant it and run again.

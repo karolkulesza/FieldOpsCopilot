@@ -28,10 +28,8 @@ import 'package:integration_test/integration_test.dart';
 ///
 /// 1. buffers arrive at all, from a real `AVAudioEngine` tap or `AudioRecord`;
 /// 2. they arrive at the **cadence 16 kHz mono implies** — 32000 bytes per second
-///    of wall clock. This is the assertion that catches a format the platform
-///    substituted without telling anyone: 48 kHz would run 3× fast, stereo 2×,
-///    and neither fails in any other observable way. 16-bit PCM at the wrong rate
-///    does not error, it transcribes as nonsense;
+///    of wall clock, an end-to-end sanity check on the whole request-to-bytes
+///    path (see the assertion itself for what that does and does not catch);
 /// 3. the samples are **not all zero** — a plugin can hand back correctly shaped
 ///    buffers of silence when the input is dead, which passes every structural
 ///    check there is;
@@ -111,8 +109,18 @@ void main() {
           // 2. Cadence. This is the AC's "assert byte cadence/format on device",
           // and the tolerance is wide on purpose: the first buffer arrives some
           // milliseconds after the engine starts, and `stop` is asked for after the
-          // delay rather than at the last sample. ±25% cannot be met by a 2× or 3×
-          // rate error, which is the failure it exists to catch.
+          // delay rather than at the last sample.
+          //
+          // **Narrowed by review finding R0-F3 and its companion note.** An earlier
+          // version called this "the failure it exists to catch", meaning a
+          // silently substituted format. That claim was wider than the code: a
+          // silent rate substitution is not a state either platform reaches — iOS
+          // resamples to the requested rate through `AVAudioConverter` and throws if
+          // it cannot, Android constructs `AudioRecord` at the requested rate or
+          // throws — and the one coercion that *is* reachable (Android rewriting
+          // `numChannels`) surfaces as a `MicCaptureFault` before this line is ever
+          // evaluated. So this is a broad sanity check on request-to-bytes, not the
+          // sole guard against a specific failure.
           final captured = frames.fold(
             0,
             (sum, frame) => sum + frame.bytes.length,
@@ -133,8 +141,9 @@ void main() {
               (expected * 1.25).ceil(),
             ),
             reason:
-                'a substituted sample rate or channel count shows up here and '
-                'nowhere else — 48kHz would be ~3× and stereo ~2×',
+                'bytes must arrive at 16 kHz mono cadence; a rate or channel '
+                'count other than the one requested lands far outside this '
+                '(48kHz ~3x, stereo ~2x)',
           );
 
           // 3. Live input. Correctly shaped silence passes every check above.
