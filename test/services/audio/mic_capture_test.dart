@@ -105,9 +105,13 @@ void main() {
     });
 
     test('drops empty buffers rather than forwarding them', () async {
-      // Both platforms can produce one: iOS when a tap buffer carries no frames,
-      // Android when `AudioRecord.read` returns 0. An empty frame is not audio,
-      // and a recogniser has to special-case it if it arrives.
+      // **iOS** can produce one, when a tap buffer carries no frames:
+      // `Pcm16BitsEncoder.encode` returns `[bytes]` with `bytes` empty, and
+      // `handleTap` sends every element. Android cannot — review finding R0-F8.3
+      // refuted that half of an earlier version of this comment, because
+      // `RecordThread` guards `if (buffer.isNotEmpty())` before encoding. One
+      // platform is reason enough: an empty frame is not audio, and a recogniser
+      // would have to special-case it if it arrived.
       final harness = await _Harness.start();
 
       harness.input.emit([]);
@@ -212,6 +216,103 @@ void main() {
       await session.stop();
       await done;
       expect(session.droppedByteCount, 0);
+    });
+
+    test('the bound applies before anyone has listened at all', () async {
+      // The property `frames`' docstring advertises — "Buffers up to the backlog
+      // bound while nothing is listening" — and the one sold as the OOM defence for
+      // an app already at 1.67GB RSS. Worth binding on its own account.
+      //
+      // It is **not** what kills the `hasListener` mutation, and saying so is the
+      // point of this comment. Review finding R0-F4 attributed that mutation's
+      // survival to this case, on the reasoning that with no listener the backlog
+      // would drain into the controller's unbounded pending-event buffer. Measured,
+      // that is not what happens: a single-subscription `StreamController` reports
+      // `isPaused == true` before any `listen`, so `!isPaused` already blocks the
+      // loop and the bound holds either way. The clause earns its place in a
+      // different state — see *audio dropped after the consumer cancels is still
+      // reported* below.
+      final input = _ScriptedAudioInput();
+      final capture = MicCapture(
+        input: input,
+        // 32 bytes — one millisecond of 16 kHz mono.
+        maxBacklog: const Duration(milliseconds: 1),
+      );
+      final session = ((await capture.start()) as MicCaptureStarted).session;
+
+      // Nobody has listened. Offer four times the bound.
+      for (var buffer = 0; buffer < 4; buffer++) {
+        input.emit(List.filled(32, buffer));
+      }
+      await pumpEventQueue();
+
+      expect(
+        session.droppedByteCount,
+        greaterThan(0),
+        reason:
+            'the ceiling has to hold with no listener attached, or it is not '
+            'a ceiling — it is a promise kept only while someone is watching',
+      );
+      expect(
+        session.droppedByteCount,
+        96,
+        reason: '4 x 32B against a 32B bound',
+      );
+
+      final frames = <MicFrame>[];
+      final done = session.frames.listen(frames.add).asFuture<void>();
+      await session.stop();
+      await done;
+
+      expect(
+        _flatten(frames),
+        List.filled(32, 3),
+        reason:
+            'and what survives is the newest audio, as when a consumer stalls',
+      );
+    });
+
+    test('audio dropped after the consumer cancels is still reported', () async {
+      // What actually binds `_pump`'s `hasListener` clause, and the corrected
+      // mechanism for review finding R0-F4. Measured on a single-subscription
+      // `StreamController`:
+      //
+      //   before any listen : hasListener=false isPaused=true
+      //   while listening   : hasListener=true  isPaused=false
+      //   while paused      : hasListener=true  isPaused=true
+      //   after cancel      : hasListener=false isPaused=false
+      //
+      // The last row is the gap. After a cancel `isPaused` goes back to false while
+      // there is no subscriber, so without `hasListener` the loop runs and every
+      // frame is handed to `_controller.add` — which, on a single-subscription
+      // controller that can never be listened to again, buffers it forever. Two
+      // consequences, both of which this class exists to prevent: the backlog's
+      // ceiling stops applying (the bytes accumulate in the controller instead), and
+      // `droppedByteCount` reports **0** while audio is in fact being discarded.
+      // Silent loss reported as no loss.
+      final input = _ScriptedAudioInput();
+      final capture = MicCapture(
+        input: input,
+        maxBacklog: const Duration(milliseconds: 1),
+      );
+      final session = ((await capture.start()) as MicCaptureStarted).session;
+
+      final subscription = session.frames.listen((_) {});
+      await pumpEventQueue();
+      await subscription.cancel();
+
+      for (var buffer = 0; buffer < 4; buffer++) {
+        input.emit(List.filled(32, buffer));
+      }
+      await pumpEventQueue();
+
+      expect(
+        session.droppedByteCount,
+        96,
+        reason:
+            'a cancelled consumer is not a consumer: the ceiling still applies '
+            'and what it discards is still counted',
+      );
     });
 
     test('a stalled consumer loses the oldest audio, not the newest', () async {
@@ -337,6 +438,34 @@ void main() {
       expect(_flatten(await harness.frames), [1, 2, 3, 4]);
       expect(harness.session.isCapturing, isFalse);
       expect(harness.input.stopCalls, 1);
+    });
+
+    test('stop is prompt when the plugin closes its stream', () async {
+      // Review finding R0-F5. Deleting the `_rawClosed.complete()` in `onDone`
+      // left all 51 tests green — including the grace-period test below, which
+      // asserts `elapsed >= drainGrace` and therefore passes *more* easily when
+      // every stop waits the full 250ms. Nothing asserted that the normal case is
+      // fast. On a dictation UI a quarter-second added to the end of every
+      // utterance is perceptible, and the whole argument for `drainGrace`'s value
+      // is that the close "is already in flight" — which only holds if something
+      // notices it.
+      final harness = await _Harness.start();
+
+      harness.input.emit([1, 2]);
+      await pumpEventQueue();
+      final stopwatch = Stopwatch()..start();
+      await harness.session.stop();
+      stopwatch.stop();
+
+      expect(
+        stopwatch.elapsed,
+        lessThan(MicCaptureSession.drainGrace ~/ 5),
+        reason:
+            'a plugin that closes its stream must not be waited out; '
+            'measured ${stopwatch.elapsedMilliseconds}ms against a '
+            '${MicCaptureSession.drainGrace.inMilliseconds}ms grace',
+      );
+      expect(_flatten(await harness.frames), [1, 2]);
     });
 
     test('stop is idempotent and releases the input once', () async {
@@ -641,6 +770,116 @@ void main() {
     });
   });
 
+  group('the stall watchdog', () {
+    // Review findings R0-F1/R0-F2. This is the *only* "the microphone went away"
+    // condition either real platform produces. `record` registers no `onDone` on
+    // the platform stream and neither native side ever ends its event channel, so
+    // a stream that closes by itself is not a thing; what iOS actually does on an
+    // audio-session interruption is pause the engine and never resume it, leaving
+    // the tap installed and the buffers simply absent. Before this timer existed
+    // that state was invisible: the session stayed `isCapturing` with `frames`
+    // open forever, and `SttEngine.transcribe` consumes `frames` to completion —
+    // so a call mid-dictation meant a transcript that never arrived.
+    test('faults when the microphone goes silent', () async {
+      final harness = await _Harness.start(
+        stallTimeout: const Duration(milliseconds: 60),
+        listen: false,
+      );
+      final events = <Object>[];
+      final done = Completer<void>();
+      harness.session.frames.listen(
+        events.add,
+        onError: events.add,
+        onDone: done.complete,
+      );
+
+      harness.input.emit([1, 2]);
+      await done.future;
+
+      expect(
+        _flatten(events.whereType<MicFrame>()),
+        [1, 2],
+        reason:
+            'the audio captured before the input died is still '
+            'transcribable and still goes out first',
+      );
+      expect(events.last, isA<MicCaptureFault>());
+      expect(
+        (events.last as MicCaptureFault).message,
+        contains('no audio for'),
+      );
+      expect(harness.session.isCapturing, isFalse);
+      expect(
+        harness.input.stopCalls,
+        1,
+        reason: 'a stall must still hand the microphone back',
+      );
+    });
+
+    test('a live microphone keeps re-arming it', () async {
+      // The watchdog measures *buffers*, not speech. Any live input produces
+      // buffers continuously — a quiet room is near-zero samples, not an absence —
+      // so this must not fire while audio is flowing, however quiet.
+      final harness = await _Harness.start(
+        stallTimeout: const Duration(milliseconds: 100),
+      );
+
+      for (var i = 0; i < 6; i++) {
+        harness.input.emit([0, 0]);
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+      }
+      expect(harness.session.isCapturing, isTrue);
+
+      await harness.session.stop();
+      expect(_flatten(await harness.frames), List.filled(12, 0));
+    });
+
+    test('an empty buffer is proof of life too', () async {
+      // Re-armed before the whole-frame check, deliberately: a buffer carrying no
+      // whole frame still means the input is alive, and iOS does emit those.
+      final harness = await _Harness.start(
+        stallTimeout: const Duration(milliseconds: 100),
+      );
+
+      for (var i = 0; i < 6; i++) {
+        harness.input.emit([]);
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+      }
+
+      expect(harness.session.isCapturing, isTrue);
+      await harness.session.stop();
+    });
+
+    test('it does not fire after a normal stop', () async {
+      // A cancelled timer, or a fault delivered onto a closed stream, would both
+      // show up here.
+      final harness = await _Harness.start(
+        stallTimeout: const Duration(milliseconds: 40),
+      );
+
+      harness.input.emit([1, 2]);
+      await harness.session.stop();
+      final frames = await harness.frames;
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+
+      expect(_flatten(frames), [1, 2]);
+      expect(harness.input.stopCalls, 1);
+    });
+
+    test('it can be disabled', () async {
+      // Off is a legitimate configuration — a caller driving a finite, scripted
+      // input has no stall to detect.
+      final harness = await _Harness.start(stallTimeout: null);
+
+      harness.input.emit([1, 2]);
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+
+      expect(harness.session.isCapturing, isTrue);
+      await harness.session.stop();
+      expect(_flatten(await harness.frames), [1, 2]);
+    });
+  });
+
   group('RecordAudioInput.describeFormatMismatch', () {
     // The plugin fires `onConfigChanged` when *any* of bit rate, sample rate or
     // channel count was adjusted. Bit rate does not exist for a raw PCM stream —
@@ -713,9 +952,12 @@ class _Harness {
     required this._drained,
   });
 
+  /// [stallTimeout] defaults to `null` — off — so a test that is not about the
+  /// watchdog leaves no timer running and cannot be made flaky by one.
   static Future<_Harness> start({
     PcmAudioFormat format = PcmAudioFormat.sttMono16k,
     Duration maxBacklog = const Duration(seconds: 2),
+    Duration? stallTimeout,
     bool listen = true,
   }) async {
     final input = _ScriptedAudioInput();
@@ -723,6 +965,7 @@ class _Harness {
       input: input,
       format: format,
       maxBacklog: maxBacklog,
+      stallTimeout: stallTimeout,
     );
     final started = await capture.start();
     final session = (started as MicCaptureStarted).session;

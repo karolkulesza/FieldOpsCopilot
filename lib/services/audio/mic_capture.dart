@@ -135,6 +135,7 @@ class MicCaptureSession {
   MicCaptureSession._({
     required this.format,
     required this._maxBacklogBytes,
+    required this._stallTimeout,
     required this._releaseInput,
   }) {
     _controller = StreamController<MicFrame>(onListen: _pump, onResume: _pump);
@@ -144,6 +145,7 @@ class MicCaptureSession {
   final PcmAudioFormat format;
 
   final int _maxBacklogBytes;
+  final Duration? _stallTimeout;
   final Future<void> Function() _releaseInput;
 
   late final StreamController<MicFrame> _controller;
@@ -167,12 +169,22 @@ class MicCaptureSession {
   /// accepted, while a stream `done` in that window must not be read as a fault.
   bool _stopRequested = false;
 
-  /// Set once no further buffer will be accepted.
+  /// Set once the terminal path has begun.
+  ///
+  /// What actually stops buffers being accepted is the `_rawSubscription.cancel()`
+  /// that every path setting this flag performs in the same synchronous block — not
+  /// the flag. The guard in [_onRawBuffer] that reads it is therefore
+  /// belt-and-braces and unreachable today (review finding R0-F6); it is kept
+  /// because an `await` introduced between the flag and the cancel would make it
+  /// load-bearing again, and it costs one comparison.
   bool _finishing = false;
   bool _closed = false;
 
   final Completer<void> _releaseCompleter = Completer<void>();
   final Completer<void> _rawClosed = Completer<void>();
+
+  /// Fires when no buffer has arrived for [_stallTimeout]; `null` when disabled.
+  Timer? _stallTimer;
 
   /// How long [stop] waits for the plugin to close its stream before giving up on
   /// the drain.
@@ -250,10 +262,15 @@ class MicCaptureSession {
       await _rawClosed.future.timeout(drainGrace, onTimeout: () {});
     } finally {
       _finishing = true;
+      _stallTimer?.cancel();
+      _stallTimer = null;
       await _rawSubscription?.cancel();
       _rawSubscription = null;
-      // A partial frame is not a frame, and padding it would invent samples the
-      // technician did not speak, so the carry is discarded rather than flushed.
+      // Hygiene, not the mechanism: nothing reads the carry after the cancel
+      // above, so deleting this line changes no behaviour (review finding R0-F6).
+      // The decision it used to claim — that a partial frame is dropped rather than
+      // padded into samples the technician did not speak — is implemented by the
+      // *absence* of a flush here, which no line can express.
       _carry = null;
       if (!_releaseCompleter.isCompleted) _releaseCompleter.complete();
       _pump();
@@ -261,11 +278,16 @@ class MicCaptureSession {
   }
 
   void _attach(Stream<Uint8List> raw) {
+    _armStallTimer();
     _rawSubscription = raw.listen(
       _onRawBuffer,
       onError: (Object error, StackTrace stackTrace) =>
           _fail(MicCaptureFault('the microphone reported an error: $error')),
       onDone: () {
+        // Completing this is what makes [stop] prompt rather than always paying the
+        // full [drainGrace]; bound by *stop is prompt when the plugin closes its
+        // stream*. Deleting it left every other test green and added 250ms to every
+        // utterance (review finding R0-F5).
         if (!_rawClosed.isCompleted) _rawClosed.complete();
         // A `done` arriving during [stop] is the expected end, not a fault:
         // releasing the input closes the plugin's stream (`record` 7.1.1,
@@ -273,9 +295,24 @@ class MicCaptureSession {
         // once a stop is under way, so that case needs no branch here — a second
         // guard for it would be a line no test could reach.
         //
-        // A `done` at any other time is the microphone going away mid-capture — a
-        // revoked permission, a route change, another app taking the input — and
-        // the alternative to reporting it is a transcript that simply stops.
+        // **A `done` at any other time cannot come from `record` 7.1.1.** An earlier
+        // version of this comment named three causes for it — a revoked permission,
+        // a route change, another app taking the input — and the plugin's source
+        // refutes all three (review finding R0-F1). `_startRecordStream` subscribes
+        // to the platform stream with `onData` and `onError` and **no `onDone`**,
+        // and neither native side ever ends its event channel (`endOfStream` and
+        // `FlutterEndOfEventStream` appear nowhere in `record_ios` 2.1.1 or
+        // `record_android` 2.1.2), so the broadcast controller this listens to is
+        // closed only by `_stopRecordStream` — by `stop`, `cancel`, `dispose`, or a
+        // second `startStream`. The three causes go elsewhere: on Android a read
+        // failure arrives as an **error**, handled above; on iOS an audio-session
+        // interruption pauses the engine and never resumes it, which is silence
+        // rather than an end and is what [MicCapture.stallTimeout] exists for.
+        //
+        // So this is defence against a future plugin version and against any other
+        // [AudioInput] implementation — the seam's contract says a stream that ends
+        // by itself is a fault, and this is where that contract is kept. It is
+        // deliberately no longer described as a live path.
         _fail(
           const MicCaptureFault(
             'the microphone closed the stream unexpectedly',
@@ -285,9 +322,32 @@ class MicCaptureSession {
     );
   }
 
+  /// Restarts the stall watchdog. Every arriving buffer is proof of life.
+  void _armStallTimer() {
+    final timeout = _stallTimeout;
+    if (timeout == null) return;
+    _stallTimer?.cancel();
+    _stallTimer = Timer(timeout, _onStalled);
+  }
+
+  void _onStalled() {
+    _fail(
+      MicCaptureFault(
+        'the microphone delivered no audio for '
+        '${_stallTimeout!.inMilliseconds}ms — the input was most likely taken by '
+        'the system (a call, a voice assistant, another app) and will not come '
+        'back on its own',
+      ),
+    );
+  }
+
   /// Turns one platform buffer into zero or more whole-frame [MicFrame]s.
   void _onRawBuffer(Uint8List raw) {
     if (_finishing) return;
+    // Re-armed before the empty-buffer and partial-frame checks below,
+    // deliberately: a buffer carrying no whole frame is still evidence the input
+    // is alive, and iOS does emit those.
+    _armStallTimer();
 
     final carry = _carry;
     final Uint8List merged;
@@ -311,8 +371,12 @@ class MicCaptureSession {
     final wholeBytes =
         merged.length - merged.length.remainder(format.bytesPerFrame);
     if (wholeBytes == 0) {
-      // Includes the empty buffer both platforms can produce (iOS when a tap
-      // buffer carries no frames; Android when `AudioRecord.read` returns 0).
+      // Includes an empty buffer, which **iOS** can produce: `Pcm16BitsEncoder`
+      // returns `[bytes]` with `bytes` empty when the converted buffer has no
+      // frames, and `handleTap` sends every element. Android cannot — review
+      // finding R0-F8.3 refuted that half of an earlier comment, because
+      // `RecordThread` guards `if (buffer.isNotEmpty()) encoder.encode(buffer)`, so
+      // a zero-length read never reaches the sink.
       _carry = merged.isEmpty ? null : merged;
       return;
     }
@@ -364,6 +428,10 @@ class MicCaptureSession {
       _controller.add(MicFrame(bytes: bytes, precedingGapBytes: gap));
     }
 
+    // `|| _closed` is belt-and-braces: no path calls `_pump` after the close, so
+    // deleting it changes no behaviour (review finding R0-F6). Kept because it
+    // makes double-closing impossible by construction rather than by tracing every
+    // caller.
     if (!_finishing || _backlog.isNotEmpty || _closed) return;
     _closed = true;
     final fault = _pendingFault;
@@ -378,6 +446,8 @@ class MicCaptureSession {
     _pendingFault = fault;
     _stopRequested = true;
     _finishing = true;
+    _stallTimer?.cancel();
+    _stallTimer = null;
     _rawSubscription?.cancel();
     _rawSubscription = null;
     _carry = null;
@@ -416,8 +486,13 @@ class MicCapture {
     required this._input,
     this.format = PcmAudioFormat.sttMono16k,
     Duration maxBacklog = const Duration(seconds: 2),
+    this.stallTimeout = const Duration(seconds: 5),
   }) : maxBacklogBytes = format.byteCountFor(maxBacklog),
-       assert(!maxBacklog.isNegative, 'maxBacklog cannot be negative');
+       assert(!maxBacklog.isNegative, 'maxBacklog cannot be negative'),
+       assert(
+         stallTimeout == null || stallTimeout > Duration.zero,
+         'stallTimeout must be positive, or null to disable',
+       );
 
   final AudioInput _input;
 
@@ -431,6 +506,32 @@ class MicCapture {
   /// a thermal hiccup in the recogniser, short enough that the technician is
   /// never watching a transcript run seconds behind their own voice.
   final int maxBacklogBytes;
+
+  /// How long the microphone may deliver *nothing* before the capture is faulted.
+  /// `null` disables the check.
+  ///
+  /// **This is the only "the microphone went away" condition either real platform
+  /// produces, and it took review findings R0-F1/R0-F2 to establish that.** The
+  /// obvious candidate does not happen: `record` 7.1.1 registers no `onDone` on the
+  /// platform stream and neither native side ever ends its event channel, so a
+  /// stream closing by itself is not a thing. What *does* happen, on iOS, is
+  /// silence — an audio-session interruption (a call, a voice assistant, another app
+  /// claiming the input) reaches `RecorderSessionExtension`, which under `record`'s
+  /// default `AudioInterruptionMode.pause` pauses the engine and **never resumes
+  /// it**. The tap stays installed and buffers simply stop arriving.
+  ///
+  /// Without this timer that state is invisible and terminal: the session sits
+  /// `isCapturing`, `frames` stays open, and `SttEngine.transcribe` consumes
+  /// `frames` to completion — so it can never emit a final transcript. The app waits
+  /// forever on a microphone that is not coming back, which on the demo device is
+  /// the most likely way voice capture fails.
+  ///
+  /// Five seconds because *any* live input produces buffers continuously — a quiet
+  /// room is a stream of near-zero samples, not an absence of buffers — so silence
+  /// this long is not a pause in speech, it is a dead input. Long enough that no
+  /// plausible scheduling hiccup trips it; short enough that a technician is not
+  /// left watching a dictation that will never finish.
+  final Duration? stallTimeout;
 
   MicCaptureSession? _session;
 
@@ -467,10 +568,15 @@ class MicCapture {
     final session = MicCaptureSession._(
       format: format,
       maxBacklogBytes: maxBacklogBytes,
+      stallTimeout: stallTimeout,
       releaseInput: _input.stop,
     );
 
     try {
+      // **Before `startStream`, and that order is load-bearing** (raised in review
+      // round 0): on Android `notifyConfigChanged` fires immediately after the
+      // platform call `startStream` awaits resolves, so a watcher registered
+      // afterwards can miss the only notification there will be.
       await _input.watchFormat(
         (description) => session._fail(
           MicCaptureFault(
@@ -483,6 +589,16 @@ class MicCapture {
       final raw = await _input.startStream(format);
       session._attach(raw);
     } on Exception catch (error) {
+      // The input may already be open — `watchFormat` can succeed and `startStream`
+      // fail after the platform has taken the microphone — and a caller told
+      // "unavailable" holds no session to stop with. Without this the recorder stays
+      // open until `dispose`. Raised as a non-blocking note in review round 0.
+      try {
+        await _input.stop();
+      } on Exception catch (_) {
+        // Already closed, or never opened. What the caller needs is the failure
+        // below, not a second one from the cleanup.
+      }
       return MicCaptureUnavailable('could not open the microphone: $error');
     }
 
@@ -583,9 +699,29 @@ class RecordAudioInput implements AudioInput {
   /// sample rate or channel count was adjusted (read in `record_ios` 2.1.1
   /// `RecordConfig.isModified` and `record_android` 2.1.2
   /// `RecordConfig.isModified`), and bit rate does not exist for a raw PCM
-  /// stream — neither platform's PCM encoder reads it. Faulting a good capture
-  /// because the platform normalised an unused field would be worse than not
-  /// watching at all.
+  /// stream — neither platform's PCM encoder reads it (`Pcm16BitsEncoder.setup` is
+  /// empty; `PcmFormat.getMediaFormat` never sets `KEY_BIT_RATE`, and `syncConfig`
+  /// copies it only `if (containsKey)`). Faulting a good capture because the
+  /// platform normalised an unused field would be worse than not watching at all.
+  ///
+  /// **Which platform this is live on, corrected by review finding R0-F3.** An
+  /// earlier version claimed neither stream path mutates the format, so the callback
+  /// should never fire. True on iOS, whose stream delegate resamples to the
+  /// requested format through `AVAudioConverter` and throws if it cannot, never
+  /// rewriting the config. **False on Android:** `FormatCodecSelector.findCodec`
+  /// calls `adjustToDeviceCapabilities(config)` *before* its `MIMETYPE_AUDIO_RAW`
+  /// early return, and that assigns
+  /// `config.numChannels = nearestValue(deviceChannelCounts, config.numChannels)`
+  /// from the routed input's advertised channel counts. So on an Android device
+  /// whose default input does not advertise mono, a mono request is silently coerced
+  /// to stereo and this fires.
+  ///
+  /// The consequence is deliberate and worth stating: such a capture is **faulted,
+  /// not degraded**. Interleaved stereo handed to a mono recogniser is not
+  /// quiet-but-usable audio, it is every second sample from the wrong channel, and
+  /// this app does not downmix. A named failure beats a transcript of nonsense.
+  /// Downmixing is the obvious alternative and belongs with whoever owns the
+  /// recogniser.
   @visibleForTesting
   static String? describeFormatMismatch({
     required PcmAudioFormat requested,
