@@ -561,6 +561,42 @@ void main() {
       expect(harness.input.stopCalls, 1);
     });
 
+    test('a fault does not discard audio the consumer has not read yet', () async {
+      // The fault is queued behind the audio rather than delivered in place of
+      // it. That only has teeth when there *is* audio still queued — which is
+      // why this test pauses first: with the consumer keeping up, every frame has
+      // already been delivered by the time the error lands, and the ordering rule
+      // is never exercised. The mutation deleting the guard survived 50 tests
+      // until this one existed.
+      final harness = await _Harness.start(listen: false);
+      final events = <Object>[];
+      final done = Completer<void>();
+      final subscription = harness.session.frames.listen(
+        events.add,
+        onError: events.add,
+        onDone: done.complete,
+      );
+      await pumpEventQueue();
+
+      subscription.pause();
+      harness.input.emit([1, 2]);
+      harness.input.emit([3, 4]);
+      await pumpEventQueue();
+      harness.input.emitError(StateError('route lost'));
+      await pumpEventQueue();
+      subscription.resume();
+      await done.future;
+
+      expect(
+        _flatten(events.whereType<MicFrame>()),
+        [1, 2, 3, 4],
+        reason:
+            'the utterance captured before the microphone died is still '
+            'transcribable, and is the more useful half of this event',
+      );
+      expect(events.last, isA<MicCaptureFault>());
+    });
+
     test('a fault is reported once, and stop after it is a no-op', () async {
       final harness = await _Harness.start(listen: false);
       final errors = <Object>[];

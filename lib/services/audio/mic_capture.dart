@@ -340,11 +340,23 @@ class MicCaptureSession {
   }
 
   void _pump() {
-    // While finishing, push into the controller's own buffer regardless of
-    // pause: the backlog is bounded, and a consumer that resumes after `stop`
-    // should still get the tail of the utterance.
+    // Delivery is driven entirely by the consumer being ready — which, after the
+    // last buffer has arrived, means it is driven by `onListen` and `onResume`.
+    // Nothing forces events past a pause, deliberately: a paused subscription's
+    // own buffer is unbounded, so pushing into it would launder the very
+    // ceiling the backlog exists to impose, and it would step over the
+    // backpressure signal the consumer just gave.
+    //
+    // An earlier version added `_finishing ||` here so that `stop` drained the
+    // queue whatever the consumer was doing. It made no observable difference —
+    // a consumer that never resumes never observes anything either way — and it
+    // cost something real: draining unconditionally left the backlog always
+    // empty at the closing guard below, so the `_backlog.isNotEmpty` clause
+    // there could not fail, and a mutation deleting it survived the suite. Two
+    // clauses overlapping is how a guard stops being checked.
     while (_backlog.isNotEmpty &&
-        (_finishing || (_controller.hasListener && !_controller.isPaused))) {
+        _controller.hasListener &&
+        !_controller.isPaused) {
       final bytes = _backlog.removeFirst();
       _backlogBytes -= bytes.length;
       final gap = _pendingGapBytes;
