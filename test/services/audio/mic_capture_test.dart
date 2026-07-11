@@ -855,6 +855,17 @@ void main() {
         stallTimeout: const Duration(milliseconds: 60),
         listen: false,
       );
+      // Asserted with a *non-default* value on purpose. The sibling test above
+      // reads the same accessor with the 5s default, so a `configuredStallTimeout`
+      // that ignored `_stallTimeout` and returned a hardcoded 5s would satisfy it —
+      // a test-only accessor that lies about the thing it exists to expose. Found
+      // by mutation immediately after adding the accessor, which makes it the
+      // fourth instance in this task of a line written in a fixing round with
+      // nothing holding it.
+      expect(
+        harness.session.configuredStallTimeout,
+        const Duration(milliseconds: 60),
+      );
       final events = <Object>[];
       final done = Completer<void>();
       harness.session.frames.listen(
