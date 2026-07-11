@@ -563,6 +563,48 @@ void main() {
       expect(input.startStreamCalls, 2);
     });
 
+    test('the format watcher is registered before the stream opens', () async {
+      // Review finding R1-F3: this ordering was documented as load-bearing in the
+      // round that introduced the comment, and swapping the two statements left all
+      // 73 tests green — a documented invariant with no guard, which is what R0-F7
+      // was. On Android `notifyConfigChanged` fires immediately after the platform
+      // call `startStream` awaits resolves, so a watcher registered afterwards can
+      // miss the only notification there will be.
+      final input = _ScriptedAudioInput();
+      final capture = MicCapture(input: input);
+
+      await capture.start();
+
+      expect(
+        input.calls,
+        ['hasPermission', 'watchFormat', 'startStream'],
+        reason: 'permission first, then the watcher, then the microphone',
+      );
+    });
+
+    test('the session getter tracks the running capture', () async {
+      // Review finding R1-F4. This getter was touched by no test: I had claimed it
+      // was "covered incidentally by the busy path", and it is not — that path reads
+      // the `_session` field directly and never the getter. Reducing it to
+      // `return _session;` left all 73 green.
+      final input = _ScriptedAudioInput();
+      final capture = MicCapture(input: input);
+
+      expect(capture.session, isNull, reason: 'nothing started yet');
+
+      final started = (await capture.start()) as MicCaptureStarted;
+      expect(capture.session, same(started.session));
+
+      await started.session.stop();
+      expect(
+        capture.session,
+        isNull,
+        reason:
+            'a stopped session is not a running capture, which is the whole '
+            'distinction the getter draws over the field',
+      );
+    });
+
     test('dispose stops the capture and releases the recorder', () async {
       final harness = await _Harness.start();
 
@@ -844,6 +886,73 @@ void main() {
       );
     });
 
+    test('it is on by default, at five seconds', () async {
+      // Review finding R1-F1. Two mutations survived all 73 tests: deleting the
+      // default outright (making it `null`, i.e. the watchdog off everywhere) and
+      // changing it to 500 seconds. Neither is observable, because `_Harness`
+      // deliberately opts out with `null` and every watchdog test passes an explicit
+      // duration — so no test ever constructed a `MicCapture` with the watchdog on
+      // by default. The entire R0-F2 remedy could have been disabled in production
+      // with a green suite, which is R0-F7's shape on the feature R0-F2 asked for.
+      expect(
+        MicCapture(input: _ScriptedAudioInput()).stallTimeout,
+        const Duration(seconds: 5),
+      );
+    });
+
+    test('the default actually arms, without being passed one', () async {
+      // The composition the assertion above cannot make on its own: that the
+      // constructor's default reaches the session and arms a real timer. Deliberately
+      // the slowest test in this suite — it waits out the production five seconds —
+      // and it is worth it once, because what it guards is "the watchdog runs at
+      // all" rather than any detail of how.
+      final input = _ScriptedAudioInput();
+      final capture = MicCapture(input: input);
+      final session = ((await capture.start()) as MicCaptureStarted).session;
+      Object? fault;
+      final done = Completer<void>();
+      session.frames.listen(
+        (_) {},
+        onError: (Object error) => fault = error,
+        onDone: done.complete,
+      );
+
+      input.emit([1, 2]);
+      await done.future.timeout(const Duration(seconds: 20));
+
+      expect(fault, isA<MicCaptureFault>());
+      expect(session.isCapturing, isFalse);
+    });
+
+    test('a capture that never receives a single buffer still faults', () async {
+      // Review finding R1-F2, and the worst form of the failure the watchdog exists
+      // for: a microphone that produced nothing at all. Deleting the arm in
+      // `_attach` left all 73 tests green, because every other watchdog test emits a
+      // buffer first and `_onRawBuffer` re-arms — so what they bound was the
+      // *re*-arm. This case is reachable on both platforms: on iOS an interruption
+      // beginning between `engine.start()` and the first tap callback leaves
+      // `m_isPaused` true and `handleTap` returns early forever; on Android a
+      // `PCMReader.read()` that keeps returning 0 is filtered before the sink, so no
+      // event is ever sent.
+      final harness = await _Harness.start(
+        stallTimeout: const Duration(milliseconds: 60),
+        listen: false,
+      );
+      Object? fault;
+      final done = Completer<void>();
+      harness.session.frames.listen(
+        (_) {},
+        onError: (Object error) => fault = error,
+        onDone: done.complete,
+      );
+
+      // Nothing emitted at all.
+      await done.future;
+
+      expect(fault, isA<MicCaptureFault>());
+      expect(harness.input.stopCalls, 1);
+    });
+
     test('a live microphone keeps re-arming it', () async {
       // The watchdog measures *buffers*, not speech. Any live input produces
       // buffers continuously — a quiet room is near-zero samples, not an absence —
@@ -1064,6 +1173,10 @@ class _ScriptedAudioInput implements AudioInput {
   int disposeCalls = 0;
   PcmAudioFormat? requestedFormat;
 
+  /// Every seam method called, in order. Exists for the registration-order test:
+  /// counts cannot express a sequence.
+  final List<String> calls = <String>[];
+
   final StreamController<Uint8List> _raw =
       StreamController<Uint8List>.broadcast();
   void Function(String description)? _onCoerced;
@@ -1079,6 +1192,7 @@ class _ScriptedAudioInput implements AudioInput {
 
   @override
   Future<bool> hasPermission({bool request = true}) async {
+    calls.add('hasPermission');
     final error = permissionError;
     if (error != null) throw error;
     return permission;
@@ -1086,6 +1200,7 @@ class _ScriptedAudioInput implements AudioInput {
 
   @override
   Future<Stream<Uint8List>> startStream(PcmAudioFormat format) async {
+    calls.add('startStream');
     final error = startError;
     if (error != null) throw error;
     startStreamCalls++;
@@ -1095,6 +1210,7 @@ class _ScriptedAudioInput implements AudioInput {
 
   @override
   Future<void> watchFormat(void Function(String description) onCoerced) async {
+    calls.add('watchFormat');
     _onCoerced = onCoerced;
   }
 
