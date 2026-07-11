@@ -712,7 +712,7 @@ void main() {
 
       harness.input.emit([1, 2]);
       harness.input.emitError(StateError('audio route lost'));
-      await done.future;
+      await done.future.timeout(_faultDeadline);
 
       expect(events, hasLength(2));
       expect((events.first as MicFrame).bytes, [1, 2]);
@@ -741,7 +741,7 @@ void main() {
       );
 
       await harness.input.closeRaw();
-      await done.future;
+      await done.future.timeout(_faultDeadline);
 
       expect(error, isA<MicCaptureFault>());
       expect((error! as MicCaptureFault).message, contains('unexpectedly'));
@@ -761,7 +761,7 @@ void main() {
       );
 
       harness.input.coerceFormat('48000Hz rather than 16000Hz');
-      await done.future;
+      await done.future.timeout(_faultDeadline);
 
       expect(error, isA<MicCaptureFault>());
       expect((error! as MicCaptureFault).message, contains('48000Hz'));
@@ -792,7 +792,7 @@ void main() {
       harness.input.emitError(StateError('route lost'));
       await pumpEventQueue();
       subscription.resume();
-      await done.future;
+      await done.future.timeout(_faultDeadline);
 
       expect(
         _flatten(events.whereType<MicFrame>()),
@@ -815,7 +815,7 @@ void main() {
       );
 
       harness.input.emitError(StateError('first'));
-      await done.future;
+      await done.future.timeout(_faultDeadline);
       await harness.session.stop();
 
       expect(errors, hasLength(1));
@@ -834,7 +834,7 @@ void main() {
 
       harness.input.emitError(StateError('lost'));
       harness.input.emit([9, 9]);
-      await done.future;
+      await done.future.timeout(_faultDeadline);
 
       expect(events.whereType<MicFrame>(), isEmpty);
     });
@@ -875,7 +875,7 @@ void main() {
       );
 
       harness.input.emit([1, 2]);
-      await done.future;
+      await done.future.timeout(_faultDeadline);
 
       expect(
         _flatten(events.whereType<MicFrame>()),
@@ -957,7 +957,7 @@ void main() {
       // Nothing emitted at all. Bounded so a broken watchdog fails in seconds
       // rather than hanging to `flutter_test`'s 30s default — raised in review
       // round 2, where three mutation rows spent most of their wall clock here.
-      await done.future.timeout(const Duration(seconds: 5));
+      await done.future.timeout(_faultDeadline);
 
       expect(fault, isA<MicCaptureFault>());
       expect(harness.input.stopCalls, 1);
@@ -1243,6 +1243,16 @@ class _ScriptedAudioInput implements AudioInput {
     if (!_raw.isClosed) await _raw.close();
   }
 }
+
+/// A bound on every wait for a fault or a stream close.
+///
+/// A test that expects a `MicCaptureFault` and does not get one must fail in
+/// seconds rather than hang to `flutter_test`'s 30s default. Review finding R3-F1:
+/// I reported bounding two such waits and had bounded one, and the consequence was
+/// measurable — the reviewer's row that broke the fault path spent most of its wall
+/// clock in the wait I had missed. Named once here so the next one cannot drift, and
+/// so `grep` over this file answers "are they all bounded?" with a single count.
+const _faultDeadline = Duration(seconds: 5);
 
 List<int> _flatten(Iterable<MicFrame> frames) =>
     frames.expand((frame) => frame.bytes).toList();
