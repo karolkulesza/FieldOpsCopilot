@@ -159,10 +159,31 @@ class MicCaptureSession {
 
   StreamSubscription<Uint8List>? _rawSubscription;
   MicCaptureFault? _pendingFault;
+
+  /// Set as soon as [stop] is called, which is *before* the input is released.
+  ///
+  /// Distinct from [_finishing] because the window between the two is exactly
+  /// where the plugin's already-queued buffers arrive: they must still be
+  /// accepted, while a stream `done` in that window must not be read as a fault.
+  bool _stopRequested = false;
+
+  /// Set once no further buffer will be accepted.
   bool _finishing = false;
   bool _closed = false;
 
   final Completer<void> _releaseCompleter = Completer<void>();
+  final Completer<void> _rawClosed = Completer<void>();
+
+  /// How long [stop] waits for the plugin to close its stream before giving up on
+  /// the drain.
+  ///
+  /// Bounded rather than open-ended on the principle Task 1.11 arrived at the
+  /// hard way: a seam that hangs reports nothing, and a frozen UI reads as a
+  /// crash. A quarter-second is far longer than the close takes when it happens
+  /// at all — it is already in flight when the release completes — and short
+  /// enough that a plugin which never closes costs a perceptible pause rather
+  /// than the app.
+  static const drainGrace = Duration(milliseconds: 250);
 
   /// Completes when the microphone has actually been handed back, which is later
   /// than [isCapturing] going false.
@@ -192,7 +213,12 @@ class MicCaptureSession {
   int get droppedByteCount => _droppedByteCount;
 
   /// Whether audio is still being captured.
-  bool get isCapturing => !_finishing && !_closed;
+  ///
+  /// Goes false the moment [stop] is *asked for*, not when it finishes: from that
+  /// point on this session will accept no new audio, only drain what the plugin
+  /// had already queued. Callers waiting for the microphone itself to come back
+  /// want [released].
+  bool get isCapturing => !_stopRequested && !_closed;
 
   /// Closes the microphone and lets [frames] drain, then close.
   ///
@@ -200,21 +226,35 @@ class MicCaptureSession {
   /// input is released — not once the stream has drained, which cannot be
   /// promised to a caller who may itself be the thing draining it.
   ///
+  /// **The release happens before the subscription is cancelled, and that order
+  /// is the whole point.** Buffers the plugin has already handed to its stream
+  /// but not yet dispatched are lost the instant the subscription is cancelled,
+  /// so cancelling first truncates the end of the utterance — the last word of
+  /// "…and the brake is dragging", every time, with nothing to indicate it
+  /// happened. Awaiting the release yields to the event loop, which is what lets
+  /// those buffers land first.
+  ///
   /// A failure releasing the input is rethrown, after [frames] has been closed
   /// out: the stream is finished either way, but "the microphone may still be
   /// open" is not something to swallow.
   Future<void> stop() async {
-    if (_finishing) return released;
-    _finishing = true;
-    await _rawSubscription?.cancel();
-    _rawSubscription = null;
-    // Whatever is already captured is still valid audio, so the carry is not
-    // flushed: a partial frame is not a frame, and padding it would invent
-    // samples.
-    _carry = null;
+    if (_stopRequested) return released;
+    _stopRequested = true;
     try {
       await _releaseInput();
+      // Releasing the input closes the plugin's stream, and every buffer it had
+      // already queued is delivered before that close. So waiting for the close
+      // — rather than for the release future alone — is what makes the drain
+      // complete instead of "however many event-loop turns the release happened
+      // to take".
+      await _rawClosed.future.timeout(drainGrace, onTimeout: () {});
     } finally {
+      _finishing = true;
+      await _rawSubscription?.cancel();
+      _rawSubscription = null;
+      // A partial frame is not a frame, and padding it would invent samples the
+      // technician did not speak, so the carry is discarded rather than flushed.
+      _carry = null;
       if (!_releaseCompleter.isCompleted) _releaseCompleter.complete();
       _pump();
     }
@@ -225,12 +265,21 @@ class MicCaptureSession {
       _onRawBuffer,
       onError: (Object error, StackTrace stackTrace) =>
           _fail(MicCaptureFault('the microphone reported an error: $error')),
-      // The platform closing the stream by itself is the microphone going away
-      // mid-capture (a revoked permission, a route change, another app taking
-      // the input) — not a normal end, which only [stop] produces.
-      onDone: () => _fail(
-        const MicCaptureFault('the microphone closed the stream unexpectedly'),
-      ),
+      onDone: () {
+        if (!_rawClosed.isCompleted) _rawClosed.complete();
+        // Releasing the input closes the plugin's stream (`record` 7.1.1,
+        // `AudioRecorder.stop` → `_stopRecordStream`), so a `done` arriving
+        // during [stop] is the expected end and not a fault. One arriving at any
+        // other time is the microphone going away mid-capture — a revoked
+        // permission, a route change, another app taking the input — and the
+        // alternative to reporting it is a transcript that simply stops.
+        if (_stopRequested) return;
+        _fail(
+          const MicCaptureFault(
+            'the microphone closed the stream unexpectedly',
+          ),
+        );
+      },
     );
   }
 
@@ -311,8 +360,9 @@ class MicCaptureSession {
   }
 
   void _fail(MicCaptureFault fault) {
-    if (_finishing) return;
+    if (_stopRequested || _finishing) return;
     _pendingFault = fault;
+    _stopRequested = true;
     _finishing = true;
     _rawSubscription?.cancel();
     _rawSubscription = null;

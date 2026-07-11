@@ -1,0 +1,807 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:field_ops_copilot/services/audio/mic_capture.dart';
+import 'package:field_ops_copilot/services/audio/pcm_audio_format.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:record/record.dart';
+
+/// Unit-tier coverage for Task 2.1.
+///
+/// The device AC (**TC-MIC-01**) asserts the one thing only hardware can answer:
+/// that a real microphone produces real PCM. Everything *around* that — the
+/// permission gate, frame normalisation, the bounded backlog, the lifecycle, and
+/// what happens when the microphone goes away mid-utterance — is decided by
+/// [MicCapture] over the [AudioInput] seam, and is bound here.
+///
+/// The double below is deliberately a **broadcast** controller with no
+/// backpressure, because that is the shape `record` 7.1.1 actually returns
+/// (`_StreamMixin._startRecordStream`). Testing against a well-behaved
+/// single-subscription stream would test a world the plugin does not provide.
+void main() {
+  group('permission gate', () {
+    test('a denial is a value, and the microphone is never opened', () async {
+      final input = _ScriptedAudioInput(permission: false);
+      final capture = MicCapture(input: input);
+
+      final result = await capture.start();
+
+      expect(result, isA<MicPermissionDenied>());
+      expect(
+        input.startStreamCalls,
+        0,
+        reason:
+            'asking the recorder for audio it may not take is the bug this '
+            'gate exists to prevent',
+      );
+    });
+
+    test('a failure to *ask* is not a denial', () async {
+      // The one that actually happens is a missing platform usage declaration.
+      // Reporting that as "permission denied" sends an operator to Settings for
+      // a toggle that is not there.
+      final input = _ScriptedAudioInput()
+        ..permissionError = Exception('MissingPluginException');
+      final capture = MicCapture(input: input);
+
+      final result = await capture.start();
+
+      expect(result, isA<MicCaptureUnavailable>());
+      expect(
+        (result as MicCaptureUnavailable).message,
+        contains('MissingPluginException'),
+      );
+      expect(input.startStreamCalls, 0);
+    });
+
+    test(
+      'a granted permission opens the microphone in the STT format',
+      () async {
+        final input = _ScriptedAudioInput();
+        final capture = MicCapture(input: input);
+
+        final result = await capture.start();
+
+        expect(result, isA<MicCaptureStarted>());
+        expect(input.startStreamCalls, 1);
+        expect(input.requestedFormat, PcmAudioFormat.sttMono16k);
+        expect(
+          (result as MicCaptureStarted).session.format,
+          PcmAudioFormat.sttMono16k,
+        );
+      },
+    );
+
+    test(
+      'a microphone that refuses to open is unavailable, not denied',
+      () async {
+        final input = _ScriptedAudioInput()
+          ..startError = Exception('input in use by another app');
+        final capture = MicCapture(input: input);
+
+        final result = await capture.start();
+
+        expect(result, isA<MicCaptureUnavailable>());
+        expect(
+          (result as MicCaptureUnavailable).message,
+          contains('input in use by another app'),
+        );
+      },
+    );
+  });
+
+  group('frame normalisation', () {
+    test('delivers what the microphone produced', () async {
+      final harness = await _Harness.start();
+
+      harness.input.emit([1, 2, 3, 4]);
+      harness.input.emit([5, 6]);
+      await harness.session.stop();
+
+      expect(await harness.byteRuns, [
+        [1, 2, 3, 4],
+        [5, 6],
+      ]);
+    });
+
+    test('drops empty buffers rather than forwarding them', () async {
+      // Both platforms can produce one: iOS when a tap buffer carries no frames,
+      // Android when `AudioRecord.read` returns 0. An empty frame is not audio,
+      // and a recogniser has to special-case it if it arrives.
+      final harness = await _Harness.start();
+
+      harness.input.emit([]);
+      harness.input.emit([1, 2]);
+      harness.input.emit([]);
+      await harness.session.stop();
+
+      final frames = await harness.frames;
+      expect(frames, hasLength(1));
+      expect(frames.single.bytes, [1, 2]);
+      expect(
+        frames.every((frame) => frame.bytes.isNotEmpty),
+        isTrue,
+        reason: 'MicFrame.bytes documents itself as never empty',
+      );
+    });
+
+    test('carries a split sample instead of emitting half of one', () async {
+      // A frame boundary is the only place a PCM stream may be cut. Emit one byte
+      // at a time and the naive implementation forwards half-samples, at which
+      // point every sample after the splice decodes from the wrong two bytes.
+      final harness = await _Harness.start();
+
+      for (final byte in [1, 2, 3, 4, 5]) {
+        harness.input.emit([byte]);
+      }
+      await harness.session.stop();
+
+      final frames = await harness.frames;
+      expect(frames.map((frame) => frame.bytes.length), everyElement(isNot(0)));
+      for (final frame in frames) {
+        expect(
+          frame.bytes.length.remainder(2),
+          0,
+          reason:
+              'a 16-bit sample is two bytes; a frame is a whole number of them',
+        );
+      }
+      // Nothing invented, nothing reordered, and only the trailing odd byte held
+      // back — it is still a partial sample when the capture ends, so it is
+      // dropped rather than padded into a sample nobody spoke.
+      expect(_flatten(frames), [1, 2, 3, 4]);
+    });
+
+    test('carries to a whole frame on a multi-channel stream', () async {
+      // Cutting a stereo stream at a *sample* boundary that is not a *frame*
+      // boundary swaps left and right for everything after it — audible, and not
+      // caught by any even-length assertion.
+      const stereo = PcmAudioFormat(sampleRate: 16000, numChannels: 2);
+      final harness = await _Harness.start(format: stereo);
+
+      harness.input.emit([1, 2, 3, 4, 5, 6]);
+      harness.input.emit([7, 8]);
+      await harness.session.stop();
+
+      final frames = await harness.frames;
+      for (final frame in frames) {
+        expect(frame.bytes.length.remainder(stereo.bytesPerFrame), 0);
+      }
+      expect(_flatten(frames), [1, 2, 3, 4, 5, 6, 7, 8]);
+    });
+
+    test('a buffer shorter than one frame produces no frame at all', () async {
+      const stereo = PcmAudioFormat(sampleRate: 16000, numChannels: 2);
+      final harness = await _Harness.start(format: stereo);
+
+      harness.input.emit([1, 2]);
+      await pumpEventQueue();
+
+      expect(harness.received, isEmpty);
+
+      harness.input.emit([3, 4]);
+      await harness.session.stop();
+
+      expect(_flatten(await harness.frames), [1, 2, 3, 4]);
+    });
+  });
+
+  group('the backlog bound', () {
+    test('audio captured before the first listen is not lost', () async {
+      // The plugin's own stream discards every buffer that arrives with no
+      // listener, so this is a property of the session rather than of the input.
+      final input = _ScriptedAudioInput();
+      final capture = MicCapture(input: input);
+      final session = ((await capture.start()) as MicCaptureStarted).session;
+
+      input.emit([1, 2, 3, 4]);
+      await pumpEventQueue();
+
+      final frames = <MicFrame>[];
+      final done = session.frames.listen(frames.add).asFuture<void>();
+      await session.stop();
+      await done;
+
+      expect(_flatten(frames), [1, 2, 3, 4]);
+      expect(session.droppedByteCount, 0);
+    });
+
+    test('a stalled consumer loses the oldest audio, not the newest', () async {
+      final harness = await _Harness.start(
+        // 32 bytes — one millisecond of 16 kHz mono.
+        maxBacklog: const Duration(milliseconds: 1),
+        listen: false,
+      );
+      final frames = <MicFrame>[];
+      final subscription = harness.session.frames.listen(frames.add);
+      await pumpEventQueue();
+
+      subscription.pause();
+      for (var buffer = 0; buffer < 4; buffer++) {
+        harness.input.emit(List.filled(16, buffer));
+      }
+      await pumpEventQueue();
+      subscription.resume();
+      await pumpEventQueue();
+      await harness.session.stop();
+      await subscription.asFuture<void>();
+
+      expect(
+        harness.session.droppedByteCount,
+        32,
+        reason:
+            'a 32-byte bound holds two 16-byte buffers, so of the four offered '
+            'exactly two are dropped',
+      );
+      expect(
+        _flatten(frames),
+        List.filled(16, 2) + List.filled(16, 3),
+        reason:
+            'buffers 0 and 1 are the ones dropped; the recogniser resumes at '
+            'the present moment rather than accumulating lag it can never pay '
+            'off',
+      );
+    });
+
+    test('the gap is attached to the frame that follows it', () async {
+      final harness = await _Harness.start(
+        maxBacklog: const Duration(milliseconds: 1),
+        listen: false,
+      );
+      final frames = <MicFrame>[];
+      final subscription = harness.session.frames.listen(frames.add);
+      await pumpEventQueue();
+
+      subscription.pause();
+      // Three buffers dropped in one stall must arrive as one 48-byte gap on the
+      // next frame, not as three separate losses nobody can add up.
+      for (var buffer = 0; buffer < 5; buffer++) {
+        harness.input.emit(List.filled(16, buffer));
+      }
+      await pumpEventQueue();
+      subscription.resume();
+      await pumpEventQueue();
+      await harness.session.stop();
+      await subscription.asFuture<void>();
+
+      expect(frames.first.precedingGapBytes, 48);
+      expect(frames.first.followsGap, isTrue);
+      expect(
+        frames.skip(1).every((frame) => frame.precedingGapBytes == 0),
+        isTrue,
+        reason: 'the gap is reported once, on the frame after it',
+      );
+      expect(harness.session.droppedByteCount, 48);
+    });
+
+    test('a bound smaller than one buffer keeps the newest buffer', () async {
+      // Degenerate but reachable: a platform buffer larger than the whole bound.
+      // Dropping until the backlog fits would empty it completely and the capture
+      // would deliver nothing, forever.
+      final harness = await _Harness.start(
+        maxBacklog: const Duration(milliseconds: 1),
+        listen: false,
+      );
+      final frames = <MicFrame>[];
+      final subscription = harness.session.frames.listen(frames.add);
+      await pumpEventQueue();
+
+      subscription.pause();
+      harness.input.emit(List.filled(64, 7));
+      harness.input.emit(List.filled(64, 9));
+      await pumpEventQueue();
+      subscription.resume();
+      await pumpEventQueue();
+      await harness.session.stop();
+      await subscription.asFuture<void>();
+
+      expect(_flatten(frames), List.filled(64, 9));
+      expect(harness.session.droppedByteCount, 64);
+    });
+
+    test('a consumer that keeps up loses nothing', () async {
+      final harness = await _Harness.start(
+        maxBacklog: const Duration(milliseconds: 1),
+      );
+
+      for (var buffer = 0; buffer < 20; buffer++) {
+        harness.input.emit(List.filled(16, buffer));
+        await pumpEventQueue();
+      }
+      await harness.session.stop();
+
+      expect(await harness.frames, hasLength(20));
+      expect(harness.session.droppedByteCount, 0);
+    });
+  });
+
+  group('lifecycle', () {
+    test('stop drains the audio, then closes the stream', () async {
+      final harness = await _Harness.start();
+
+      harness.input.emit([1, 2]);
+      harness.input.emit([3, 4]);
+      await harness.session.stop();
+
+      // The `frames` future completing at all is the closure; the content is the
+      // drain. Task 2.2 depends on both: `SttEngine.transcribe` consumes the
+      // stream and cannot emit a final transcript until it ends.
+      expect(_flatten(await harness.frames), [1, 2, 3, 4]);
+      expect(harness.session.isCapturing, isFalse);
+      expect(harness.input.stopCalls, 1);
+    });
+
+    test('stop is idempotent and releases the input once', () async {
+      final harness = await _Harness.start();
+
+      await harness.session.stop();
+      await harness.session.stop();
+      await harness.session.stop();
+
+      expect(harness.input.stopCalls, 1);
+      await harness.frames;
+    });
+
+    test('a second start is refused while one is running', () async {
+      final input = _ScriptedAudioInput();
+      final capture = MicCapture(input: input);
+      final first = ((await capture.start()) as MicCaptureStarted).session;
+
+      final second = await capture.start();
+
+      expect(second, isA<MicCaptureBusy>());
+      expect(
+        input.startStreamCalls,
+        1,
+        reason:
+            "the plugin's own answer to a second startStream is to close the "
+            'first stream with no error — the outcome this refusal prevents',
+      );
+
+      // And the running capture is genuinely untouched.
+      final frames = <MicFrame>[];
+      final done = first.frames.listen(frames.add).asFuture<void>();
+      input.emit([1, 2]);
+      await first.stop();
+      await done;
+      expect(_flatten(frames), [1, 2]);
+    });
+
+    test('a start after a stop waits for the recorder to come back', () async {
+      // `isCapturing` goes false at the top of `stop()`, before the plugin has
+      // released anything. Starting on that signal alone overlaps two streams on
+      // one recorder, which is the same hazard `MicCaptureBusy` covers.
+      final input = _ScriptedAudioInput();
+      final capture = MicCapture(input: input);
+      final first = ((await capture.start()) as MicCaptureStarted).session;
+
+      final gate = Completer<void>();
+      input.releaseGate = gate;
+      final stopping = first.stop();
+      await pumpEventQueue();
+
+      var restarted = false;
+      final restarting = capture.start().then((_) => restarted = true);
+      await pumpEventQueue();
+
+      expect(
+        restarted,
+        isFalse,
+        reason: 'the release has not completed, so no second stream may open',
+      );
+      expect(input.startStreamCalls, 1);
+
+      gate.complete();
+      await stopping;
+      await restarting;
+
+      expect(input.startStreamCalls, 2);
+    });
+
+    test('dispose stops the capture and releases the recorder', () async {
+      final harness = await _Harness.start();
+
+      await harness.capture.dispose();
+
+      expect(harness.input.stopCalls, 1);
+      expect(harness.input.disposeCalls, 1);
+      expect(harness.session.isCapturing, isFalse);
+      await harness.frames;
+    });
+
+    test('audio queued behind a paused consumer survives stop', () async {
+      // The drain has to reach a consumer that is *still* paused when the capture
+      // ends — otherwise the tail of the utterance waits for a resume that
+      // arrives after the stream was already closed out, and the recogniser never
+      // sees the last words.
+      final harness = await _Harness.start(listen: false);
+      final frames = <MicFrame>[];
+      final subscription = harness.session.frames.listen(frames.add);
+      await pumpEventQueue();
+
+      subscription.pause();
+      harness.input.emit([1, 2]);
+      harness.input.emit([3, 4]);
+      await pumpEventQueue();
+      await harness.session.stop();
+
+      expect(frames, isEmpty, reason: 'still paused, so nothing delivered yet');
+
+      subscription.resume();
+      await subscription.asFuture<void>();
+
+      expect(_flatten(frames), [1, 2, 3, 4]);
+    });
+
+    test('a plugin that never closes its stream does not hang stop', () async {
+      // The drain waits for the plugin's stream close. If that close never comes,
+      // an unbounded wait would freeze whatever tapped "stop" — Task 1.11's
+      // lesson, that a seam which hangs reports nothing and a frozen UI reads as
+      // a crash. Bound instead, and the audio already captured still goes out.
+      final input = _ScriptedAudioInput()..closesStreamOnStop = false;
+      final capture = MicCapture(input: input);
+      final session = ((await capture.start()) as MicCaptureStarted).session;
+      final frames = <MicFrame>[];
+      final drained = session.frames.listen(frames.add).asFuture<void>();
+
+      input.emit([1, 2]);
+      await pumpEventQueue();
+      final stopwatch = Stopwatch()..start();
+      await session.stop();
+      stopwatch.stop();
+      await drained;
+
+      expect(_flatten(frames), [1, 2]);
+      expect(
+        stopwatch.elapsed,
+        greaterThanOrEqualTo(MicCaptureSession.drainGrace),
+        reason: 'the grace period is what was waited out',
+      );
+      expect(
+        stopwatch.elapsed,
+        lessThan(MicCaptureSession.drainGrace * 8),
+        reason: 'and it is a bound, not an open-ended wait',
+      );
+    });
+
+    test(
+      'a failure releasing the microphone is reported, not swallowed',
+      () async {
+        // "the microphone may still be open" is not something to lose. The stream
+        // is still closed out first, so a consumer is not left hanging either.
+        final harness = await _Harness.start();
+        harness.input.stopError = StateError('the recorder refused to stop');
+
+        await expectLater(harness.session.stop(), throwsStateError);
+
+        expect(harness.session.isCapturing, isFalse);
+        await harness.frames;
+      },
+    );
+
+    test('dispose with no capture still releases the recorder', () async {
+      final input = _ScriptedAudioInput();
+      final capture = MicCapture(input: input);
+
+      await capture.dispose();
+
+      expect(input.disposeCalls, 1);
+      expect(input.stopCalls, 0);
+    });
+  });
+
+  group('faults', () {
+    test('a microphone error arrives after the audio it interrupted', () async {
+      // Order matters: a half-utterance is still transcribable, so the audio goes
+      // out first and the reason it ended goes out second.
+      final harness = await _Harness.start(listen: false);
+      final events = <Object>[];
+      final done = Completer<void>();
+      harness.session.frames.listen(
+        events.add,
+        onError: events.add,
+        onDone: done.complete,
+      );
+
+      harness.input.emit([1, 2]);
+      harness.input.emitError(StateError('audio route lost'));
+      await done.future;
+
+      expect(events, hasLength(2));
+      expect((events.first as MicFrame).bytes, [1, 2]);
+      expect(events.last, isA<MicCaptureFault>());
+      expect((events.last as MicCaptureFault).message, contains('route lost'));
+      expect(
+        harness.input.stopCalls,
+        1,
+        reason: 'a fault must still hand the microphone back',
+      );
+      expect(harness.session.isCapturing, isFalse);
+    });
+
+    test('the platform ending the stream by itself is a fault', () async {
+      // Only `stop` produces a normal end. The stream closing on its own is the
+      // microphone going away — a revoked permission, a route change, another app
+      // taking the input — and the alternative to reporting it is a transcript
+      // that just stops.
+      final harness = await _Harness.start(listen: false);
+      Object? error;
+      final done = Completer<void>();
+      harness.session.frames.listen(
+        (_) {},
+        onError: (Object e) => error = e,
+        onDone: done.complete,
+      );
+
+      await harness.input.closeRaw();
+      await done.future;
+
+      expect(error, isA<MicCaptureFault>());
+      expect((error! as MicCaptureFault).message, contains('unexpectedly'));
+    });
+
+    test('a format the platform substituted stops the capture', () async {
+      // 16-bit PCM at the wrong sample rate does not fail — it transcribes as
+      // nonsense. A capture that cannot be trusted is worse than no capture, so
+      // this is the one condition that ends a session that is otherwise healthy.
+      final harness = await _Harness.start(listen: false);
+      Object? error;
+      final done = Completer<void>();
+      harness.session.frames.listen(
+        (_) {},
+        onError: (Object e) => error = e,
+        onDone: done.complete,
+      );
+
+      harness.input.coerceFormat('48000Hz rather than 16000Hz');
+      await done.future;
+
+      expect(error, isA<MicCaptureFault>());
+      expect((error! as MicCaptureFault).message, contains('48000Hz'));
+      expect(harness.input.stopCalls, 1);
+    });
+
+    test('a fault is reported once, and stop after it is a no-op', () async {
+      final harness = await _Harness.start(listen: false);
+      final errors = <Object>[];
+      final done = Completer<void>();
+      harness.session.frames.listen(
+        (_) {},
+        onError: errors.add,
+        onDone: done.complete,
+      );
+
+      harness.input.emitError(StateError('first'));
+      await done.future;
+      await harness.session.stop();
+
+      expect(errors, hasLength(1));
+      expect(harness.input.stopCalls, 1);
+    });
+
+    test('buffers arriving after a fault are ignored', () async {
+      final harness = await _Harness.start(listen: false);
+      final events = <Object>[];
+      final done = Completer<void>();
+      harness.session.frames.listen(
+        events.add,
+        onError: events.add,
+        onDone: done.complete,
+      );
+
+      harness.input.emitError(StateError('lost'));
+      harness.input.emit([9, 9]);
+      await done.future;
+
+      expect(events.whereType<MicFrame>(), isEmpty);
+    });
+  });
+
+  group('RecordAudioInput.describeFormatMismatch', () {
+    // The plugin fires `onConfigChanged` when *any* of bit rate, sample rate or
+    // channel count was adjusted. Bit rate does not exist for a raw PCM stream —
+    // neither platform's PCM encoder reads it — so this decision is what keeps
+    // the tripwire from ending a perfectly good capture.
+    String? describe({
+      AudioEncoder encoder = AudioEncoder.pcm16bits,
+      int sampleRate = 16000,
+      int numChannels = 1,
+    }) => RecordAudioInput.describeFormatMismatch(
+      requested: PcmAudioFormat.sttMono16k,
+      encoder: encoder,
+      sampleRate: sampleRate,
+      numChannels: numChannels,
+    );
+
+    test('the requested format is not a mismatch', () {
+      expect(describe(), isNull);
+    });
+
+    test('an adjustment to nothing that matters is not a mismatch', () {
+      // This *is* the bit-rate case: the callback fired, and all three fields the
+      // PCM contract depends on still match. Faulting here would make the
+      // tripwire worse than not watching at all.
+      expect(
+        describe(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+        isNull,
+      );
+    });
+
+    test('a substituted sample rate is named, with both values', () {
+      expect(describe(sampleRate: 48000), '48000Hz rather than 16000Hz');
+    });
+
+    test('a substituted channel count is named', () {
+      expect(describe(numChannels: 2), '2 channels rather than 1');
+    });
+
+    test('a substituted encoder is named', () {
+      // The one that produces garbage rather than wrong-speed audio: `aacLc` is
+      // `RecordConfig`'s default, and encoded frames handed to a PCM recogniser
+      // are noise.
+      expect(describe(encoder: AudioEncoder.aacLc), 'encoder aacLc');
+    });
+
+    test('every difference is reported, not just the first', () {
+      expect(
+        describe(
+          encoder: AudioEncoder.aacLc,
+          sampleRate: 44100,
+          numChannels: 2,
+        ),
+        'encoder aacLc, 44100Hz rather than 16000Hz, 2 channels rather than 1',
+      );
+    });
+  });
+}
+
+/// A started capture plus the pieces a test needs to drive and read it.
+class _Harness {
+  _Harness._({
+    required this.capture,
+    required this.input,
+    required this.session,
+    required this.received,
+    required this._drained,
+  });
+
+  static Future<_Harness> start({
+    PcmAudioFormat format = PcmAudioFormat.sttMono16k,
+    Duration maxBacklog = const Duration(seconds: 2),
+    bool listen = true,
+  }) async {
+    final input = _ScriptedAudioInput();
+    final capture = MicCapture(
+      input: input,
+      format: format,
+      maxBacklog: maxBacklog,
+    );
+    final started = await capture.start();
+    final session = (started as MicCaptureStarted).session;
+
+    final received = <MicFrame>[];
+    Future<void>? drained;
+    if (listen) {
+      drained = session.frames.listen(received.add).asFuture<void>();
+    }
+    return _Harness._(
+      capture: capture,
+      input: input,
+      session: session,
+      received: received,
+      drained: drained,
+    );
+  }
+
+  final MicCapture capture;
+  final _ScriptedAudioInput input;
+  final MicCaptureSession session;
+
+  /// Frames delivered so far, when the harness is listening.
+  final List<MicFrame> received;
+
+  final Future<void>? _drained;
+
+  /// Every frame delivered, once the stream has closed.
+  Future<List<MicFrame>> get frames async {
+    await _drained;
+    return received;
+  }
+
+  /// The bytes of each delivered frame, once the stream has closed.
+  Future<List<List<int>>> get byteRuns async =>
+      (await frames).map((frame) => frame.bytes.toList()).toList();
+}
+
+/// An [AudioInput] a test drives directly.
+///
+/// The raw stream is a broadcast controller with no backpressure, matching what
+/// `record` 7.1.1 returns.
+class _ScriptedAudioInput implements AudioInput {
+  _ScriptedAudioInput({this.permission = true});
+
+  /// What [hasPermission] answers.
+  bool permission;
+
+  /// Thrown by [hasPermission] instead of answering.
+  Object? permissionError;
+
+  /// Thrown by [startStream] instead of opening.
+  Object? startError;
+
+  /// Thrown by [stop] after the call has been counted.
+  Object? stopError;
+
+  /// Whether [stop] closes the raw stream, as `record` does. Cleared to model a
+  /// plugin that leaves it open.
+  bool closesStreamOnStop = true;
+
+  /// Held open to keep [stop] pending, so a test can observe the window between
+  /// a capture ending and the recorder actually coming back.
+  Completer<void>? releaseGate;
+
+  int startStreamCalls = 0;
+  int stopCalls = 0;
+  int disposeCalls = 0;
+  PcmAudioFormat? requestedFormat;
+
+  final StreamController<Uint8List> _raw =
+      StreamController<Uint8List>.broadcast();
+  void Function(String description)? _onCoerced;
+
+  void emit(List<int> bytes) => _raw.add(Uint8List.fromList(bytes));
+
+  void emitError(Object error) => _raw.addError(error);
+
+  Future<void> closeRaw() => _raw.close();
+
+  /// Fires the platform's "I substituted your format" callback.
+  void coerceFormat(String description) => _onCoerced!(description);
+
+  @override
+  Future<bool> hasPermission({bool request = true}) async {
+    final error = permissionError;
+    if (error != null) throw error;
+    return permission;
+  }
+
+  @override
+  Future<Stream<Uint8List>> startStream(PcmAudioFormat format) async {
+    final error = startError;
+    if (error != null) throw error;
+    startStreamCalls++;
+    requestedFormat = format;
+    return _raw.stream;
+  }
+
+  @override
+  Future<void> watchFormat(void Function(String description) onCoerced) async {
+    _onCoerced = onCoerced;
+  }
+
+  /// Mirrors `record` 7.1.1: stopping closes the record stream
+  /// (`AudioRecorder.stop` → `_stopRecordStream`), which is what lets a session's
+  /// drain be complete rather than best-effort.
+  @override
+  Future<void> stop() async {
+    stopCalls++;
+    final gate = releaseGate;
+    if (gate != null) await gate.future;
+    final error = stopError;
+    if (error != null) throw error;
+    if (closesStreamOnStop && !_raw.isClosed) await _raw.close();
+  }
+
+  @override
+  Future<void> dispose() async {
+    disposeCalls++;
+    if (!_raw.isClosed) await _raw.close();
+  }
+}
+
+List<int> _flatten(Iterable<MicFrame> frames) =>
+    frames.expand((frame) => frame.bytes).toList();
