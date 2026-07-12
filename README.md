@@ -2884,6 +2884,14 @@ hold it:
 | the slot taken at the call site again | an unlistened stream wedges the engine until disposal |
 | the fake's `onCancel` stops releasing | R0-F1's deadlock returns as a leak |
 
+**The harness is a recorded artifact, not a tracked file.** It lives in `ledgers/`,
+which is untracked in this repo exactly as Tasks 1.5, 1.6, 1.9, 1.10, 2.0 and 2.1 left
+theirs — so "the committed harness" means the archived copy beside its results, and the
+only way to tie a results JSON to the harness that produced it is to re-run. Round 3 did
+exactly that and got a byte-identical JSON after normalising the worktree path. Worth
+knowing if Task 2.3 copies this pattern: tracking the harness would make the record
+diffable instead of reproducible-on-demand.
+
 The harness refuses a dirty baseline, asserts the match count on every edit,
 refuses duplicate labels and duplicate edits, verifies each edit actually changes
 the source before believing a survivor, and re-checks the whole tracked surface by
@@ -2929,12 +2937,19 @@ demonstrated a row reaching CONFIRMED off pure collateral — so the confirming 
 recorded rather than asserted, which is what let that audit be done by hand across all
 forty rows.
 
-Its collateral detector printed six `mtime changed` notes, and they are an artifact
-of the harness rather than damage: the revert is `git checkout -- .`, which rewrites
+Its collateral detector printed **eleven** `mtime changed` notes on the 40-row pass, and
+they are an artifact of the harness rather than damage: the revert is `git checkout -- .`, which rewrites
 the mutated file and so moves its mtime, and the check excludes only the *current*
 row's file — so the first row to use a different file reports its predecessor's.
 Said here rather than left as an unexplained line in a log, because an unexplained
 note is indistinguishable from a real one.
+
+One note fires per transition to a different mutated file, so the count moves with the
+row set. **This paragraph said "six" until review round 3 measured eleven** — six was
+exact for the original 24 rows and was then carried unchanged through the 37-, 39- and
+40-row re-runs, in a section whose other figures were updated each time. A number that
+was right once and is not re-derived is a number that goes stale silently; the mechanism
+above is what lets a reader predict the count instead of trusting it.
 
 ### Not wired into the app
 
