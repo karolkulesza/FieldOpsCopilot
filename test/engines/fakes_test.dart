@@ -198,6 +198,38 @@ void main() {
       expect(results.single.isFinal, isTrue);
     });
 
+    test('the script is not emitted until the frame stream closes', () async {
+      // **The ordering property, and it is the fake's whole parity obligation.** The
+      // real engine cannot produce a final before `finishSession`, so a fake that
+      // emitted on the first frame would let a consumer be written against an
+      // ordering the device never produces — 1.8's rule, in the direction that is
+      // easiest to break by accident.
+      //
+      // This replaces what mutation M22 used to bind. That row deleted
+      // `await frames.drain()`, which no longer exists after the R0-F1 rewrite, so
+      // the property needed an oracle that does not depend on the old shape.
+      final engine = FakeSttEngine();
+      await engine.initialize();
+
+      final frames = StreamController<MicFrame>();
+      final seen = <SttTranscript>[];
+      engine.transcribe(frames.stream).listen(seen.add);
+
+      frames.add(MicFrame(bytes: Uint8List(320)));
+      await pumpEventQueue();
+      expect(
+        seen,
+        isEmpty,
+        reason:
+            'a frame is not the end of the utterance; closing the stream is',
+      );
+
+      await frames.close();
+      await pumpEventQueue();
+      expect(seen, hasLength(1));
+      expect(seen.single.isFinal, isTrue);
+    });
+
     test('rawText defaults to text when a backend does no post-processing', () {
       const transcript = SttTranscript('E-102 error');
       expect(transcript.rawText, 'E-102 error');
