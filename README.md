@@ -2560,6 +2560,270 @@ including an empty one, because a quiet room is a stream of near-zero samples
 rather than an absence of buffers — so what it measures is a dead input, not a
 pause in speech.
 
+## Speech to text
+
+`sherpa-onnx` running a **streaming zipformer** (en, 20M params, int8) on a
+dedicated background isolate, behind `SttEngine`. Four files, 43.65MB, provisioned
+by Task 2.0 from a committed ungated source — no build-time defines.
+
+```
+MicCaptureSession.frames ─▶ SherpaSttEngine ─▶ IsolateSttHost ═╗ isolate boundary
+    Stream<MicFrame>          (state machine)                  ║
+                                                               ▼
+                          SttTranscript ◀── SherpaRecognizerRuntime ──▶ libsherpa
+                         (text, rawText,        (every FFI call)
+                          isFinal, segment)
+```
+
+The layering is Task 1.8's, deliberately: `sherpa_recognizer.dart` is the only file
+in `lib/` that imports `package:sherpa_onnx`, `stt_config.dart` speaks this app's
+vocabulary rather than the plugin's, and `SherpaSttEngine` takes an `SttHost` rather
+than building one — so the engine's contract is verified on the host and the device
+tests only have to prove the device part.
+
+### The isolate is load-bearing here, not insurance
+
+Task 1.8's isolate is a guarantee about *our* architecture rather than a bet on a
+dependency: LiteRT-LM already keeps its worst work off the caller. sherpa-onnx has
+nothing to insure. **Every entry point of its Dart API is a synchronous FFI call
+that runs to completion on the calling thread**, read in
+`sherpa_onnx-1.13.5/lib/src/`:
+
+- `OnlineRecognizer(config)` is a *constructor* that loads three ONNX graphs —
+  456–773ms measured on the macOS host.
+- `decode(stream)` runs the encoder, decoder and joiner.
+- `acceptWaveform` allocates native memory and copies the samples into it.
+
+On the UI isolate that is a dropped frame per decode step for the length of an
+utterance. Two more facts came out of the plugin's source rather than its README:
+
+- **The FFI bindings are per-isolate.** `sherpa_onnx.dart` says so in capitals
+  ("This must be called in every isolate that uses sherpa-onnx") and the mechanism
+  is visible — `initBindings` writes static fields. The worker initialises itself;
+  the UI isolate never touches the library.
+- **No `RootIsolateToken` is needed**, unlike the inference worker. sherpa reaches
+  its library through `DynamicLibrary.open` with no platform channel, and the model
+  paths are resolved on the root isolate before spawning, so the worker never calls
+  `path_provider` either. That asymmetry is worth knowing: the failure it avoids is
+  a null `RootIsolateToken.instance` inside the worker.
+
+`modelType` is passed as the **empty string, and that is the correct value**: sherpa
+reads `model_type` from the encoder's own ONNX metadata, and this artifact reports
+`zipformer` (v1, `decode_chunk_len=32`, `T=39`, `model_author=k2-fsa`). The example
+in the plugin's own `online_recognizer.dart` docstring passes `'zipformer2'` — a
+different architecture, and wrong for these weights. Copying the example would have
+hard-coded a value the file it describes contradicts.
+
+### One request, one reply — and that is the flow control
+
+Inference is one request, many replies: a turn streams tokens back until `LlmDone`.
+Recognition is **one request, one reply, every time**. A chunk of audio goes over
+and the transcripts it produced come back — frequently none, and the reply arrives
+anyway, because *the reply is the sender's permission to send again*.
+
+That is the back-pressure, and it composes with what Task 2.1 already built:
+
+1. `SherpaSttEngine` **pauses its subscription for the whole hand-off** and resumes
+   it on the reply, so at most one chunk is ever in flight.
+2. A paused subscription propagates to `MicCaptureSession`'s pause-aware pump.
+3. The mic's bounded backlog then does its job — drop oldest, and report what was
+   lost as `MicFrame.precedingGapBytes`.
+4. The gap crosses the port and the worker **bridges it with silence of its own
+   duration, before the audio that followed it**.
+
+Step 4 is the reason `SttEngine.transcribe` was widened from `Stream<Uint8List>` to
+`Stream<MicFrame>`. Task 0.2 declared it over raw buffers, before 2.1 established
+that dropped audio has to travel *with* the audio; a caller bridging the two with
+`.map((f) => f.bytes)` would discard the gap in one inconspicuous line, which is
+exactly the loss 2.1 carries the field to prevent. A recogniser fed a silent splice
+returns a fluent transcript of a sentence nobody said. Bridging **before** rather
+than after matters too: silence placed after the audio moves the pause past the
+words it separated and changes where the endpointer splits them.
+
+`MicFrame` moved to its own file so `lib/engines/` can name it without importing
+`mic_capture.dart` and dragging `package:record` into the layer that exists to keep
+plugins out. `mic_capture.dart` re-exports it, so every Task 2.1 import still
+resolves.
+
+### The model cannot say "102", and that is not cosmetic
+
+The pinned model ships a **502-entry BPE vocabulary in which no token contains a
+digit** — the only two entries with digits are the `#0` and `#1` blank placeholders
+at ids 500 and 501. A technician saying "E one oh two" is transcribed
+`E ONE OH TWO`, and no amount of configuration changes that.
+
+Left alone, that silently breaks the feature this app is *for*. Task 1.4's
+`RetrievalRouter` is why a fault code reaches the manual's indexed `code` column
+ahead of full-text search, and its `faultCodePattern` requires `\d{2,4}`. So every
+dictated inquiry would skip the structured lookup and fall through to FTS —
+returning a plausible answer grounded in whatever bm25 ranked first. Task 1.9's
+device run already recorded how reachable that is: stop words match, so almost any
+English sentence is a full-text hit.
+
+`spoken_digits.dart` rewrites runs of digit words as digits. The floor is **two**
+consecutive digit words, which is Task 1.4's floor for Task 1.4's reason one step
+earlier: `ONE`, `TWO`, `FOUR` and `O` are ordinary English, and rewriting "one of
+the guide shoes is loose" would corrupt the very inquiry the retrieval path then
+runs on. English says "one oh two" only when spelling something out.
+
+The result is `E 102`, deliberately **not** joined into `E-102`:
+`faultCodePattern` already spans the space, so a hyphen would change how the
+transcript reads without changing what it resolves to. That claim is bound by
+running the router's real pattern over the normaliser's real output — together with
+the counterfactual, that the un-normalised transcript matches no fault code at all.
+
+Casing is left exactly as the recogniser produced it (upper case, no punctuation).
+Nothing downstream is case-sensitive: `faultCodePattern` accepts `[A-Za-z]`, the
+FTS5 index uses the `porter` tokenizer, and the fault `code` column is
+`COLLATE NOCASE`. `SttTranscript.rawText` carries the verbatim output, so the
+normalisation is visible rather than hidden.
+
+### Tail padding, and a claim measured at the wrong width
+
+A streaming zipformer will not emit its last word without trailing audio, because
+it decodes with right context. `inputFinished()` does **not** synthesise the frames
+the encoder is still waiting for — it only stops the stream accepting more. So the
+worker feeds `SttConfig.tailPadding` (0.8s of silence) *before* flushing; padding
+sent afterwards is discarded.
+
+This is worth reading as a lesson and not just a setting, because the first version
+of the claim above was **too broad and the measurement refuted it**. Run over the
+committed fixture, padded and unpadded came back byte-identical — the fixture
+carries 0.8s of trailing silence of its own, so the runtime's padding had nothing
+left to add. The claim holds at a narrower width: the padding recovers the last word
+of a capture that ends **at** the last word, which is what `MicCapture.stop()`
+produces when the technician releases the button. The test now strips the fixture's
+trailing silence first — the live-microphone case, the only one the padding is for —
+and the difference is exactly one word:
+
+```
+unpadded  "… THE FALK CODE IS E ONE OH TWO PLEASE"
+padded    "… THE FALK CODE IS E ONE OH TWO PLEASE ADVISE"
+```
+
+Same shape as Task 1.6's recurring failure — a correct check described at the wrong
+width — caught by running the comparison instead of asserting the conclusion.
+
+### Endpointing, segments, and partials
+
+`enableEndpoint` is on, mapped to sherpa's `rule2MinTrailingSilence` (1.2s, its own
+default) — the rule that fires *after* something has been decoded, which is the one
+a dictation UI cares about. On an endpoint the segment is closed, a final transcript
+is emitted, and `reset` starts the next utterance; without the `reset`, `getResult`
+keeps returning the closed segment and every later partial repeats it.
+
+`SttTranscript.segment` exists because without it a consumer cannot tell the final
+transcript of one utterance from a partial of the next, and a dictation UI that
+guesses wrong either appends to the wrong line or overwrites a committed one. A
+*silent* segment emits nothing: a final empty transcript would reach a UI as "the
+user finished saying nothing", which is indistinguishable from a cleared field.
+
+Partials are emitted only when the hypothesis actually moved. Measured over the
+committed fixture, whole stack: **101 frames in, 25 transcripts out** — three
+quarters of the chunks produced nothing new. The live test prints that on every run
+and asserts the ratio stays below 1:1, which is what fails if the filter is deleted.
+
+### Running the real model without a device
+
+The one suite in `test/` that loads the real native library and the real weights.
+It exists because the alternative was shipping TC-STT-STRM-01 written and unrun, the
+way Task 2.1 had to ship TC-MIC-01 — and it is possible only because
+`sherpa_onnx_macos` ships a macOS framework in the pub cache.
+
+```bash
+R=https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main
+mkdir -p /tmp/fieldops-stt && cd /tmp/fieldops-stt
+for f in encoder-epoch-99-avg-1.int8.onnx decoder-epoch-99-avg-1.int8.onnx \
+         joiner-epoch-99-avg-1.int8.onnx tokens.txt; do curl -sLO "$R/$f"; done
+
+flutter test test/services/audio/sherpa_recognizer_live_test.dart \
+  --dart-define=FIELDOPS_STT_MODEL_DIR=/tmp/fieldops-stt \
+  --dart-define=FIELDOPS_SHERPA_LIB=$HOME/.pub-cache/hosted/pub.dev/sherpa_onnx_macos-1.13.5/macos
+```
+
+It skips itself without the first define, so CI stays hermetic. What it measured,
+whole stack — engine → real `IsolateSttHost` → real isolate → real sherpa → real
+weights → recorded fixture, on macOS arm64:
+
+| | |
+|---|---|
+| recognizer load | 456–773ms over four runs |
+| frames in / transcripts out | 101 / 25 |
+| final transcript | `U K THE CABIN IS VIBRATING BADLY IN THE PANEL IS SHOWING AN ERROR THE FALK CODE IS E 102 PLEASE ADVISE` |
+
+That contains `error` and `102` case-insensitively, which is TC-STT-STRM-01's
+criterion, met against the real model. **It is not a substitute for the device
+run** — see below for what only hardware can answer.
+
+`SttConfig.nativeLibraryPath` exists because of this suite, and only for it.
+Production leaves it null, which on iOS and Android is the only value that works.
+The whole-stack leg needs it because the worker builds its own runtime *after* the
+isolate hop, so a library path held on the host side never reaches it — and macOS
+cannot resolve `SherpaOnnxC.framework/SherpaOnnxC` by bare name.
+
+### The fixture
+
+`test/fixtures/e102_utterance.wav` — 16 kHz mono 16-bit LE, 10.08s, the exact format
+`SttEngine.transcribe` is declared over.
+
+It is **macOS `say` output, not a human recording**, and that is stated wherever it
+is used because it bounds what it proves: that the pipeline turns real speech-shaped
+audio into a transcript, not that the model generalises to a technician in a plant
+room. It carries 0.8s of trailing silence for the right-context reason above, and it
+is declared as an asset **from `test/fixtures/`** rather than copied into `assets/` —
+an integration test runs inside the app, on the device, where the repository's
+`test/` directory does not exist, and declaring it in place means the host suite and
+the device suite cannot drift onto different audio. The cost is 322KB of release
+bundle, stated in `pubspec.yaml` rather than hidden.
+
+The transcript is imperfect and deliberately quoted with its warts (`U K` for
+"okay", `FALK CODE` for "fault code"): the ACs are **fuzzy containment**, per the
+sprint plan, and pinning the whole string would turn a library upgrade into a
+failure.
+
+### Not wired into the app
+
+`sttEngineProvider` still binds `FakeSttEngine`, exactly as Tasks 1.3–1.10 shipped
+unwired before 1.11 did the wiring. Nothing in the UI consumes speech yet.
+
+**One hazard to hand to Task 2.3, recorded because the obvious wiring is the wrong
+one.** `sttEngineProvider` is the Tier 0 fake seam. Wiring a microphone to it would
+produce a demo that transcribes from a script — voice input that looks like it works
+on a device where the recogniser never ran. That is the class of deception
+`no_fake_in_production_test.dart` exists for, and it does **not** cover this today:
+its guarded set is deliberately the *answer* path (`LlmEngine`, `InferenceHost`,
+`InferenceRuntime`), and a scripted STT fakes the question rather than the answer —
+the same basis on which that file excludes `SeedSource` and `AgentTool`. When 2.3
+puts a transcript on screen, `SttEngine` / `SttHost` / `SttRecognizerRuntime` belong
+in `scriptableContracts`, and 1.11's rule applies: return **null rather than a
+fake**, because a fallback yields an app that is indistinguishable from success in a
+screen recording.
+
+### Owed on a device
+
+⚠️ **TC-STT-INIT-01 and TC-STT-STRM-01 have not run on hardware.**
+`integration_test/stt_test.dart` is written and needs no defines; it provisions the
+43.65MB set first if it is absent.
+
+```bash
+flutter test integration_test/stt_test.dart -d <device>
+```
+
+The host run above covers the logic, so what the device run adds is specific:
+
+1. **The native library resolves by bare name from inside the app bundle** —
+   `SherpaOnnxC.framework/SherpaOnnxC` on iOS, `libsherpa-onnx-c-api.so` on Android
+   — with `nativeLibraryPath` null. The host suite has to supply a path, so that is
+   precisely the thing it cannot verify.
+2. `initBindings` on a spawned isolate in a real engine build.
+3. Load and decode times on arm64 mobile silicon **next to the LLM**. Task 1.8
+   measured process RSS at 1.67GB with Gemma resident and refuted §3.4's 500MB cap;
+   whether a 43MB recogniser alongside it is free is unmeasured.
+
+Also unrun on hardware: the endpoint path with **more than one utterance** (the
+fixture is one), the gap bridge against a real dropped buffer, and the
+`recognizerLost` distinction — all host-bound only.
+
 ## Getting started
 
 Requires the Flutter SDK (stable channel, Dart 3.12+). iOS 16.0+ / a 64-bit
@@ -2592,8 +2856,9 @@ Tests are split into two tiers:
 - **Unit tier** (`test/`) — pure Dart, deterministic, runs in CI on every commit
   (engine fakes, database, FTS, seeding, retrieval routing and prompt
   compilation, the agent tool registry, the tool-call guard, the agent loop,
-  the golden transcript suite, model provisioning, microphone capture, the startup
-  wiring, the demo viewmodel, widget tests). The widget suite is split on purpose — see _Two things
+  the golden transcript suite, model provisioning, microphone capture, the STT
+  config/protocol/worker/host and the STT engine, spoken-digit normalisation, the
+  startup wiring, the demo viewmodel, widget tests). The widget suite is split on purpose — see _Two things
   a host test cannot tell you_ above; rendering tests inject state, wiring tests
   run the real graph. The HTTP
   transport is covered against a loopback `HttpServer` rather than a mock, because
@@ -2621,9 +2886,18 @@ Tests are split into two tiers:
   artifact to fetch and must not pull gigabytes over the network to try. (This
   sentence read "Both suites" until Task 2.1, which was already loose with four
   files in this directory and became wrong with the fifth: `mic_capture_test.dart`
-  needs no defines at all.)
+  needs no defines at all. Task 2.2 adds a sixth, `stt_test.dart`, which also needs
+  none — its model's source and pins are committed. The sentence is now written as
+  the two file names it actually means, so a seventh file cannot make it wrong
+  again.)
   - `model_provisioning_test.dart` (TC-PROV-E2E-01) — a real download, verify and
     install.
+  - `stt_test.dart` (TC-STT-INIT-01, TC-STT-STRM-01) — loads the streaming
+    zipformer on a background isolate and transcribes the recorded fixture, with
+    fuzzy containment rather than exact equality. No defines; it provisions the
+    43.65MB set first if it is absent. ⚠️ **Written and unrun** — see _Speech to
+    text → Owed on a device_ for what only hardware answers here, given that the
+    same stack already passes against the real weights on the host.
   - `llm_inference_test.dart` (TC-LLM-LOAD-01, TC-LLM-GEN-01, TC-LLM-TOOLCALL-01) —
     loads the provisioned weights, streams a response, and checks that a grounded
     prompt with a registered tool produces a structured tool call. It refuses to load
@@ -2703,6 +2977,8 @@ Tests are split into two tiers:
 | Inference threading | Dedicated background isolate with an encoded message protocol |
 | Model delivery     | `dart:io` streaming download + `crypto` SHA-256 verify, no-backup storage |
 | Audio capture      | `record` (16-bit mono PCM stream) behind an `AudioInput` seam |
+| On-device STT      | streaming zipformer (en, 20M, int8) via `sherpa_onnx` (`dart:ffi`) |
+| STT threading      | Dedicated background isolate, one-request-one-reply protocol (the reply is the flow control) |
 | Testing            | `flutter_test` (unit + widget), `integration_test` |
 | CI                 | GitHub Actions                                     |
 
