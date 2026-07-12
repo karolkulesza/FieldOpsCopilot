@@ -310,11 +310,17 @@ class SherpaRecognizerRuntime implements SttRecognizerRuntime {
     // thing.
     //
     // Measured on the committed fixture, whole stack, macOS host:
-    // **101 frames in, 25 transcripts out** — three quarters of the chunks
-    // produced nothing new. Printed by `sherpa_recognizer_live_test.dart`'s
-    // whole-stack test on every run, so the figure can be re-derived rather than
-    // trusted; that test also asserts the ratio is below 1:1, which is what would
-    // fail if this filter were deleted.
+    // **101 frames in, 25 transcripts out** — three quarters of the chunks produced
+    // nothing new. Printed by `sherpa_recognizer_live_test.dart`'s whole-stack test on
+    // every run, so the figure can be re-derived rather than trusted.
+    //
+    // **What holds this line in place is that test's *property* assertion** — no
+    // partial repeats its predecessor within a segment — plus a bound below **half**
+    // the frame count. An earlier version of this comment said the guard was a ratio
+    // "below 1:1", and review finding R0-F2 refuted it by deleting this clause and
+    // watching all five tests pass at 101 → 90: a chunk emits nothing until decoding
+    // begins, so the count is structurally under the frame count whatever this does.
+    // Deleting the clause now fails at partial 1.
     if (text.isNotEmpty && text != _lastEmitted) {
       _lastEmitted = text;
       out.add(

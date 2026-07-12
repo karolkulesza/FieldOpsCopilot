@@ -66,6 +66,19 @@ abstract interface class SttEngine {
   ///
   /// The stream is consumed to completion; closing it is what ends the utterance
   /// and produces the final transcript.
+  ///
+  /// **One transcription at a time, and the refusal arrives by two different channels
+  /// depending on when the caller listens.** Implementations take the in-flight slot
+  /// at `onListen`, not here, so that a stream which is built and never listened to
+  /// costs nothing. The consequence is worth stating on the interface rather than
+  /// leaving to be discovered: calling this while a transcription is *running* throws
+  /// a [StateError] synchronously, whereas building two streams before listening to
+  /// either gives the second one a [StateError] **on the stream**. Both are the same
+  /// refusal; only the delivery differs.
+  ///
+  /// Cancelling the returned subscription releases the session — it does not leave the
+  /// backend holding one — so a consumer that stops dictating mid-utterance may simply
+  /// cancel.
   Stream<SttTranscript> transcribe(Stream<MicFrame> frames);
 
   Future<void> dispose();

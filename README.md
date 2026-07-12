@@ -2685,12 +2685,29 @@ structured lookup was instead making it run that lookup on a code nobody said.
 Three is the corpus's own shape rather than a guess: every fault code in the seed
 asset is `E-\d{3}`. The single-letter exception is deliberately **narrower than the
 router's** `[A-Za-z]{1,2}`, because `NO`, `IS`, `AT`, `IN` and `OF` are all two-letter
-English words and it was exactly a two-letter word in front of a two-word run that
-produced those candidates. The residue is bounded rather than eliminated and is
-written down as such: the article "a" is a single letter, so `A ONE TWO` still becomes
-`A 12` — and the bound is the router's own, since a candidate resolving to no row
-lands in `unresolved` and the text survives in the residual, costing one wasted
-lookup rather than a wrong answer.
+English words and it was a two-letter word in front of a two-word run that produced
+those candidates.
+
+**What remains is a class, not a curiosity, and review finding R1-F2 made that
+correction.** This paragraph used to offer one artificial input (`A ONE TWO` → `A 12`).
+Measured, the residue is the approximation idiom of the register this app is used in,
+plus a single-letter word nobody had named, plus the two-letter hazard surviving at run
+length three:
+
+```
+THERE WAS A FOUR FIVE SECOND DELAY  →  … A 45 SECOND DELAY    → A-45
+I SAW A TWO THREE MILLIMETRE GAP    →  … A 23 MILLIMETRE GAP  → A-23
+I FOUR TWO                          →  I 42                   → I-42
+NO ONE TWO THREE OF THEM WORK       →  NO 123 OF THEM WORK    → NO-123
+IS O ONE TWO OF THE DOORS           →  IS 012 OF THE DOORS    → IS-012
+```
+
+It is kept rather than chased, on a bound rather than a hope: `RetrievalRouter`
+verifies every candidate by lookup, so one resolving to no row lands in `unresolved`
+and the text survives in the residual — a wasted lookup, not a wrong answer. R0-F3's
+actual harm is gone: the *silent* skip of the structured lookup, and codes fabricated
+out of a bare `OH TWO`. Every case above is pinned in the residue group of
+`spoken_digits_test.dart`, so a future narrowing cannot widen it unnoticed.
 
 The original hazard is still covered: `ONE`, `TWO`, `FOUR` and `O` are ordinary
 English, and "one of the guide shoes is loose" survives intact.
@@ -2748,9 +2765,15 @@ guesses wrong either appends to the wrong line or overwrites a committed one. A
 user finished saying nothing", which is indistinguishable from a cleared field.
 
 Partials are emitted only when the hypothesis actually moved. Measured over the
-committed fixture, whole stack: **101 frames in, 25 transcripts out** — three
-quarters of the chunks produced nothing new. The live test prints that on every run
-and asserts the ratio stays below 1:1, which is what fails if the filter is deleted.
+committed fixture, whole stack: **101 frames in, 25 transcripts out** — three quarters
+of the chunks produced nothing new. The live test prints that on every run.
+
+What *holds* the filter is that test's property assertion — no partial repeats its
+predecessor within a segment — together with a bound below **half** the frame count.
+This paragraph used to claim the guard was "the ratio below 1:1", and review finding
+R0-F2 refuted it: a chunk emits nothing until decoding begins, so the count is
+structurally under the frame count whatever the filter does, and deleting the filter
+left all five tests green at 101 → 90 transcripts. It now fails at partial 1.
 
 ### Running the real model without a device
 
@@ -2785,7 +2808,12 @@ criterion, met against the real model. **It is not a substitute for the device
 run** — see below for what only hardware can answer.
 
 `SttConfig.nativeLibraryPath` exists because of this suite, and only for it.
-Production leaves it null, which on iOS and Android is the only value that works.
+Production leaves it null. On Android that is the only value that *works* (the bare
+`libsherpa-onnx-c-api.so` resolves from the app's lib directory); on iOS it is the
+only value that *means* anything, because that branch of `init_native.dart`
+discards the parameter and returns the bare-name open regardless. This sentence
+said "on iOS and Android the only value that works" until review finding R0-F8 —
+true of Android, false of iOS for that second reason.
 The whole-stack leg needs it because the worker builds its own runtime *after* the
 isolate hop, so a library path held on the host side never reaches it — and macOS
 cannot resolve `SherpaOnnxC.framework/SherpaOnnxC` by bare name.

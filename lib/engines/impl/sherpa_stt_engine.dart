@@ -123,22 +123,52 @@ class SherpaSttEngine implements SttEngine {
     var begun = false;
     var settled = false;
 
+    /// The `beginSession()` round trip while it is still in flight, or `null`.
+    ///
+    /// **Held because a cancel can land inside that window — review finding R1-F1.**
+    /// `beginSession` is a real isolate round trip, and 1.8 measured the UI isolate
+    /// stalling 1445–1728ms while a model loads, which is exactly when a user taps
+    /// twice. `begun` is still `false` for the whole of it, so a `release` that
+    /// guarded only on `begun` dropped the cancel: the worker opened its
+    /// `OnlineStream`, nothing was left holding a reference to it, and because
+    /// `SherpaRecognizerRuntime.beginSession` throws while `_stream != null`, **every
+    /// later transcription failed for the life of the engine** — verbatim the outcome
+    /// this whole owned-subscription shape exists to prevent.
+    Future<void>? beginning;
+
     /// Releases the session and the engine's in-flight slot. Idempotent, because
     /// both a normal close and the consumer's cancel land here.
     Future<void> release({required bool cancelSession}) async {
       if (!_transcribing) return;
       _transcribing = false;
-      // Guarded by `begun`: a `beginSession` that itself failed has no session to
-      // cancel, and cancelling one that was never opened would replace the real
-      // failure with a second, less informative one.
-      if (cancelSession && begun) {
-        begun = false;
+      if (!cancelSession) return;
+
+      // A cancel that arrived mid-`beginSession` has to wait for the session it is
+      // cancelling to exist. Awaiting the same future the opener awaits is safe in
+      // either resume order: whichever runs second sees `begun` already settled.
+      final pending = beginning;
+      if (pending != null && !begun) {
         try {
-          await _host.cancelSession();
+          await pending;
+          begun = true;
         } on Object {
-          // The original failure is the one worth propagating; a cancel that also
-          // failed adds nothing a caller can act on.
+          // The begin failed, so there is no session to cancel — the same
+          // conclusion the `begun` guard below reaches, arrived at without
+          // pretending the failure did not happen.
+          return;
         }
+      }
+
+      // Guarded by `begun`: a `beginSession` that failed has no session to cancel,
+      // and cancelling one that was never opened would replace the real failure with
+      // a second, less informative one.
+      if (!begun) return;
+      begun = false;
+      try {
+        await _host.cancelSession();
+      } on Object {
+        // The original failure is the one worth propagating; a cancel that also
+        // failed adds nothing a caller can act on.
       }
     }
 
@@ -226,9 +256,16 @@ class SherpaSttEngine implements SttEngine {
       }
       _transcribing = true;
 
+      // Published *before* it is awaited, so a cancel landing inside the round trip
+      // can find it and release the session it opens — R1-F1.
+      final begin = _host.beginSession();
+      beginning = begin;
       try {
-        await _host.beginSession();
-        begun = true;
+        await begin;
+        // Not set when the stream has already settled: a cancel that resumed first
+        // has by then cancelled the session and cleared this, and re-raising it would
+        // leave the flag claiming a session that is gone.
+        if (!settled) begun = true;
       } on Object catch (error, stack) {
         await fail(error, stack);
         return;
@@ -263,11 +300,18 @@ class SherpaSttEngine implements SttEngine {
   /// Wire transcript → app transcript, applying spoken-digit normalisation.
   ///
   /// **This is where the model's missing digits are repaired**, and it happens on
-  /// every transcript rather than only on finals. A partial that reads
-  /// `… CODE IS E ONE OH` while the user is still speaking becomes `… CODE IS E 1`
-  /// — mid-number, and briefly wrong, but consistent with the final. Normalising
-  /// only finals would instead show digits appear all at once at the end of an
-  /// utterance, which reads as the transcript being rewritten.
+  /// every transcript rather than only on finals. Normalising only finals would show
+  /// digits appear all at once at the end of an utterance, which reads as the
+  /// transcript being rewritten under the user.
+  ///
+  /// The cost is that a partial can carry a **code-shaped** intermediate. Measured:
+  /// `AN ERROR THE FALK CODE IS E ONE OH` → `AN ERROR THE FALK CODE IS E 10`, and
+  /// `E 10` is a well-formed `faultCodePattern` candidate for a code nobody said.
+  /// Review finding R1-F3 corrected this example — it previously read `E 1`, which is
+  /// both wrong (the run is two digit words, so two digits are emitted) and
+  /// understated, because `E 1` matches nothing while `E 10` matches. Harmless today
+  /// because nothing consumes partials; it is Task 2.3's to know before one reaches
+  /// the retrieval path.
   ///
   /// [SttTranscript.rawText] carries the recogniser's verbatim output, so nothing
   /// is hidden by this and a caller comparing against a reference run has the
