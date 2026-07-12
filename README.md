@@ -2840,9 +2840,9 @@ failure.
 
 ### What the mutation pass found
 
-**39 targeted mutations, 39 killed, 0 survived, 0 aborted** — and every killed row
+**40 targeted mutations, 40 killed, 0 survived, 0 aborted** — and every killed row
 **confirmed by the test its `expect` names** — run with `--concurrency=1` against
-`test/services/audio` and `test/engines` (baseline 276 passing, 5 skipped).
+`test/services/audio` and `test/engines` (baseline 277 passing, 5 skipped).
 
 The pass was **re-run after review round 1, not before it** — 1.6's rule, and 2.1's
 row is blunter about why: six of its fifteen findings were claims or values introduced
@@ -2911,8 +2911,14 @@ block — which the default reporter **truncates** ("… and 14 more"), Task 1.4
 instrument defect verbatim — so it flagged killed rows as mismatches. Rewritten to read
 the expanded reporter's `[E]` lines, it then matched nothing at all, because this suite
 always reports 5 skips and the pattern required the pass and fail counters to be
-adjacent. A checker that cannot parse its input reports on itself. The pattern is now
-unit-checked against four sample lines before it is trusted.
+adjacent. A checker that cannot parse its input reports on itself.
+
+So the pattern is now checked **inside the harness**, against four reporter lines it must
+accept (with the exact name it must capture from each) and four it must reject, and the
+run aborts before touching the tree if any of them disagrees. That guard exists because
+review finding **R2-F3** caught this paragraph claiming it while the committed harness had
+none — the check had only ever run in a shell — which is the same shape as the prose
+findings above, aimed at the instrument instead of the code.
 
 Its collateral detector printed six `mtime changed` notes, and they are an artifact
 of the harness rather than damage: the revert is `git checkout -- .`, which rewrites

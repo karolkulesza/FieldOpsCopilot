@@ -145,11 +145,12 @@ class SherpaSttEngine implements SttEngine {
 
       final pending = beginning;
       if (pending == null) {
-        // Unreachable, and said so rather than dressed as a guard: `release` is only
-        // reached with `cancelSession: true` after `onListen` published the begin, and
-        // a stream nobody listened to never takes `_transcribing`, so the early return
-        // above already covered it. The check exists because Dart requires one to use
-        // `pending` below.
+        // **Reachable, and by exactly one path: a `beginSession` that threw
+        // synchronously**, before the line that publishes its future ran. `fail` then
+        // brings us here with `_transcribing` still set and nothing to cancel, because
+        // no session was ever opened. An earlier version of this comment called the
+        // branch unreachable and kept it only to satisfy Dart's null check — true while
+        // the call sat outside the `try`, which is the defect R2-F1 records.
         return;
       }
 
@@ -200,9 +201,17 @@ class SherpaSttEngine implements SttEngine {
         for (final transcript in await _host.finishSession()) {
           if (!out.isClosed) out.add(_toTranscript(transcript));
         }
-        // Finishing *is* the release — the worker freed the native stream on its
-        // way out — so there is nothing left to cancel.
-        begun = false;
+        // Finishing *is* the release — the worker freed the native stream on its way
+        // out — so there is nothing left to cancel.
+        //
+        // The sentence above is the point; there is deliberately no `begun = false`
+        // under it. Review finding R2-F2 measured that assignment surviving mutation in
+        // **both** directions, which is the stronger form of dead: after `settled` is
+        // set, `begun` is read only by `release` under `cancelSession: true`, reachable
+        // only from `fail` and `onCancel`, both of which return early on `settled` — and
+        // the call below clears `_transcribing`, so any later `release` returns at its
+        // first line regardless. It was the third instance of the class this task
+        // deleted two of, and 1.4's rule applies the same way: decoration rots.
         await release(cancelSession: false);
         if (!out.isClosed) await out.close();
       } on Object catch (error, stack) {
@@ -266,11 +275,19 @@ class SherpaSttEngine implements SttEngine {
       }
       _transcribing = true;
 
-      // Published *before* it is awaited, so a cancel landing inside the round trip
-      // can find it and release the session it opens — R1-F1.
-      final begin = _host.beginSession();
-      beginning = begin;
       try {
+        // Published *before* it is awaited, so a cancel landing inside the round trip
+        // can find it and release the session it opens — R1-F1.
+        //
+        // **Inside the `try`, not above it — review finding R2-F1.** R1-F1's fix hoisted
+        // this call out of the block that used to catch it, so a host whose
+        // `beginSession` threw *synchronously* lost the error to the zone handler: the
+        // stream never completed, `_transcribing` was never cleared, and the engine was
+        // wedged for life — the same permanent refusal R0-F6 was about, through a
+        // different door. A strict regression, and one only a synchronous throw can
+        // reach.
+        final begin = _host.beginSession();
+        beginning = begin;
         await begin;
         // Unconditional. An earlier version guarded this with `if (!settled)`, on the
         // theory that a cancel which resumed first had already cleared the flag — but
