@@ -47,6 +47,12 @@ dependencies:
   flutter_gemma_litertlm: ^1.3.1
   record: ^7.1.1
 
+  # Task 2.2: on-device streaming ASR. `sherpa_onnx` is a thin `dart:ffi`
+  # binding over the next-gen Kaldi C API; the native libraries arrive as the
+  # per-platform packages it depends on (`sherpa_onnx_ios`, the four Android
+  # ABIs, …), so no extra entry is needed here.
+  sherpa_onnx: ^1.13.5
+
 # Bundle SQLite3MultipleCiphers (encryption-enabled SQLite) via the sqlite3
 # package's build hooks instead of the legacy sqlcipher_flutter_libs. This gives
 # every platform — including host unit tests — an encryption-capable sqlite3 and
