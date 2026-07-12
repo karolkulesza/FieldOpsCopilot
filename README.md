@@ -2938,18 +2938,27 @@ recorded rather than asserted, which is what let that audit be done by hand acro
 forty rows.
 
 Its collateral detector printed **eleven** `mtime changed` notes on the 40-row pass, and
-they are an artifact of the harness rather than damage: the revert is `git checkout -- .`, which rewrites
-the mutated file and so moves its mtime, and the check excludes only the *current*
-row's file — so the first row to use a different file reports its predecessor's.
-Said here rather than left as an unexplained line in a log, because an unexplained
-note is indistinguishable from a real one.
+they are an artifact of the harness rather than damage. Reverting a row rewrites the
+mutated file and so moves its mtime, and the check excludes only the *current* row's
+file — so the first row to use a different file reports its predecessor's. Said here
+rather than left as an unexplained line in a log, because an unexplained note is
+indistinguishable from a real one.
 
-One note fires per transition to a different mutated file, so the count moves with the
-row set. **This paragraph said "six" until review round 3 measured eleven** — six was
-exact for the original 24 rows and was then carried unchanged through the 37-, 39- and
-40-row re-runs, in a section whose other figures were updated each time. A number that
-was right once and is not re-derived is a number that goes stale silently; the mechanism
-above is what lets a reader predict the count instead of trusting it.
+**Eleven, and deriving it needs one more line of the mechanism than an earlier version
+of this paragraph gave.** A note fires on a transition to a different mutated file, *and
+the detector rebases its reference when it fires* (`baseline_stamps = stamps_now`) — so
+a file used by exactly **one** row has its post-revert mtime captured in that new
+reference and leaves nothing stale for the next transition to report. The 40-row set has
+**twelve** file transitions and `N12` is its only single-row group, so the transition
+out of it is silent: twelve minus one is eleven.
+
+That clause is review finding **R3-F1**, and it is worth more than the arithmetic. The
+count itself had said "six" since the 24-row pass — exact then, carried unchanged
+through the 37-, 39- and 40-row re-runs in a section whose other figures were updated
+each time. Round 3 corrected the number and shipped it with a *rule that predicts
+twelve*, which the reviewer caught by applying the rule and getting the wrong answer.
+Both halves are the same failure at different scales: **a number that is not re-derived
+goes stale, and a rule that is not applied is not checked.**
 
 ### Not wired into the app
 
