@@ -235,6 +235,58 @@ void main() {
       expect(engine.initialize, throwsStateError);
     });
 
+    test('cancelling mid-utterance completes, and releases', () async {
+      // **The test that was missing, and its absence is why R0-F1 was invisible.**
+      // The real engine's suite has `'when the consumer walks away mid-utterance'`;
+      // this one had no cancel test at all, so a fake that deadlocked on cancel could
+      // claim parity with the real engine in prose and nothing would disagree.
+      //
+      // The old fake was an `async*` suspended in `await frames.drain()`. Cancelling
+      // an `async*` subscription awaits the body's termination, and the body could not
+      // terminate while awaiting a stream nobody closes — so `cancel()` never
+      // completed. Bounded with a timeout, because the failure mode is a hang and an
+      // unbounded await would report it as a suite timeout thirty seconds later
+      // instead of as this assertion.
+      final engine = FakeSttEngine();
+      await engine.initialize();
+
+      final frames = StreamController<MicFrame>();
+      addTearDown(frames.close);
+      final subscription = engine.transcribe(frames.stream).listen(null);
+      frames.add(MicFrame(bytes: Uint8List(320)));
+      await pumpEventQueue();
+
+      await expectLater(
+        subscription.cancel().timeout(const Duration(seconds: 2)),
+        completes,
+        reason: 'a consumer that stops dictating must not deadlock',
+      );
+
+      // Released, not merely unblocked: the next transcription has to be accepted.
+      expect(
+        () => engine.transcribe(const Stream<MicFrame>.empty()),
+        returnsNormally,
+      );
+    });
+
+    test('a stream that is never listened to does not wedge the engine', () async {
+      // Review finding R0-F6, and it applies to both engines — the slot is taken in
+      // `onListen`, not at the call site, so a discarded stream costs nothing.
+      final engine = FakeSttEngine();
+      await engine.initialize();
+
+      engine.transcribe(const Stream<MicFrame>.empty());
+      await pumpEventQueue();
+
+      expect(
+        () => engine.transcribe(const Stream<MicFrame>.empty()),
+        returnsNormally,
+        reason:
+            'taking the in-flight slot at the call site made a discarded stream '
+            'refuse every later transcription until dispose()',
+      );
+    });
+
     test('a completed transcription releases the in-flight guard', () async {
       final engine = FakeSttEngine();
       await engine.initialize();

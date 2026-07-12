@@ -279,6 +279,45 @@ void main() {
       await frames.close();
     });
 
+    test('a stream that is never listened to does not wedge the engine', () async {
+      // **Review finding R0-F6.** The slot used to be taken synchronously in
+      // `transcribe`, so a stream built and discarded held it forever: nothing leaked
+      // on the worker — no session was ever opened — but the engine refused every
+      // later transcription until it was disposed, recoverable only by rebuilding the
+      // provider graph.
+      final host = ScriptedHost();
+      final engine = SherpaSttEngine(config: config, host: host);
+      await engine.initialize();
+
+      engine.transcribe(Stream.fromIterable([frame(320)]));
+      await pumpEventQueue();
+
+      // Nothing was begun, because nothing listened.
+      expect(host.calls, ['start']);
+      expect(
+        () => engine.transcribe(const Stream<MicFrame>.empty()),
+        returnsNormally,
+      );
+    });
+
+    test('two streams built before either is listened to: the second errors', () async {
+      // The case the synchronous refusal can no longer catch, now that the slot is
+      // taken in `onListen`. It is reported on the stream rather than thrown, because
+      // `onListen` has no caller to throw at — and it must be reported rather than
+      // silently sharing a session, since the runtime holds one `OnlineStream`.
+      final host = ScriptedHost();
+      final engine = SherpaSttEngine(config: config, host: host);
+      await engine.initialize();
+
+      final first = engine.transcribe(StreamController<MicFrame>().stream);
+      final second = engine.transcribe(const Stream<MicFrame>.empty());
+
+      first.listen(null);
+      await pumpEventQueue();
+
+      await expectLater(second.toList(), throwsStateError);
+    });
+
     test('a completed transcription releases the slot', () async {
       final host = ScriptedHost();
       final engine = SherpaSttEngine(config: config, host: host);

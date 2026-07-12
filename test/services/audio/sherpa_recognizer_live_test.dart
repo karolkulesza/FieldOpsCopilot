@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:field_ops_copilot/engines/impl/sherpa_stt_engine.dart';
 import 'package:field_ops_copilot/services/audio/mic_frame.dart';
 import 'package:field_ops_copilot/services/audio/pcm_audio_format.dart';
+import 'package:field_ops_copilot/services/audio/pcm_samples.dart';
 import 'package:field_ops_copilot/services/audio/sherpa_recognizer.dart';
 import 'package:field_ops_copilot/services/audio/spoken_digits.dart';
 import 'package:field_ops_copilot/services/audio/stt_config.dart';
@@ -269,22 +270,51 @@ void main() {
           .transcribe(Stream.fromIterable(frames))
           .toList();
 
-      // Printed rather than asserted, because it is a property of the model's
-      // decoding schedule and not of this app: it is the measurement behind
-      // `SherpaRecognizerRuntime`'s decision to emit a partial only when the
-      // hypothesis actually moved, and the number belongs next to the run that
-      // produced it rather than in a comment that can go stale.
       // ignore: avoid_print
       print(
         '[live] ${frames.length} frames in, ${transcripts.length} transcripts '
         'out, final "${transcripts.last.text}"',
       );
+
+      // **The property, not a proxy for it — review finding R0-F2.** This used to be
+      // `expect(transcripts.length, lessThan(frames.length))` under a comment claiming
+      // it was "what would fail if this filter were deleted". It was not: a chunk
+      // produces no text until decoding has begun, so the count is structurally below
+      // the frame count whatever the filter does, and the reviewer deleted the filter
+      // and watched all five tests pass at 101 → 90 transcripts.
+      //
+      // What the filter actually guarantees is that no partial repeats its
+      // predecessor within a segment. Asserting that is asserting the thing, and it
+      // fails the moment the `text != _lastEmitted` clause goes.
+      // Consecutive **partials** only, and the exclusion is not a weakening — the
+      // first version of this loop asserted it of every adjacent pair and failed on
+      // transcript 24, which is the segment's *final* restating the last partial's
+      // text. That is correct and load-bearing behaviour: a consumer needs a final to
+      // commit the segment, and it carries the hypothesis it is committing. Only a
+      // partial that repeats a partial is evidence the filter is gone.
+      for (var i = 1; i < transcripts.length; i++) {
+        final previous = transcripts[i - 1];
+        final current = transcripts[i];
+        if (previous.segment != current.segment) continue;
+        if (current.isFinal) continue;
+        expect(
+          current.rawText,
+          isNot(previous.rawText),
+          reason:
+              'partial $i repeats its predecessor verbatim, so the '
+              'unchanged-hypothesis filter in _drain is not running',
+        );
+      }
+
+      // And the ratio, at a bound the deletion actually crosses: 25 with the filter,
+      // 90 without it, over 101 frames. Half the frame count separates those two and
+      // nothing else in the pipeline sits near it.
       expect(
         transcripts.length,
-        lessThan(frames.length),
+        lessThan(frames.length ~/ 2),
         reason:
-            'a transcript per frame would mean the unchanged-hypothesis filter '
-            'in _drain is doing nothing',
+            'measured 25 of 101 with the filter and 90 of 101 without it; a count '
+            'above half the frames means it is not filtering',
       );
 
       expect(transcripts, isNotEmpty);
@@ -297,15 +327,6 @@ void main() {
       expect(last.rawText, isNot(contains('102')));
     }, skip: skip);
   });
-}
-
-Float32List _floats(Uint8List bytes) {
-  final view = ByteData.sublistView(bytes);
-  final out = Float32List(bytes.length ~/ 2);
-  for (var i = 0; i < out.length; i++) {
-    out[i] = view.getInt16(i * 2, Endian.little) / 32768.0;
-  }
-  return out;
 }
 
 /// One transcription of [pcm], optionally with the tail padding.
@@ -323,7 +344,7 @@ Future<String> _run(
     runtime.beginSession();
     var last = '';
     for (final frame in framesOf(pcm, const Duration(milliseconds: 100))) {
-      for (final t in runtime.acceptSamples(_floats(frame.bytes))) {
+      for (final t in runtime.acceptSamples(pcm16ToFloat32(frame.bytes))) {
         last = t.text;
       }
     }

@@ -10,7 +10,8 @@
 /// not an incidental detail, it is the reason Task 2.2 owns an isolate at all:
 ///
 /// * `OnlineRecognizer(config)` is a *constructor* that loads three ONNX graphs on
-///   the calling thread. Measured on the macOS host at 466–471ms.
+///   the calling thread — see [SherpaRecognizerRuntime.load] for the measurement
+///   and the command that produced it.
 /// * `decode(stream)` runs the encoder/decoder/joiner on the calling thread.
 /// * `acceptWaveform` allocates native memory and copies the samples into it.
 ///
@@ -102,15 +103,19 @@ abstract interface class SttRecognizerRuntime {
 class SherpaRecognizerRuntime implements SttRecognizerRuntime {
   SherpaRecognizerRuntime({this.nativeLibraryPath});
 
-  /// Directory the native library is loaded from, or `null` for the platform
-  /// default.
+  /// Root the plugin composes its per-platform library path **under**, or `null` for
+  /// the platform default.
   ///
-  /// Production always passes `null`: on iOS and Android the library ships inside
-  /// the app bundle and `DynamicLibrary.open` finds it by name. It is settable
-  /// only so the host can point at the `sherpa_onnx_macos` framework in the pub
-  /// cache, which is what makes it possible to run this class — the real one,
-  /// against the real weights — without a device. See
-  /// `test/services/audio/sherpa_recognizer_live_test.dart`.
+  /// Not the directory the library is in: `init_native.dart` appends a per-platform
+  /// suffix, so on macOS the framework binary sits five directories below this value,
+  /// and on **iOS the parameter is ignored entirely** — that branch returns the
+  /// bare-name open whatever is passed. See [SttConfig.nativeLibraryPath], which
+  /// carries this across the isolate boundary and spells the suffixes out.
+  ///
+  /// Production always passes `null`. It is settable only so the host can point at the
+  /// `sherpa_onnx_macos` framework in the pub cache, which is what makes it possible
+  /// to run this class — the real one, against the real weights — without a device.
+  /// See `test/services/audio/sherpa_recognizer_live_test.dart`.
   final String? nativeLibraryPath;
 
   sherpa.OnlineRecognizer? _recognizer;
@@ -120,14 +125,37 @@ class SherpaRecognizerRuntime implements SttRecognizerRuntime {
   int _segment = 0;
   String _lastEmitted = '';
 
+  /// Builds the recogniser, synchronously, on this isolate.
+  ///
+  /// **Load is 337–773 ms**, measured over nine runs on this machine (an Apple-silicon
+  /// macOS host) plus 371–476 ms over four runs on the reviewer's, both with:
+  ///
+  /// ```sh
+  /// flutter test test/services/audio/sherpa_recognizer_live_test.dart \
+  ///   --dart-define=FIELDOPS_STT_MODEL_DIR=… --dart-define=FIELDOPS_SHERPA_LIB=…
+  /// ```
+  ///
+  /// **One figure with its command beside it — review finding R0-F11.** Two ranges
+  /// for one quantity were in circulation: `466–471ms` in two source comments and
+  /// `456–773ms` in the README, with no command recorded against either, and the
+  /// narrow band was a much tighter claim than the runs behind it could support.
+  /// The spread is real and mostly first-read-off-flash, which is why it is quoted
+  /// as a range across hosts rather than as a number.
   @override
   Future<SttReady> load(SttConfig config) async {
     if (_recognizer != null) {
       throw StateError('SherpaRecognizerRuntime.load called twice');
     }
 
-    // Per-isolate, and this is the isolate that will do the decoding. Cheap and
-    // idempotent — it re-opens an already-open dynamic library.
+    // Per-isolate, and this is the isolate that will do the decoding. Cheap to
+    // repeat — it re-opens an already-open dynamic library.
+    //
+    // **Idempotent in its effect but not in its argument — review finding R0-F9.**
+    // `sherpa_onnx.dart:107` is `_path ??= p`, so the *first* `initBindings` call in
+    // an isolate fixes that isolate's search root for its lifetime and every later
+    // argument is silently discarded. Harmless here, because a worker loads once; it
+    // matters to anyone who tries to load twice with different paths in one isolate,
+    // where the second `dlopen` fails with nothing in this file pointing at why.
     sherpa.initBindings(nativeLibraryPath);
 
     final watch = Stopwatch()..start();

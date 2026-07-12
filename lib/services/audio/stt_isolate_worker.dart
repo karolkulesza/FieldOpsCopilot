@@ -5,8 +5,8 @@
 /// that boundary guarantees at *this app's* seam something the plugin happens to
 /// do. Here there is nothing to insure. Every entry point of `sherpa_onnx`'s Dart
 /// API is a synchronous FFI call that runs to completion on the calling thread —
-/// the recogniser's *constructor* loads three ONNX graphs (466–471ms measured on
-/// the macOS host), and `decode` runs the network. On the UI isolate that is a
+/// the recogniser's *constructor* loads three ONNX graphs (337–773ms measured — see
+/// `SherpaRecognizerRuntime.load` for the command), and `decode` runs the network. On the UI isolate that is a
 /// dropped frame per decode step, for the whole length of an utterance.
 ///
 /// **The protocol is one request, one reply, and that is the flow control.** The
