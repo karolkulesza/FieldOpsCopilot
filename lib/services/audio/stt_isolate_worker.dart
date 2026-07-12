@@ -324,10 +324,7 @@ class IsolateSttHost implements SttHost {
 Future<void> sttWorkerMain(SendPort handshake) async {
   final commands = ReceivePort('stt.commands');
   handshake.send(commands.sendPort);
-  await serveSttRequests(
-    commands: commands,
-    runtime: SherpaRecognizerRuntime(),
-  );
+  await serveSttRequests(commands: commands, runtime: null);
 }
 
 /// The worker's request loop, factored out of [sttWorkerMain] so it can be driven
@@ -335,12 +332,18 @@ Future<void> sttWorkerMain(SendPort handshake) async {
 ///
 /// Returns once an [SttShutdownRequest] has been served, at which point [commands]
 /// is closed and the entry point is free to return.
+///
+/// [runtime] is `null` in the isolate, where the real one cannot be built until a
+/// load request arrives carrying [SttConfig.nativeLibraryPath]; it is constructed
+/// there and reused for the worker's life. Tests pass a scripted runtime, which is
+/// used as given and never replaced.
 @visibleForTesting
 Future<void> serveSttRequests({
   required ReceivePort commands,
-  required SttRecognizerRuntime runtime,
+  required SttRecognizerRuntime? runtime,
 }) async {
   SttConfig? config;
+  var recognizer = runtime;
 
   await for (final message in commands) {
     final command = _decodeCommand(message);
@@ -351,7 +354,12 @@ Future<void> serveSttRequests({
       case SttLoadRequest(config: final wire):
         try {
           final decoded = SttConfig.fromWire(wire);
-          final ready = await runtime.load(decoded);
+          // Built here rather than at spawn because the library path travels in
+          // the config. A scripted runtime supplied by a test is kept as it is.
+          recognizer ??= SherpaRecognizerRuntime(
+            nativeLibraryPath: decoded.nativeLibraryPath,
+          );
+          final ready = await recognizer.load(decoded);
           config = decoded;
           reply?.send(SttReadyReply(ready).toWire());
         } on Object catch (error) {
@@ -368,19 +376,21 @@ Future<void> serveSttRequests({
         }
 
       case SttBeginRequest():
+        final active = recognizer;
+        if (active == null) {
+          reply?.send(_notLoaded('begin').toWire());
+          continue;
+        }
         _guard(reply, () {
-          runtime.beginSession();
+          active.beginSession();
           return const SttAckReply();
         });
 
       case SttAudioRequest(:final bytes, :final precedingGapBytes):
         final active = config;
-        if (active == null) {
-          reply?.send(
-            const SttFailureReply(
-              message: 'audio arrived before the recognizer was loaded',
-            ).toWire(),
-          );
+        final engine = recognizer;
+        if (active == null || engine == null) {
+          reply?.send(_notLoaded('audio').toWire());
           continue;
         }
         _guard(reply, () {
@@ -390,20 +400,17 @@ Future<void> serveSttRequests({
           // words it separated and change which of them the endpointer splits.
           final gap = _bridgeSamples(active, precedingGapBytes);
           if (gap > 0) {
-            produced.addAll(runtime.acceptSamples(silentSamples(gap)));
+            produced.addAll(engine.acceptSamples(silentSamples(gap)));
           }
-          produced.addAll(runtime.acceptSamples(pcm16ToFloat32(bytes)));
+          produced.addAll(engine.acceptSamples(pcm16ToFloat32(bytes)));
           return SttTranscriptsReply(_toWire(produced));
         });
 
       case SttFinishRequest():
         final active = config;
-        if (active == null) {
-          reply?.send(
-            const SttFailureReply(
-              message: 'finish arrived before the recognizer was loaded',
-            ).toWire(),
-          );
+        final engine = recognizer;
+        if (active == null || engine == null) {
+          reply?.send(_notLoaded('finish').toWire());
           continue;
         }
         _guard(reply, () {
@@ -417,33 +424,50 @@ Future<void> serveSttRequests({
             active.format.byteCountFor(active.tailPadding),
           );
           if (padding > 0) {
-            produced.addAll(runtime.acceptSamples(silentSamples(padding)));
+            produced.addAll(engine.acceptSamples(silentSamples(padding)));
           }
-          produced.addAll(runtime.finishSession());
+          produced.addAll(engine.finishSession());
           return SttTranscriptsReply(_toWire(produced));
         });
 
       case SttCancelRequest():
+        final active = recognizer;
+        if (active == null) {
+          reply?.send(_notLoaded('cancel').toWire());
+          continue;
+        }
         _guard(reply, () {
-          runtime.cancelSession();
+          active.cancelSession();
           return const SttAckReply();
         });
 
       case SttShutdownRequest():
         // Cancel first so no native stream is live while the recogniser under it
-        // is being destroyed.
-        try {
-          runtime.cancelSession();
-        } on Object catch (error) {
-          debugPrint('[stt worker] cancel during shutdown failed: $error');
+        // is being destroyed. A worker that never loaded has nothing to release,
+        // and must still acknowledge — the host waits for this before killing the
+        // isolate.
+        final active = recognizer;
+        if (active != null) {
+          try {
+            active.cancelSession();
+          } on Object catch (error) {
+            debugPrint('[stt worker] cancel during shutdown failed: $error');
+          }
+          await active.close();
         }
-        await runtime.close();
         reply?.send(const SttAckReply().toWire());
         commands.close();
         return;
     }
   }
 }
+
+/// The answer to any session request that arrives before a successful load.
+///
+/// One shape for all of them, naming which request it was: the caller's bug is
+/// the ordering, and the request name is the only part that varies.
+SttFailureReply _notLoaded(String what) =>
+    SttFailureReply(message: '$what arrived before the recognizer was loaded');
 
 /// Runs [body] and answers [reply] with its result, or with a failure.
 ///

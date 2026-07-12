@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:field_ops_copilot/engines/impl/sherpa_stt_engine.dart';
-import 'package:field_ops_copilot/engines/stt_engine.dart';
 import 'package:field_ops_copilot/services/audio/mic_frame.dart';
 import 'package:field_ops_copilot/services/audio/stt_config.dart';
 import 'package:field_ops_copilot/services/audio/stt_isolate_worker.dart';
