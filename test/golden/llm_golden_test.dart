@@ -607,7 +607,7 @@ void main() {
 
       // And the reported region is bounded rather than "everything after line
       // 40". Measured, because the first version of this assertion guessed
-      // `lessThan(6)` and the answer is 46 of the golden's 152 lines: the
+      // `lessThan(6)` and the answer is 47 of the golden's 154 lines: the
       // compiled prompt is embedded in *both* turns, so the altered line occurs
       // twice, and `_driftRegion` trims a common prefix and suffix rather than
       // computing an edit script — two changes far apart are one region spanning
@@ -616,9 +616,9 @@ void main() {
       final golden = lines(
         File(goldenPathFor(e102Scenario)).readAsStringSync(),
       );
-      expect(golden, hasLength(153)); // 152 lines + the trailing newline's ''
-      expect(reconciliation.driftingLines, 46);
-      // Which is why the report is capped: 46 lines a side would bury the
+      expect(golden, hasLength(155)); // 154 lines + the trailing newline's ''
+      expect(reconciliation.driftingLines, 47);
+      // Which is why the report is capped: 47 lines a side would bury the
       // change it is reporting.
       expect(report, contains('more line(s)'));
     });
