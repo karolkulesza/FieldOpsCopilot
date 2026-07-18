@@ -79,9 +79,14 @@ enum WorkOrderField {
   /// The four [wireName]s are distinct under that normalisation, so nothing here
   /// can be ambiguous. That is asserted by a test rather than by this sentence,
   /// because it is a property of the four names and a fifth field could break it.
+  ///
+  /// There is deliberately **no early return for an empty normalised key**. One
+  /// was here and mutation testing found it dead (M01: replacing it with `false`
+  /// left the suite green): no [wireName] normalises to the empty string, so an
+  /// unmatchable key already falls out of the loop below as `null`. It is deleted
+  /// rather than kept as a comment claiming a guard, which is Task 1.4's rule.
   static WorkOrderField? byKey(String rawKey) {
     final key = normalizeKey(rawKey);
-    if (key.isEmpty) return null;
     for (final field in values) {
       if (normalizeKey(field.wireName) == key) return field;
     }

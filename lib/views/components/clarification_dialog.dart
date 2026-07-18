@@ -184,6 +184,31 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
   /// one — and there is therefore no empty branch in the builder to go stale.
   ValueNotifier<ClarificationRequest>? _showing;
 
+  /// Whether the route on screen is being popped *by this host* because its
+  /// question went away.
+  ///
+  /// **This is the fix for a defect mutation M19 exposed, and the mutation was not
+  /// even the thing that failed** — the row was written expecting the state check
+  /// in [_present] to be load-bearing, it survived, and working out why found a
+  /// three-step sequence in which the host loses a question outright:
+  ///
+  /// 1. Something other than the dialog answers the pending question — the agent's
+  ///    own `answerClarification`, or `reset` behind the barrier — so the listener
+  ///    pops the route.
+  /// 2. The agent's next turn asks a *new* question while that pop is still
+  ///    animating. Without this flag the listener retargeted the dying route, so
+  ///    the new question was rendered into something already on its way out.
+  /// 3. The pop then resolved with `null`, and [_present]'s tail read the state,
+  ///    found a pending question and **dismissed it** — the very question that had
+  ///    just arrived, thrown away by the close of the dialog before it.
+  ///
+  /// So a closing route is left alone (step 2), the tail dismisses only the
+  /// question that was actually on screen (step 3), and a question that arrived
+  /// with no listener edge left to fire is presented by the tail itself. The window
+  /// is one frame wide and reachable: `AgentLoop` runs up to four turns, each may
+  /// call the tool, and a modal takes ~150ms to animate out.
+  bool _closing = false;
+
   @override
   void dispose() {
     _showing?.dispose();
@@ -207,14 +232,17 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
         // was reset behind the barrier. `_showing` is deliberately left holding
         // the outgoing question so the route paints it while it animates out;
         // `_present` clears it when the route is actually gone.
-        if (showing != null) {
+        if (showing != null && !_closing) {
+          _closing = true;
           Navigator.of(context, rootNavigator: true).pop();
         }
         return;
       }
       if (showing != null) {
-        // A second question while the first is up: retarget the open route.
-        showing.value = next;
+        // A second question while the first is up: retarget the open route —
+        // unless that route is already closing, in which case it is about to
+        // stop existing and `_present`'s tail will put the new one up instead.
+        if (!_closing) showing.value = next;
         return;
       }
       _showing = ValueNotifier<ClarificationRequest>(next);
@@ -231,12 +259,17 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
     if (showing == null) return;
     if (!mounted) {
       _showing = null;
+      _closing = false;
       showing.dispose();
       return;
     }
 
     final choice = await showClarificationDialog(context, showing);
+    // The question the route was actually rendering when it closed. Read before
+    // the notifier is disposed, and it is what makes a dismissal specific.
+    final shown = showing.value;
     _showing = null;
+    _closing = false;
     showing.dispose();
     if (!mounted) return;
 
@@ -245,15 +278,24 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
       // See `WorkOrderFormState.answerClarification` for what this deliberately
       // does *not* do, which is resume the agent's run.
       form.answerClarification(choice);
-      return;
-    }
-    // `null` covers three closings and only one of them is a dismissal: the
-    // button, the barrier, and the pop this host itself performs when the question
-    // is already gone. Checking the state is what tells them apart — calling
-    // `dismissClarification` unconditionally would clear a question that arrived
-    // between the pop and this line.
-    if (ref.read(workOrderFormProvider).clarification != null) {
+    } else if (ref.read(workOrderFormProvider).clarification == shown) {
+      // `null` covers three closings and only one of them is a dismissal: the
+      // button, the barrier, and the pop this host itself performs when the
+      // question is already gone. **Comparing the request rather than checking for
+      // one** is what tells them apart — an earlier version asked only whether
+      // *some* question was pending, which dismissed a question that had arrived
+      // while this route was closing. `ClarificationRequest` has value equality.
       form.dismissClarification();
+    }
+
+    // A question that arrived while the route was closing produced no listener
+    // edge this host could act on — the listener saw a non-null `next` while a
+    // route still existed and deliberately left it alone. So it is presented from
+    // here, which is the only point at which the route is known to be gone.
+    final pending = ref.read(workOrderFormProvider).clarification;
+    if (pending != null && _showing == null) {
+      _showing = ValueNotifier<ClarificationRequest>(pending);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _present());
     }
   }
 }

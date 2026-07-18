@@ -49,6 +49,16 @@ class WorkOrderFormViewModel extends Notifier<WorkOrderFormState> {
   /// doc), so there is nothing in the payload to apply — and because a technician
   /// does not need the form to react to the model mis-spelling an argument.
   ///
+  /// **The `ToolSuccess` check is unreachable today, and is recorded as unbound
+  /// rather than dressed up as a guard.** Mutation M12 deleted it and the suite
+  /// stayed green, which is correct and not a coverage gap: `ToolOutcome` is
+  /// sealed, so a failure is a `ToolFailure`, and `ToolFailure.payload` is a
+  /// computed `{error, parameter?, message}` that cannot carry a `recorded` key —
+  /// so [applyPayload] already answers `false` for one. It is kept because it puts
+  /// the rule where the decision belongs instead of making this method depend on a
+  /// payload shape defined one file away. The name check above is a different
+  /// matter and *is* bound (M11).
+  ///
   /// Returns whether anything changed, so a caller can tell "no form call" from
   /// "a form call that recorded nothing". Nothing in the app branches on it today;
   /// the tests do, and a bool is cheaper than making them diff the state.
