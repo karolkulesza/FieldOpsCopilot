@@ -44,6 +44,7 @@ import '../services/models/model_storage.dart';
 import '../services/models/providers.dart';
 import '../viewmodels/dictation_viewmodel.dart';
 import '../viewmodels/field_job_viewmodel.dart';
+import '../viewmodels/work_order_form_viewmodel.dart';
 import 'components/answer_markdown.dart';
 import 'components/clarification_dialog.dart';
 import 'components/model_readiness_banner.dart';
@@ -345,9 +346,21 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
                 FilledButton.icon(
                   key: DiagnoseKeys.diagnoseButton,
                   onPressed: canDiagnose && _inquiry.text.trim().isNotEmpty
-                      ? () => ref
-                            .read(fieldJobViewModelProvider.notifier)
-                            .diagnose(_inquiry.text)
+                      ? () {
+                          // **Before the run, not after it.** A new inquiry
+                          // discards the previous one's agent-filled fields, and
+                          // the agent's first `record_work_order_fields` call can
+                          // land before its answer does — so clearing on
+                          // completion would erase the run that just filled the
+                          // form. The technician's own values survive either way;
+                          // see `WorkOrderFormState.forNewInquiry`.
+                          ref
+                              .read(workOrderFormProvider.notifier)
+                              .beginInquiry();
+                          ref
+                              .read(fieldJobViewModelProvider.notifier)
+                              .diagnose(_inquiry.text);
+                        }
                       : null,
                   icon: const Icon(Icons.medical_services_outlined),
                   // No spinner in the busy label, for the reason in the library

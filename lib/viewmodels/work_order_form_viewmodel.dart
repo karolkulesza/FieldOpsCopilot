@@ -140,6 +140,16 @@ class WorkOrderFormViewModel extends Notifier<WorkOrderFormState> {
   void reset() {
     state = const WorkOrderFormState();
   }
+
+  /// Drops the previous inquiry's agent-filled fields, keeping what the
+  /// technician typed. See [WorkOrderFormState.forNewInquiry].
+  ///
+  /// Called when a diagnosis **starts**, not when one finishes: the agent's first
+  /// `record_work_order_fields` call can arrive before the answer does, so
+  /// clearing at the end would erase the run that just filled the form.
+  void beginInquiry() {
+    state = state.forNewInquiry();
+  }
 }
 
 /// The one work order the demo screen fills in.
