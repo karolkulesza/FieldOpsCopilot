@@ -31,6 +31,9 @@ abstract final class WorkOrderKeys {
 
   static Key dismissSuggestion(WorkOrderField field) =>
       Key('work-order-dismiss-${field.wireName}');
+
+  /// The line reporting fields the agent sent that this form does not have.
+  static const Key refusals = Key('work-order-refusals');
 }
 
 /// The four fields, filled by the agent and editable by the technician.
@@ -100,6 +103,45 @@ class WorkOrderFormPanel extends ConsumerWidget {
               ],
             ),
             const Divider(height: 16),
+            if (form.rejected.isNotEmpty)
+              Padding(
+                key: WorkOrderKeys.refusals,
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.filter_alt_off_outlined,
+                      size: 16,
+                      color: theme.colorScheme.outline,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      // Counted rather than listed, which is `_ResultPanel`'s
+                      // decision about refused *tool calls* applied to refused
+                      // *fields*: `RejectedFieldUpdate.message` is written for the
+                      // model ("send the value as text"), so it is not a sentence
+                      // to put in front of a technician. The count is the part that
+                      // is theirs — it says the agent heard something this form has
+                      // no box for.
+                      //
+                      // Added for review finding R0-F4: before it, the refusals
+                      // reached nothing at all and the state field that held them
+                      // documented a reader that did not exist.
+                      child: Text(
+                        form.rejected.length == 1
+                            ? 'The assistant sent 1 value this form has no field '
+                                  'for.'
+                            : 'The assistant sent ${form.rejected.length} values '
+                                  'this form has no fields for.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.outline,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             for (final field in WorkOrderField.values)
               _Field(
                 field: field,

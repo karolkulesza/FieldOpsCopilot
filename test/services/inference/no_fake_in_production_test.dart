@@ -107,8 +107,9 @@ void main() {
   /// every inquiry.
   ///
   /// So the question is no longer "which of these is a fake" (an open set, guessed
-  /// by name) but **"which of these may production touch"** (a closed set, three
-  /// files, each justified). Everything else under `lib/engines/` is off-limits
+  /// by name) but **"which of these may production touch"** (a closed set, five
+  /// files since Task 2.3, each justified). Everything else under `lib/engines/` is
+  /// off-limits
   /// whether or not it names a fake, whether or not it is a fake at all.
   ///
   /// **It fails closed, which is the whole point.** Add a file to `lib/engines/` and
@@ -252,8 +253,8 @@ void main() {
     };
 
     // The closure R3-F1 bought, applied to what remains: an *open* file that reaches
-    // a restricted one is itself restricted, so the three exceptions cannot be used
-    // as a doorway. Iterated, because an open file could reach another open file
+    // a restricted one is itself restricted, so the exceptions cannot be used as a
+    // doorway. Iterated, because an open file could reach another open file
     // that later becomes restricted.
     for (var changed = true; changed;) {
       changed = false;
@@ -768,8 +769,10 @@ void main() {
       expect(openFiles, isNot(contains('lib/engines/providers.dart')));
     });
 
-    // The open set is three files and growing it must be a deliberate, visible
-    // edit — each entry carries its justification in the constant's doc.
+    // The open set is five files and growing it must be a deliberate, visible
+    // edit — each entry carries its justification in the constant's doc. The count
+    // in this comment went stale when Task 2.3 added the two STT entries, which is
+    // review finding R0-F5 and exactly the failure this file specialises in.
     test('the open set is exactly the five production needs', () {
       expect(openFiles, {
         'lib/engines/llm_engine.dart',

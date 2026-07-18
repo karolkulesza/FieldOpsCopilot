@@ -341,6 +341,54 @@ void main() {
       );
     });
 
+    // **Review finding R0-F2, and the failure it describes is not subtle: the app's
+    // home route disappears.** `_showing` is assigned in the listener and the route
+    // is pushed one post-frame callback later; clearing the clarification inside
+    // that window used to take the `next == null` branch, find `_showing` non-null
+    // and pop the *root* navigator with no dialog on the stack. No `pumpAndSettle`
+    // between the two calls, deliberately — that is the whole window, and the
+    // existing 'clearing the request under an open overlay pops it' test pumps one
+    // and therefore cannot see this.
+    testWidgets('a question cleared before its route is pushed pops nothing', (
+      tester,
+    ) async {
+      final container = await pumpHost(tester);
+      final form = container.read(workOrderFormProvider.notifier);
+
+      ask(container);
+      form.reset();
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('behind'),
+        findsOneWidget,
+        reason: 'the pop took the app\'s home route with it',
+      );
+      expect(find.byKey(ClarificationKeys.dialog), findsNothing);
+      expect(container.read(workOrderFormProvider).clarification, isNull);
+    });
+
+    // And the cancelled presentation must not fire late: the post-frame callback
+    // is already scheduled when the request is cleared, so `_present` has to find
+    // `_showing` null and return rather than opening a dialog for a question that
+    // no longer exists.
+    testWidgets('the cancelled presentation does not open later', (
+      tester,
+    ) async {
+      final container = await pumpHost(tester);
+      final form = container.read(workOrderFormProvider.notifier);
+
+      ask(container);
+      form.reset();
+      await tester.pumpAndSettle();
+      // A second question afterwards still works — the cancel released the slot
+      // rather than wedging it.
+      ask(container);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(ClarificationKeys.dialog), findsOneWidget);
+    });
+
     // The ordinary path through the same code: answering *with the button* pops
     // with a choice, so the tail never reaches the dismissal branch at all.
     testWidgets('answering with the button does not dismiss anything', (

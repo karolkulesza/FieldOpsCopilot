@@ -182,6 +182,88 @@ void main() {
     });
   });
 
+  // **Review finding R0-F4.** `applyPayload` used to pass `rejected: const []`,
+  // so the state field that carries the model's refusals was populated only by
+  // unit tests of the model itself — dead on every production path, under a
+  // docstring naming a reader.
+  group('refusals reach the form', () {
+    test('a refused field lands on the state beside the recorded one', () {
+      final c = container();
+
+      final applied = c.read(workOrderFormProvider.notifier).applyPayload(
+        const {
+          RecordWorkOrderFieldsTool.recordedKey: {'fault_code': 'E-102'},
+          RecordWorkOrderFieldsTool.refusedKey: [
+            {
+              'field': 'elevator_colour',
+              'error': 'unknown_field',
+              'message': 'no such field',
+            },
+          ],
+        },
+      );
+
+      expect(applied, isTrue);
+      final state = c.read(workOrderFormProvider);
+      expect(state.textOf(WorkOrderField.faultCode), 'E-102');
+      expect(state.rejected.single.key, 'elevator_colour');
+    });
+
+    // A call whose *every* field was refused records nothing and is still worth
+    // reporting — before R0-F4 this returned `false` and vanished.
+    test(
+      'a call that recorded nothing but refused something still applies',
+      () {
+        final c = container();
+
+        final applied = c.read(workOrderFormProvider.notifier).applyPayload(
+          const {
+            RecordWorkOrderFieldsTool.recordedKey: <String, Object?>{},
+            RecordWorkOrderFieldsTool.refusedKey: [
+              {
+                'field': 'elevator_colour',
+                'error': 'unknown_field',
+                'message': 'no such field',
+              },
+            ],
+          },
+        );
+
+        expect(applied, isTrue);
+        expect(c.read(workOrderFormProvider).rejected, hasLength(1));
+        expect(c.read(workOrderFormProvider).isEmpty, isTrue);
+      },
+    );
+
+    test('refusals accumulate across runs', () async {
+      final c = container();
+
+      await runAgent(
+        c,
+        const LlmToolCall(
+          name: RecordWorkOrderFieldsTool.toolName,
+          arguments: {
+            formUpdatesArgument: {'fault_code': 'E-102', 'nope': 'x'},
+          },
+        ),
+      );
+      await runAgent(
+        c,
+        const LlmToolCall(
+          name: RecordWorkOrderFieldsTool.toolName,
+          arguments: {
+            formUpdatesArgument: {'also_nope': 'y'},
+          },
+        ),
+      );
+
+      expect(c.read(workOrderFormProvider).rejected.map((r) => r.key), [
+        'nope',
+        'also_nope',
+      ]);
+    });
+  });
+
   group('the controllers stay in step with the state', () {
     test('a technician entry reaches the controller', () {
       final c = container();

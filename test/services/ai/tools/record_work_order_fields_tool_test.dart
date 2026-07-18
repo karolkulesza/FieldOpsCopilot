@@ -300,6 +300,58 @@ void main() {
       );
     });
 
+    // R0-F4: the refusals reach the state and the panel, so the reader has to be
+    // exact in the same way `recordedFieldsOf` is.
+    test('every refusal survives execute → refusedUpdatesOf', () async {
+      final payload = await run(const {
+        formUpdatesArgument: {
+          'fault_code': 'E-102',
+          'elevator_colour': 'green',
+          'technician_hours': 2,
+          'required_parts': '',
+        },
+      });
+
+      final refused = refusedUpdatesOf(payload);
+      expect(refused.map((r) => r.key), [
+        'elevator_colour',
+        'technician_hours',
+        'required_parts',
+      ]);
+      expect(refused.map((r) => r.reason), [
+        FormUpdateRejection.unknownField,
+        FormUpdateRejection.notAString,
+        FormUpdateRejection.blank,
+      ]);
+      expect(refused.map((r) => r.message), everyElement(isNotEmpty));
+    });
+
+    test('a payload with nothing refused reports nothing', () async {
+      final payload = await run(const {
+        formUpdatesArgument: {'fault_code': 'E-102'},
+      });
+      expect(refusedUpdatesOf(payload), isEmpty);
+    });
+
+    test('an unreadable refusal entry is dropped, not half-built', () {
+      // Same tolerance as the other two readers, and for the same reason: it runs
+      // mid-flight over whatever payload arrives. An unknown `error` keeps the
+      // entry — the reason is the least interesting part of it — but an entry with
+      // no message has nothing to draw and is dropped.
+      final refused = refusedUpdatesOf(const {
+        RecordWorkOrderFieldsTool.refusedKey: [
+          {'field': 'a', 'error': 'unknown_field', 'message': 'kept'},
+          {'field': 'b', 'error': 'a_code_from_the_future', 'message': 'kept'},
+          {'field': 'c', 'error': 'unknown_field'},
+          {'field': 7, 'error': 'unknown_field', 'message': 'dropped'},
+          'not a map',
+        ],
+      });
+
+      expect(refused.map((r) => r.key), ['a', 'b']);
+      expect(refused[1].reason, FormUpdateRejection.unknownField);
+    });
+
     test('a payload with no question asks none', () async {
       final payload = await run(const {
         formUpdatesArgument: {'fault_code': 'E-102'},

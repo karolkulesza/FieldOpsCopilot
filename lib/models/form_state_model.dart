@@ -509,8 +509,12 @@ class WorkOrderFormState {
 
   /// Every update the agent sent that was refused, newest run last.
   ///
-  /// On the state rather than only in the tool payload because the tool's copy
-  /// goes to the *model*, and this one is what a person debugging a demo reads.
+  /// On the state rather than only in the tool payload because the tool's copy goes
+  /// to the *model*: `WorkOrderFormViewModel.applyPayload` reads the payload's
+  /// `refused` list into this, and the work-order panel draws a counted line from
+  /// it. **That wiring is review finding R0-F4** — until it, this field was
+  /// populated only by unit tests and its docstring named a reader that did not
+  /// exist, which is precisely the shape this project keeps finding.
   final List<RejectedFieldUpdate> rejected;
 
   /// Whether anything at all has been filled in.
