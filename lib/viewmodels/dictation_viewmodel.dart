@@ -184,6 +184,10 @@ class DictationController extends Notifier<DictationState> {
     final generation = ++_generation;
     state = const DictationState(phase: DictationPhase.starting);
 
+    // **Step 1 — is there anything to transcribe?** Cheap: the install-status
+    // check is receipts, not a re-hash, and building the engine does not load it.
+    // Asked before the microphone so a device with no verified weights never opens
+    // an input it cannot use.
     final SttEngine? engine;
     try {
       engine = await ref.read(dictationEngineProvider.future);
@@ -204,27 +208,30 @@ class DictationController extends Notifier<DictationState> {
     }
     if (!ref.mounted || _generation != generation) return;
 
-    try {
-      // Idempotent, and awaited here rather than at provider resolution: this is
-      // the deliberate action `deviceSttEngineProvider` defers the load to. **This
-      // is the await R1-F1 lived under** — it is the long one, and until the check
-      // below a `stop()` inside it was a no-op.
-      await engine.initialize();
-    } on Exception catch (error) {
-      _unavailable(generation, 'The speech model could not be loaded: $error');
-      return;
-    }
-    if (!ref.mounted || _generation != generation) return;
-
+    // **Step 2 — open the microphone *before* the recogniser loads, which is the
+    // whole point of this ordering.** The load is 359–530ms (Task 2.2 measured it
+    // on this device) and it used to happen first, so every word spoken in that
+    // window was never *recorded* — not mis-heard, absent. On the demo device
+    // "cabin vibrating" came back as "IN VIBRATING": the leading "cab" fell in the
+    // gap between the tap and the input opening. The second utterance of a session
+    // was always fine, because `initialize()` returns immediately once ready.
+    //
+    // Nothing new is needed to hold that audio: Task 2.1 built
+    // `MicCaptureSession` with a bounded 2s backlog for exactly this, and says so
+    // — *"buffers up to the backlog bound while nothing is listening, so audio
+    // captured between `MicCapture.start` and the first `listen` is not lost"*.
+    // The capability existed; the call order defeated it. 500ms of 16 kHz mono
+    // 16-bit is ~16KB against a 64KB bound, so the load fits with room to spare —
+    // and a load that somehow overran the bound drops *oldest* and reports what it
+    // dropped as `precedingGapBytes`, which the engine bridges with silence. It
+    // degrades visibly rather than silently.
     final outcome = await ref.read(micCaptureProvider).start();
-    // The graph went away, or a stop landed, while the platform was answering.
-    // Whatever was opened has to be closed either way, or the microphone stays
-    // live with nobody reading it.
     if (!ref.mounted || _generation != generation) {
       if (outcome is MicCaptureStarted) unawaited(outcome.session.stop());
       return;
     }
 
+    final MicCaptureSession session;
     switch (outcome) {
       case MicPermissionDenied():
         _unavailable(
@@ -232,22 +239,59 @@ class DictationController extends Notifier<DictationState> {
           'FieldOps Copilot has no microphone access. Grant it in Settings to '
           'dictate.',
         );
+        return;
       case MicCaptureBusy():
         // Reachable only if something else holds the capture — this controller's
         // own re-entry is refused at the top. Reported rather than swallowed,
         // because a mic button that silently does nothing is indistinguishable
         // from one that is broken.
         _unavailable(generation, 'The microphone is already in use.');
+        return;
       case MicCaptureUnavailable(:final message):
         _unavailable(
           generation,
           'The microphone could not be opened: $message',
         );
-      case MicCaptureStarted(:final session):
-        _session = session;
-        _listen(engine, session);
-        state = state.copyWith(phase: DictationPhase.listening);
+        return;
+      case MicCaptureStarted(session: final started):
+        session = started;
     }
+    // Held from here on, so a `stop()` during the load below has a session to
+    // close rather than only a generation to bump.
+    _session = session;
+
+    // **Step 3 — load the recogniser while the microphone fills the backlog.**
+    // This is the await R1-F1 lived under, and it is still the long one; what has
+    // changed is that audio is now being captured throughout it.
+    try {
+      await engine.initialize();
+    } on Exception catch (error) {
+      // The microphone is open at this point and nothing is going to read it.
+      await _releaseSession(session);
+      _unavailable(generation, 'The speech model could not be loaded: $error');
+      return;
+    }
+    if (!ref.mounted || _generation != generation) {
+      await _releaseSession(session);
+      return;
+    }
+
+    // **Step 4 — attach.** The backlog replays from the first frame captured in
+    // step 2, so the recogniser hears the whole utterance including whatever was
+    // said while it was loading.
+    _listen(engine, session);
+    state = state.copyWith(phase: DictationPhase.listening);
+  }
+
+  /// Closes a session this [start] opened and never attached anything to.
+  ///
+  /// Its own method because it is now reachable from three places — a failed
+  /// load, a cancelled start, and a stop that landed mid-load — and the thing it
+  /// guards against is the one that costs a technician something real: a
+  /// microphone left live with nobody reading it.
+  Future<void> _releaseSession(MicCaptureSession session) async {
+    if (identical(_session, session)) _session = null;
+    await session.stop();
   }
 
   void _listen(SttEngine engine, MicCaptureSession session) {
@@ -332,11 +376,23 @@ class DictationController extends Notifier<DictationState> {
       }
       return;
     }
+
     await session.stop();
-    // Closing the frames is what makes the engine flush, and the flush is where
-    // the last utterance comes from — so the wait is on the transcript stream
-    // ending, not on the microphone being handed back.
-    await _closed?.future;
+    final closed = _closed;
+    if (closed != null) {
+      // Closing the frames is what makes the engine flush, and the flush is where
+      // the last utterance comes from — so the wait is on the transcript stream
+      // ending, not on the microphone being handed back. `_listen`'s `onDone`
+      // puts the phase back.
+      await closed.future;
+    } else if (ref.mounted && state.isActive) {
+      // **Stopped between the microphone opening and the recogniser attaching**,
+      // which is a state that only exists since the capture was moved ahead of the
+      // model load. There is no transcript stream to end and therefore no `onDone`
+      // to put the phase back, so it is done here. Without this the screen sits on
+      // "Preparing the recogniser…" over a microphone that is already closed.
+      state = state.copyWith(phase: DictationPhase.idle);
+    }
     _session = null;
     _closed = null;
     await _transcripts?.cancel();

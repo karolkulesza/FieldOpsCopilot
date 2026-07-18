@@ -87,7 +87,7 @@ void main() {
       expect(stateOf(c).message, contains('no input route'));
     });
 
-    test('a model that will not load is unavailable', () async {
+    test('a model that will not load is unavailable, and frees the mic', () async {
       engine.initializeError = Exception('encoder-epoch-99: no such file');
       final c = container();
 
@@ -95,7 +95,15 @@ void main() {
 
       expect(stateOf(c).phase, DictationPhase.unavailable);
       expect(stateOf(c).message, contains('no such file'));
-      expect(input.startStreamCalls, 0);
+      // **This assertion is inverted from what it was, deliberately.** It used to
+      // read `startStreamCalls == 0`, which was true only because the microphone
+      // opened *after* the load — the ordering that cost a technician the first
+      // word of every session. The mic now opens first, so the property worth
+      // holding is not that it stayed shut but that a failed load **gives it
+      // back**: an input left live with nothing reading it is the one outcome here
+      // that costs something real.
+      expect(input.startStreamCalls, 1);
+      expect(input.stopCalls, greaterThanOrEqualTo(1));
     });
 
     test('nothing has been transcribed in any of those states', () async {
@@ -246,13 +254,16 @@ void main() {
       return gate;
     }
 
-    test('stops the capture instead of opening the microphone', () async {
+    test('releases the microphone the start had already opened', () async {
       final c = container();
       final gate = gateTheLoad();
 
       unawaited(controllerOf(c).start());
       await pumpEventQueue();
       expect(stateOf(c).phase, DictationPhase.starting);
+      // The microphone is *already open* here, and that is the point of the
+      // ordering rather than a leak — see the capture-during-the-load group below.
+      expect(input.startStreamCalls, 1);
 
       await controllerOf(c).stop();
       gate.complete();
@@ -264,11 +275,11 @@ void main() {
         reason: 'a cancelled start must not leave the UI saying "starting"',
       );
       expect(
-        input.startStreamCalls,
-        0,
+        input.stopCalls,
+        greaterThanOrEqualTo(1),
         reason:
-            'the microphone must not open for a capture that was already '
-            'stopped — that is the state the fix exists to prevent',
+            'the input was open before the stop landed, so the stop has to hand '
+            'it back rather than only bump the generation',
       );
     });
 
@@ -285,8 +296,89 @@ void main() {
       await controllerOf(c).start();
 
       expect(stateOf(c).phase, DictationPhase.listening);
-      expect(input.startStreamCalls, 1);
+      // Two, not one: the cancelled start opened the input and gave it back, and
+      // this one opened it again. Counting them is what shows the first was
+      // genuinely released rather than reused.
+      expect(input.startStreamCalls, 2);
+      expect(input.stopCalls, greaterThanOrEqualTo(1));
     });
+
+    // **The defect this ordering exists to fix, reported from the demo iPad:
+    // "cabin vibrating" came back as "IN VIBRATING".** The microphone used to
+    // open *after* `initialize()`, so the 359–530ms of ONNX loading (Task 2.2's
+    // measurement, on that device) happened with no input open — and every word
+    // spoken in that window was never recorded. The second utterance of a session
+    // was always clean, because `initialize()` returns immediately once ready,
+    // which is exactly the asymmetry the report described.
+    //
+    // Asserted on the *bytes*, not on a transcript: the double does not
+    // transcribe, and what was in question was never recognition.
+    test(
+      'audio spoken while the model loads still reaches the recogniser',
+      () async {
+        final c = container();
+        final gate = gateTheLoad();
+
+        unawaited(controllerOf(c).start());
+        await pumpEventQueue();
+
+        // The input is open before the recogniser is — that is the fix.
+        expect(stateOf(c).phase, DictationPhase.starting);
+        expect(
+          input.startStreamCalls,
+          1,
+          reason: 'the microphone must already be capturing during the load',
+        );
+
+        // "CAB" — the syllable the demo device lost.
+        input.emit(List<int>.filled(320, 7));
+        await pumpEventQueue();
+
+        gate.complete();
+        await pumpEventQueue();
+
+        expect(stateOf(c).phase, DictationPhase.listening);
+        final bytes = engine.receivedFrames.fold<int>(
+          0,
+          (total, frame) => total + frame.bytes.length,
+        );
+        expect(
+          bytes,
+          320,
+          reason:
+              'the backlog Task 2.1 built for this must replay what was captured '
+              'before the recogniser attached',
+        );
+        expect(
+          engine.receivedFrames.first.precedingGapBytes,
+          0,
+          reason:
+              'and nothing may be dropped on the way — a gap here is lost audio',
+        );
+      },
+    );
+
+    test(
+      'audio after the load arrives too, so the join is not one-shot',
+      () async {
+        final c = container();
+        final gate = gateTheLoad();
+        unawaited(controllerOf(c).start());
+        await pumpEventQueue();
+        input.emit(List<int>.filled(320, 7));
+        gate.complete();
+        await pumpEventQueue();
+
+        input.emit(List<int>.filled(160, 9));
+        await pumpEventQueue();
+
+        final bytes = engine.receivedFrames.fold<int>(
+          0,
+          (total, frame) => total + frame.bytes.length,
+        );
+        expect(bytes, 480);
+      },
+    );
 
     // **Review finding R2-F1, and the reachable row of it.** R1-F1's counter was
     // read on the way *forward*, after each await — but three of `start`'s exits
@@ -655,6 +747,13 @@ class _ScriptedSttEngine implements SttEngine {
   StreamSubscription<MicFrame>? _frames;
   SttTranscript? _onFinish;
 
+  /// Every frame handed to [transcribe]'s stream, in order.
+  ///
+  /// Recorded rather than discarded because the question "did the audio spoken
+  /// while the model was loading reach the recogniser" cannot be asked of a
+  /// transcript — the double does not transcribe. It is asked of the bytes.
+  final receivedFrames = <MicFrame>[];
+
   Object? initializeError;
 
   /// Held open to keep `initialize()` pending, so a test can sit inside the
@@ -713,7 +812,7 @@ class _ScriptedSttEngine implements SttEngine {
     final out = StreamController<SttTranscript>();
     _out = out;
     _frames = frames.listen(
-      (_) {},
+      receivedFrames.add,
       onError: fail,
       onDone: () {
         final last = _onFinish;
@@ -741,6 +840,14 @@ class _ScriptedAudioInput implements AudioInput {
   /// Held open to keep `startStream` pending — the other window a stop can land
   /// in while a start is in flight (R1-F1).
   Completer<void>? startGate;
+
+  /// Pushes raw PCM as the plugin would. Even-length only: `MicCapture` emits
+  /// whole frames and carries a partial one over, so an odd buffer would be held
+  /// back and the test would be measuring the carry rather than the ordering.
+  void emit(List<int> bytes) {
+    assert(bytes.length.isEven, 'whole 16-bit samples only');
+    _raw?.add(Uint8List.fromList(bytes));
+  }
 
   int startStreamCalls = 0;
   int stopCalls = 0;
