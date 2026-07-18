@@ -517,10 +517,25 @@ class DictationController extends Notifier<DictationState> {
   }
 
   /// Largest absolute 16-bit sample in [bytes], little-endian.
+  ///
+  /// [ByteData.getInt16] rather than an [Int16List] view, for the reason
+  /// `pcm16ToFloat32` states and this function first ignored: a mic frame is a
+  /// `Uint8List` carved out of a platform message, so its `offsetInBytes` is
+  /// whatever the plugin's allocator happened to hand back — on device it was
+  /// **5**, and `Int16List.sublistView` requires two-byte alignment and throws
+  /// on anything else. That throw reached the frame handler and killed the
+  /// capture, so a line of instrumentation stopped dictation outright.
+  ///
+  /// An odd length drops its trailing byte instead of throwing, which is the
+  /// opposite of what `pcm16ToFloat32` does with the same input — deliberately.
+  /// There, half a sample means the audio *being transcribed* was cut
+  /// mid-sample and everything after it decodes as noise, which has to be loud.
+  /// Here it means one diagnostic frame is a hair short.
   static int _peakOf(Uint8List bytes) {
-    final samples = Int16List.sublistView(bytes);
+    final view = ByteData.sublistView(bytes);
     var peak = 0;
-    for (final sample in samples) {
+    for (var offset = 0; offset + 2 <= bytes.length; offset += 2) {
+      final sample = view.getInt16(offset, Endian.little);
       final magnitude = sample < 0 ? -sample : sample;
       if (magnitude > peak) peak = magnitude;
     }
