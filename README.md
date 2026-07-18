@@ -2288,6 +2288,14 @@ configured, and Diagnose stays dead — which is the correct behaviour, not a
 degraded one. Add `--dart-define=FIELDOPS_DB_KEY=<passphrase>` to use something
 other than the named demo key.
 
+For driving the app **by hand** on a device — including what to say to the
+microphone and what each prompt should produce — see
+[`docs/device-test-scenarios.md`](docs/device-test-scenarios.md). Every
+expectation there is quoted from the seeded manual and warehouse, so a run that
+disagrees with it is a finding rather than a judgement call. It also records what
+the 20M recogniser is and is not good at, which is worth reading before dictating
+a part number at it.
+
 The on-device acceptance test is `integration_test/demo_flow_test.dart`
 (TC-UI-DEMO-01). It is the only test in the repo that pumps `FieldOpsApp` with **no
 overrides at all**, so it is the only one that exercises the three wirings as the
