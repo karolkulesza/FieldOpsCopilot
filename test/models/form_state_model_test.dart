@@ -43,6 +43,15 @@ void main() {
       expect(normalised, hasLength(WorkOrderField.values.length));
     });
 
+    // The wire names reach the model and are snapshotted, so a duplicate would make
+    // two different refusals indistinguishable in a transcript.
+    test('every rejection reason has a distinct wire name', () {
+      expect(
+        FormUpdateRejection.values.map((r) => r.wireName).toSet(),
+        hasLength(FormUpdateRejection.values.length),
+      );
+    });
+
     test('every field carries a non-empty label and hint', () {
       for (final field in WorkOrderField.values) {
         expect(field.label.trim(), isNotEmpty, reason: field.name);
@@ -131,19 +140,6 @@ void main() {
     test('a null value is refused as not-a-string', () {
       final parse = parseFormUpdates(const {'fault_code': null});
       expect(parse.rejected.single.reason, FormUpdateRejection.notAString);
-    });
-
-    test('a non-map argument is one rejection against form_updates itself', () {
-      for (final raw in const <Object?>[
-        'E-102',
-        42,
-        ['a'],
-        null,
-      ]) {
-        final parse = parseFormUpdates(raw);
-        expect(parse.accepted, isEmpty, reason: '$raw');
-        expect(parse.rejected.single.key, formUpdatesArgument, reason: '$raw');
-      }
     });
 
     test('a rejected key is quoted as the model spelled it', () {
@@ -237,6 +233,41 @@ void main() {
       });
       expect(parse.rejection, isNotNull);
       expect(parse.rejection!.key, clarificationArgument);
+      expect(
+        parse.rejection!.reason,
+        FormUpdateRejection.unusableClarification,
+      );
+    });
+
+    // Every clarification refusal is one reason, which is the decision on the enum
+    // value. Held here so that splitting it into four is a visible edit.
+    test('every clarification refusal carries the one reason', () {
+      for (final raw in const <Object?>[
+        'not an object',
+        {
+          'field': 'nope',
+          'question': 'Which?',
+          'options': ['a', 'b'],
+        },
+        {
+          'field': 'fault_code',
+          'question': '',
+          'options': ['a', 'b'],
+        },
+        {'field': 'fault_code', 'question': 'Which?', 'options': 'a or b'},
+        {
+          'field': 'fault_code',
+          'question': 'Which?',
+          'options': ['only'],
+        },
+      ]) {
+        final parse = parseClarification(raw);
+        expect(
+          parse.rejection?.reason,
+          FormUpdateRejection.unusableClarification,
+          reason: '$raw',
+        );
+      }
     });
 
     test('a blank or missing question is refused', () {

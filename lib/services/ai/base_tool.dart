@@ -187,6 +187,69 @@ class ToolArguments {
     }
     return value;
   }
+
+  /// Reads [name] as a JSON object, or throws [ToolArgumentException].
+  ///
+  /// Added by Task 2.3, whose `record_work_order_fields` takes a *nested* map
+  /// (`{"form_updates": {"fault_code": "E-102"}}`) rather than a flat scalar. It is
+  /// here rather than in that tool for [requiredString]'s reason — the rule about
+  /// what a badly typed argument means belongs to the reader every tool shares, or
+  /// the second tool to need it writes a second rule.
+  ///
+  /// The three failing shapes are exactly [requiredString]'s, minus the blank case
+  /// which has no analogue: absent and `null` are [ToolFailureCode.missingParameter]
+  /// because from the model's side both mean "you sent me no fields", and a
+  /// non-object is [ToolFailureCode.invalidParameter] because it is the model
+  /// ignoring a schema that declares an object.
+  ///
+  /// **An empty object is returned, not refused**, and that is the deliberate
+  /// difference from [requiredString]'s treatment of a blank string. `{}` from this
+  /// tool is a well-formed call that turned out to have nothing to record — the
+  /// model attempted the extraction and found no fields — whereas `""` for a SKU is
+  /// a lookup with nothing to look up. The caller decides what an empty map means,
+  /// because only the caller knows.
+  ///
+  /// Returned as `Map<Object?, Object?>` rather than `Map<String, Object?>`: this
+  /// map came from the weights through an isolate port, so its static key type is
+  /// `Object?` and a `cast` here would move a possible `TypeError` from a place that
+  /// reports it to a place that throws it.
+  Map<Object?, Object?> requiredMap(String name) {
+    if (!_raw.containsKey(name)) {
+      throw ToolArgumentException.missing(
+        parameter: name,
+        message:
+            'required argument "$name" was not provided; call the tool again '
+            'with "$name" set to a JSON object',
+      );
+    }
+    final value = _raw[name];
+    if (value == null) {
+      throw ToolArgumentException.missing(
+        parameter: name,
+        message:
+            'required argument "$name" was null; call the tool again with '
+            '"$name" set to a JSON object',
+      );
+    }
+    if (value is! Map) {
+      throw ToolArgumentException.invalid(
+        parameter: name,
+        message:
+            'argument "$name" must be a JSON object, but a '
+            '${value.runtimeType} was provided',
+      );
+    }
+    return value;
+  }
+
+  /// The raw value of [name], or `null` when it was absent or `null`.
+  ///
+  /// Deliberately untyped: it exists for an argument whose *own* parser decides
+  /// what to do with a malformed value, rather than one where a wrong type should
+  /// fail the call. Task 2.3's `clarification` is that case — it is an optional
+  /// extra sent alongside the field updates, and failing the whole call over it
+  /// would discard updates that were perfectly good.
+  Object? optional(String name) => _raw[name];
 }
 
 /// Why a tool call could not produce a result.

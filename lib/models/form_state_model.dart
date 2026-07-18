@@ -115,7 +115,16 @@ enum FormUpdateRejection {
   /// a model emitting `""` for a field it has nothing to say about is far more
   /// likely than one deliberately erasing a technician's entry, and the erasing
   /// reading is the destructive one.
-  blank('blank');
+  blank('blank'),
+
+  /// A `clarification` argument arrived but could not be put to a technician.
+  ///
+  /// One reason rather than four (not an object / no such field / no question /
+  /// too few options) because unlike the field cases above they do not have
+  /// different corrective actions — every one of them means "send the whole
+  /// clarification object again, correctly". The *message* says which, on
+  /// [FormUpdateRejection.blank]'s reasoning.
+  unusableClarification('unusable_clarification');
 
   const FormUpdateRejection(this.wireName);
 
@@ -177,27 +186,23 @@ class FormUpdateParse {
 
 /// Reads a model-supplied `form_updates` map.
 ///
-/// Never throws; see the library doc. [raw] is `Object?` rather than a map because
-/// it arrives from `LlmToolCall.arguments`, whose values are whatever the weights
-/// emitted — a list, a string, `null`. A non-map is one rejection against the key
-/// `form_updates` itself rather than a silent empty result, because "I sent you
-/// updates and nothing happened" is the failure the model cannot diagnose.
-FormUpdateParse parseFormUpdates(Object? raw) {
-  if (raw is! Map) {
-    return FormUpdateParse(
-      accepted: const {},
-      rejected: [
-        RejectedFieldUpdate(
-          key: formUpdatesArgument,
-          reason: FormUpdateRejection.notAString,
-          message:
-              '"$formUpdatesArgument" must be an object mapping field names to '
-              'string values, but a ${raw.runtimeType} was provided',
-        ),
-      ],
-    );
-  }
-
+/// Never throws; see the library doc. Every *entry* that cannot be used becomes a
+/// [RejectedFieldUpdate] and the rest still apply.
+///
+/// **Takes a map rather than `Object?`, and the asymmetry with
+/// [parseClarification] is deliberate.** `form_updates` not being an object at all
+/// is a failure of the whole call — there is nothing left to record — so it is
+/// caught one layer up by `ToolArguments.requiredMap`, where Task 1.5 already
+/// decided what a wrongly typed argument means. Putting a `raw is! Map` branch here
+/// as well would be a second rule for one question, and it would be unreachable
+/// from the only production caller. `clarification` gets the opposite treatment for
+/// the opposite reason: it is an optional extra, so a malformed one must not take
+/// good field updates down with it, and its refusal is a value.
+///
+/// The key type is `Object?` because this map crossed an isolate port and came out
+/// of a plugin: JSON keys are strings once decoded, but nothing in the type system
+/// says so by the time it arrives here.
+FormUpdateParse parseFormUpdates(Map<Object?, Object?> raw) {
   final accepted = <WorkOrderField, String>{};
   final rejected = <RejectedFieldUpdate>[];
 
@@ -331,7 +336,7 @@ class ClarificationParse {
 ClarificationParse parseClarification(Object? raw) {
   RejectedFieldUpdate refuse(String message) => RejectedFieldUpdate(
     key: clarificationArgument,
-    reason: FormUpdateRejection.notAString,
+    reason: FormUpdateRejection.unusableClarification,
     message: message,
   );
 
