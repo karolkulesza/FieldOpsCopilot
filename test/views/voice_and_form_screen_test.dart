@@ -422,6 +422,109 @@ void main() {
     });
   });
 
+  group('clearing the inquiry', () {
+    testWidgets('the button is absent until there is something to clear', (
+      tester,
+    ) async {
+      await pumpScreen(tester);
+      expect(find.byKey(DiagnoseKeys.clearInquiry), findsNothing);
+
+      await tester.enterText(
+        find.byKey(DiagnoseKeys.inquiryField),
+        'cabin vibrating',
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(DiagnoseKeys.clearInquiry), findsOneWidget);
+    });
+
+    testWidgets('one tap empties the field and disables Diagnose', (
+      tester,
+    ) async {
+      await pumpScreen(tester);
+      await tester.enterText(
+        find.byKey(DiagnoseKeys.inquiryField),
+        'cabin vibrating, E-102',
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(DiagnoseKeys.diagnoseButton))
+            .onPressed,
+        isNotNull,
+      );
+
+      await tester.tap(find.byKey(DiagnoseKeys.clearInquiry));
+      await tester.pumpAndSettle();
+
+      expect(inquiryText(tester), '');
+      // **The half a `clear()` alone would miss.** `controller.clear()` is a
+      // programmatic write and does not fire `onChanged`, so without the
+      // rebuild the text would vanish while Diagnose stayed live over an empty
+      // inquiry — the same asymmetry `_onDictation` documents, arriving through
+      // a different door.
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(DiagnoseKeys.diagnoseButton))
+            .onPressed,
+        isNull,
+        reason: 'an empty inquiry must not be diagnosable',
+      );
+      expect(find.byKey(DiagnoseKeys.clearInquiry), findsNothing);
+    });
+
+    testWidgets('clearing during a capture takes the field and stops the mic', (
+      tester,
+    ) async {
+      // Clearing **is** an edit, so it takes the field on the same terms typing
+      // does (R0-F1). A clear that left the microphone open would go on filling
+      // a field the technician had just emptied; one that left the mirror
+      // attached would be undone by the next partial.
+      final c = await pumpScreen(tester);
+      await tapMic(tester);
+      await engine.push(
+        tester,
+        const SttTranscript('THE CABIN IS VIBRATING', isFinal: true),
+      );
+      expect(inquiryText(tester), 'THE CABIN IS VIBRATING');
+      expect(c.read(dictationControllerProvider).isActive, isTrue);
+
+      await tester.tap(find.byKey(DiagnoseKeys.clearInquiry));
+      await settleAsync(tester);
+
+      expect(inquiryText(tester), '');
+      expect(
+        c.read(dictationControllerProvider).isActive,
+        isFalse,
+        reason: 'the microphone must not keep writing into a cleared field',
+      );
+    });
+
+    testWidgets('a capture after a clear starts from empty', (tester) async {
+      // The transcript is not carried over: `start()` resets it and
+      // `_onDictation` re-reads the base from the field, which is now blank. If
+      // either stopped being true, the cleared words would reappear on the next
+      // capture — which is the failure a technician would read as the clear
+      // button not working.
+      await pumpScreen(tester);
+      await tapMic(tester);
+      await engine.push(
+        tester,
+        const SttTranscript('THE CABIN IS VIBRATING', isFinal: true),
+      );
+      await tester.tap(find.byKey(DiagnoseKeys.clearInquiry));
+      await settleAsync(tester);
+
+      await tapMic(tester);
+      await engine.push(
+        tester,
+        const SttTranscript('E ONE OH TWO', isFinal: true),
+      );
+
+      expect(inquiryText(tester), 'E ONE OH TWO');
+    });
+  });
+
   // **Reported from the demo iPad: `BOTTOM OVERFLOWED BY 64 PIXELS` with the
   // software keyboard up.** `Scaffold` shrinks the body for the keyboard inset,
   // and the two panels are `Expanded` — so they had already collapsed to zero and
