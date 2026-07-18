@@ -123,6 +123,14 @@ void main() {
     'lib/engines/tool_schema.dart',
     // The device engine — the one implementation production is *supposed* to reach.
     'lib/engines/impl/gemma_llm_engine.dart',
+    // **Task 2.3 put speech on the answer path**, so the same two files exist for
+    // the recogniser as for the model: the interface `DictationController` is
+    // written against, and the one implementation production is supposed to reach.
+    // Everything else under `lib/engines/` stays restricted — including
+    // `fakes/fake_stt_engine.dart`, which is now guarded rather than merely
+    // unused.
+    'lib/engines/stt_engine.dart',
+    'lib/engines/impl/sherpa_stt_engine.dart',
   };
 
   /// Comments are where the *reason* for this rule is written down, so they must be
@@ -762,11 +770,13 @@ void main() {
 
     // The open set is three files and growing it must be a deliberate, visible
     // edit — each entry carries its justification in the constant's doc.
-    test('the open set is exactly the three production needs', () {
+    test('the open set is exactly the five production needs', () {
       expect(openFiles, {
         'lib/engines/llm_engine.dart',
         'lib/engines/tool_schema.dart',
         'lib/engines/impl/gemma_llm_engine.dart',
+        'lib/engines/stt_engine.dart',
+        'lib/engines/impl/sherpa_stt_engine.dart',
       });
     });
   });
@@ -788,6 +798,11 @@ void main() {
       expect(scanned, contains('lib/services/inference/providers.dart'));
       expect(scanned, contains('lib/viewmodels/field_job_viewmodel.dart'));
       expect(scanned, contains('lib/views/diagnose_screen.dart'));
+      // Task 2.3's additions, for R1-F3's reason: the file that matters has to be
+      // in the scanned set, and the two that now decide whether a *transcript*
+      // comes from a script are these.
+      expect(scanned, contains('lib/services/audio/providers.dart'));
+      expect(scanned, contains('lib/viewmodels/dictation_viewmodel.dart'));
     });
 
     test('the exemption does not cover the seam it protects', () {
@@ -795,7 +810,9 @@ void main() {
         'lib/main.dart',
         'lib/app.dart',
         'lib/services/inference/providers.dart',
+        'lib/services/audio/providers.dart',
         'lib/viewmodels/field_job_viewmodel.dart',
+        'lib/viewmodels/dictation_viewmodel.dart',
         'lib/views/diagnose_screen.dart',
       ]) {
         expect(path.startsWith(exemptPrefix), isFalse, reason: path);
@@ -987,16 +1004,38 @@ void main() {
     // "driven on the host against a scripted [InferenceRuntime]" — the evasion is
     // written in the source as an intended capability.
     //
+    // **`SttEngine` and its two seams joined the set in Task 2.3, on the condition
+    // the previous version of this comment stated: "If a future feature puts one of
+    // them there, it belongs here."** 2.3 is that feature. A transcript is now the
+    // *inquiry* — it is what `RetrievalRouter` searches on, what `PromptCompiler`
+    // grounds, and what reaches the model — so a scripted recogniser produces a
+    // genuine answer, genuinely grounded, to a question nobody asked. That is worse
+    // than a scripted `LlmEngine` rather than lesser: every downstream artefact is
+    // real work, so nothing looks wrong anywhere.
+    //
+    // The set is the whole *speech* path for the reason it is the whole token path
+    // one layer up — `SherpaSttEngine` is a state machine over an injected
+    // `SttHost`, and `IsolateSttHost` drives an injected `SttRecognizerRuntime`
+    // whose own doc offers scripting as a capability. Guarding only the top
+    // interface would be R9-F1 repeated on new code, which is the move this file
+    // records buying exactly one round, five times.
+    //
     // **What is deliberately *not* here, and why.** `SeedSource` and `AgentTool` can
     // both feed the model false input, but the model still generates the answer, so
     // they break "the corpus is genuine" rather than "a model ran" — a real property
-    // and a different one. `VisionEngine`, `SttEngine`, `PlatformTelemetry`,
-    // `ModelDownloader` and `BackupExclusion` are not on the answer path at all.
-    // If a future feature puts one of them there, it belongs here.
+    // and a different one. `AudioInput` is the closest call and stays out: it is the
+    // *microphone*, and a scripted one feeding the real recogniser produces whatever
+    // that audio really says — the transcript is still the model's own work on
+    // supplied sound, which is the same category as a supplied corpus. `VisionEngine`,
+    // `PlatformTelemetry`, `ModelDownloader` and `BackupExclusion` are not on the
+    // answer path at all. If a future feature puts one of them there, it belongs here.
     const scriptableContracts = {
       'LlmEngine',
       'InferenceHost',
       'InferenceRuntime',
+      'SttEngine',
+      'SttHost',
+      'SttRecognizerRuntime',
     };
 
     // The interface is a far smaller and more stable surface than the fake's name.
@@ -1019,6 +1058,13 @@ void main() {
       ('lib/services/inference/inference_isolate.dart', 'IsolateInferenceHost'),
       // The real runtime the host drives, one seam further down.
       ('lib/services/inference/gemma_runtime.dart', 'GemmaRuntime'),
+      // **The speech path, added by Task 2.3** — the same four roles as above:
+      // the device engine, the fake (confined by the scan), the real host, and the
+      // real runtime.
+      ('lib/engines/impl/sherpa_stt_engine.dart', 'SherpaSttEngine'),
+      ('lib/engines/fakes/fake_stt_engine.dart', 'FakeSttEngine'),
+      ('lib/services/audio/stt_isolate_worker.dart', 'IsolateSttHost'),
+      ('lib/services/audio/sherpa_recognizer.dart', 'SherpaRecognizerRuntime'),
     };
 
     /// Every `(file, declaration)` under [root] whose type reaches `LlmEngine`,
@@ -1111,13 +1157,33 @@ void main() {
     test('the guarded contract set is the whole token path', () {
       expect(
         scriptableContracts,
-        {'LlmEngine', 'InferenceHost', 'InferenceRuntime'},
+        {
+          'LlmEngine',
+          'InferenceHost',
+          'InferenceRuntime',
+          'SttEngine',
+          'SttHost',
+          'SttRecognizerRuntime',
+        },
         reason:
             'narrowing this set is exactly how R9-F1 shipped: the guard watched '
             'LlmEngine while a scripted InferenceHost answered through the real '
             'engine. Removing a name here needs an argument, not an edit.',
       );
     });
+
+    // Two of the four fakes now implement a *guarded* contract, so confinement by
+    // the scan is no longer their only protection — the sink has to know about
+    // them too, or the resolved detector reports them as unapproved.
+    test(
+      'the STT fake is a declared implementation, not just a confined one',
+      () {
+        expect(
+          approvedImplementations,
+          contains(('lib/engines/fakes/fake_stt_engine.dart', 'FakeSttEngine')),
+        );
+      },
+    );
 
     test(
       'every implementation of a scriptable contract lives in an approved file',
