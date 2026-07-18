@@ -249,7 +249,9 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
           // Cleared in the window between the assignment above and the push one
           // frame later — review finding R0-F2. There is nothing to pop, and
           // popping anyway takes the app's home route with it. Cancel the pending
-          // presentation instead: `_present` re-reads `_showing` and returns.
+          // presentation instead: the callback queued for it is still on the
+          // frame, and it identifies itself by the notifier it was scheduled with
+          // (R1-F2), so clearing `_showing` here is what makes it a no-op.
           _showing = null;
           showing.dispose();
         }
@@ -260,20 +262,31 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
         showing.value = next;
         return;
       }
-      _showing = ValueNotifier<ClarificationRequest>(next);
+      // **The notifier is captured and handed to the callback — review finding
+      // R1-F2.** R0-F2's cancel branch clears `_showing` without unscheduling the
+      // callback queued for it, so a question arriving in the same frame took the
+      // "nothing open" path and scheduled a *second* presentation. Both then ran,
+      // both found a non-null `_showing`, and both pushed a route: two stacked
+      // dialogs, and answering the top one stranded the other over a state with no
+      // question, rendering a disposed notifier that no listener edge could close.
+      // Identity is what tells a live schedule from a cancelled one.
+      final scheduled = ValueNotifier<ClarificationRequest>(next);
+      _showing = scheduled;
       // After the frame, because this fires during a notification and
       // `showDialog` mutates the navigator.
-      WidgetsBinding.instance.addPostFrameCallback((_) => _present());
+      WidgetsBinding.instance.addPostFrameCallback((_) => _present(scheduled));
     });
 
     return widget.child;
   }
 
-  Future<void> _present() async {
-    final showing = _showing;
-    // Null when the listener cancelled this presentation before the frame it was
-    // scheduled on — see [_routeUp].
-    if (showing == null) return;
+  Future<void> _present(ValueNotifier<ClarificationRequest> scheduled) async {
+    // Not the current presentation: this callback was queued for a question that
+    // has since been cancelled (R0-F2's branch, which disposed [scheduled]) or
+    // replaced. Returning is the whole of the fix for R1-F2 — whoever replaced it
+    // owns the disposal, so there is nothing to clean up here.
+    if (!identical(_showing, scheduled)) return;
+    final showing = scheduled;
     if (!mounted) {
       _showing = null;
       showing.dispose();

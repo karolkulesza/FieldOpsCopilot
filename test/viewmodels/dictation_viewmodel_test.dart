@@ -232,6 +232,90 @@ void main() {
     });
   });
 
+  // **Review finding R1-F1.** R0-F1's fix stops the capture when a technician
+  // types, and that half never fired during `DictationPhase.starting`: `stop()`
+  // returned at its first line while `_session` was null, and `_session` is
+  // assigned only at the *end* of `start()`. The window is the recogniser load —
+  // 359–530ms, measured in Task 2.2 — which is exactly when a technician who
+  // tapped the mic by accident reaches for the keyboard.
+  group('a stop during the load', () {
+    /// Holds `initialize()` open so the whole test sits in `starting`.
+    Completer<void> gateTheLoad() {
+      final gate = Completer<void>();
+      engine.initializeGate = gate;
+      return gate;
+    }
+
+    test('stops the capture instead of opening the microphone', () async {
+      final c = container();
+      final gate = gateTheLoad();
+
+      unawaited(controllerOf(c).start());
+      await pumpEventQueue();
+      expect(stateOf(c).phase, DictationPhase.starting);
+
+      await controllerOf(c).stop();
+      gate.complete();
+      await pumpEventQueue();
+
+      expect(
+        stateOf(c).phase,
+        DictationPhase.idle,
+        reason: 'a cancelled start must not leave the UI saying "starting"',
+      );
+      expect(
+        input.startStreamCalls,
+        0,
+        reason:
+            'the microphone must not open for a capture that was already '
+            'stopped — that is the state the fix exists to prevent',
+      );
+    });
+
+    test('a start after the cancelled one still works', () async {
+      final c = container();
+      final gate = gateTheLoad();
+      unawaited(controllerOf(c).start());
+      await pumpEventQueue();
+      await controllerOf(c).stop();
+      gate.complete();
+      await pumpEventQueue();
+
+      engine.initializeGate = null;
+      await controllerOf(c).start();
+
+      expect(stateOf(c).phase, DictationPhase.listening);
+      expect(input.startStreamCalls, 1);
+    });
+
+    // The microphone is a real resource, so "abandoned" has to mean released. If
+    // the stop lands while `MicCapture.start` is in flight, the session that opens
+    // must be closed rather than forgotten.
+    test('a session that opens after the stop is released', () async {
+      final c = container();
+      final gate = Completer<void>();
+      input.startGate = gate;
+
+      unawaited(controllerOf(c).start());
+      await pumpEventQueue();
+      await controllerOf(c).stop();
+      gate.complete();
+      await pumpEventQueue();
+
+      expect(
+        input.startStreamCalls,
+        1,
+        reason: 'it had already been asked for',
+      );
+      expect(
+        input.stopCalls,
+        greaterThanOrEqualTo(1),
+        reason: 'and it must not be left open with nobody reading it',
+      );
+      expect(stateOf(c).phase, DictationPhase.idle);
+    });
+  });
+
   group('ending a dictation', () {
     test('stop closes the microphone and keeps what was said', () async {
       final c = container();
@@ -443,6 +527,11 @@ class _ScriptedSttEngine implements SttEngine {
   SttTranscript? _onFinish;
 
   Object? initializeError;
+
+  /// Held open to keep `initialize()` pending, so a test can sit inside the
+  /// recogniser load the way a device does for 359–530ms (R1-F1).
+  Completer<void>? initializeGate;
+
   int initializeCalls = 0;
   bool _ready = false;
 
@@ -452,6 +541,8 @@ class _ScriptedSttEngine implements SttEngine {
   @override
   Future<void> initialize() async {
     initializeCalls++;
+    final gate = initializeGate;
+    if (gate != null) await gate.future;
     final error = initializeError;
     if (error != null) throw error;
     _ready = true;
@@ -518,6 +609,10 @@ class _ScriptedAudioInput implements AudioInput {
   bool permission = true;
   Object? startError;
 
+  /// Held open to keep `startStream` pending — the other window a stop can land
+  /// in while a start is in flight (R1-F1).
+  Completer<void>? startGate;
+
   int startStreamCalls = 0;
   int stopCalls = 0;
   PcmAudioFormat? requestedFormat;
@@ -535,6 +630,8 @@ class _ScriptedAudioInput implements AudioInput {
     final error = startError;
     if (error != null) throw error;
     startStreamCalls++;
+    final gate = startGate;
+    if (gate != null) await gate.future;
     requestedFormat = format;
     final raw = StreamController<Uint8List>.broadcast();
     _raw = raw;

@@ -264,6 +264,121 @@ void main() {
     });
   });
 
+  // **Review finding R1-F3.** `AgentLoop` re-announces a repeated call with the
+  // outcome it recorded the first time, and R0-F4's wiring appended its refusals
+  // again — so one refused field counted twice and the panel line said "2 values".
+  group('a replayed call is not a second recording', () {
+    /// The same call on two turns, which is what the loop's repeat short circuit
+    /// is for and what `unknown_tool_repeated` is in the goldens for.
+    Future<AgentRunResult> runRepeated(ProviderContainer c) async {
+      const call = LlmToolCall(
+        name: RecordWorkOrderFieldsTool.toolName,
+        arguments: {
+          formUpdatesArgument: {'fault_code': 'E-102', 'nope': 'x'},
+        },
+      );
+      final engine = FakeLlmEngine(
+        turns: [
+          [call, const LlmDone()],
+          [call, const LlmDone()],
+          [const LlmToken('Replace the pad.'), const LlmDone()],
+        ],
+      );
+      await engine.initialize();
+      addTearDown(engine.dispose);
+
+      final loop = AgentLoop(
+        engine: engine,
+        registry: ToolRegistry([RecordWorkOrderFieldsTool()]),
+      );
+      AgentRunResult? result;
+      await for (final event in loop.run('[USER INQUIRY]\ncabin vibrating')) {
+        if (event is AgentToolCallCompleted) {
+          c
+              .read(workOrderFormProvider.notifier)
+              .applyInvocation(event.invocation);
+        }
+        if (event is AgentCompleted) result = event.result;
+      }
+      return result!;
+    }
+
+    test('its refusals are counted once, not twice', () async {
+      final c = container();
+
+      final result = await runRepeated(c);
+
+      // The premise: the loop really did replay rather than dispatch twice.
+      expect(result.invocations, hasLength(2));
+      expect(result.invocations[0].repeated, isFalse);
+      expect(result.invocations[1].repeated, isTrue);
+
+      expect(
+        c.read(workOrderFormProvider).rejected,
+        hasLength(1),
+        reason: 'the panel line reads a count, so a double count is the defect',
+      );
+    });
+
+    test('the recorded field is unaffected, as it always was', () async {
+      final c = container();
+
+      await runRepeated(c);
+
+      expect(
+        c.read(workOrderFormProvider).textOf(WorkOrderField.faultCode),
+        'E-102',
+      );
+    });
+
+    // The third thing a replay used to re-apply, and the one with a technician on
+    // the other end of it: a question they had already dismissed.
+    test('a dismissed question is not re-asked by the replay', () {
+      final c = container();
+      final form = c.read(workOrderFormProvider.notifier);
+      const payload = {
+        RecordWorkOrderFieldsTool.recordedKey: <String, Object?>{},
+        RecordWorkOrderFieldsTool.askedKey: {
+          'field': 'required_parts',
+          'question': 'Which filter did you use?',
+          'options': ['12-inch mesh', '14-inch carbon'],
+        },
+      };
+
+      form.applyInvocation(
+        const AgentToolInvocation(
+          call: LlmToolCall(
+            name: RecordWorkOrderFieldsTool.toolName,
+            arguments: {},
+          ),
+          source: GuardSource.nativeEvent,
+          outcome: ToolSuccess(
+            toolName: RecordWorkOrderFieldsTool.toolName,
+            payload: payload,
+          ),
+        ),
+      );
+      form.dismissClarification();
+
+      form.applyInvocation(
+        const AgentToolInvocation(
+          call: LlmToolCall(
+            name: RecordWorkOrderFieldsTool.toolName,
+            arguments: {},
+          ),
+          source: GuardSource.nativeEvent,
+          outcome: ToolSuccess(
+            toolName: RecordWorkOrderFieldsTool.toolName,
+            payload: payload,
+          ),
+          repeated: true,
+        ),
+      );
+
+      expect(c.read(workOrderFormProvider).clarification, isNull);
+    });
+  });
+
   group('the controllers stay in step with the state', () {
     test('a technician entry reaches the controller', () {
       final c = container();

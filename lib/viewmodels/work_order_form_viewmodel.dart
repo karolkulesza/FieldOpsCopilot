@@ -70,6 +70,17 @@ class WorkOrderFormViewModel extends Notifier<WorkOrderFormState> {
     if (invocation.call.name != RecordWorkOrderFieldsTool.toolName) {
       return false;
     }
+    // **A replay is not a second recording — review finding R1-F3.** `AgentLoop`
+    // re-announces a repeated call with the outcome it recorded the first time
+    // (that is the short circuit, not a re-execution), and `FieldJobViewModel`
+    // forwards every completion. Applying it twice is invisible for the fields —
+    // writing the same value again changes nothing — and wrong for the other two
+    // things this reads: refusals **append**, so one refused field counted twice
+    // and the panel line R0-F4 added read "2 values"; and a clarification the
+    // technician had already dismissed would be re-asked by a call the model did
+    // not actually repeat asking. `unknown_tool_repeated` is in the goldens
+    // precisely because models repeat calls.
+    if (invocation.repeated) return false;
     final outcome = invocation.outcome;
     if (outcome is! ToolSuccess) return false;
     return applyPayload(outcome.payload);

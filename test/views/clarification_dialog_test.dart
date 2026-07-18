@@ -389,6 +389,51 @@ void main() {
       expect(find.byKey(ClarificationKeys.dialog), findsOneWidget);
     });
 
+    // **Review finding R1-F2, and it is R0-F2's fix creating a new state one over.**
+    // Cancelling cleared `_showing` without unscheduling the callback queued for
+    // it, so a question arriving in the same frame scheduled a second one and both
+    // pushed a route. No `pumpAndSettle` between the three calls — that is the
+    // window, and it is the same one the R0-F2 test insists on.
+    testWidgets('a question arriving in the cancel window opens one dialog', (
+      tester,
+    ) async {
+      final container = await pumpHost(tester);
+      final form = container.read(workOrderFormProvider.notifier);
+
+      ask(container);
+      form.reset();
+      ask(container);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(ClarificationKeys.dialog),
+        findsOneWidget,
+        reason: 'two scheduled presentations both pushed a route',
+      );
+    });
+
+    // And the failure that made the double push more than cosmetic: answering the
+    // top dialog left the other on screen over a state with no question, rendering
+    // a disposed notifier, with no listener edge able to close it.
+    testWidgets('answering leaves nothing stranded behind it', (tester) async {
+      final container = await pumpHost(tester);
+      final form = container.read(workOrderFormProvider.notifier);
+
+      ask(container);
+      form.reset();
+      ask(container);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(ClarificationKeys.option(0)));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(ClarificationKeys.dialog), findsNothing);
+      expect(find.text('behind'), findsOneWidget);
+      final state = container.read(workOrderFormProvider);
+      expect(state.clarification, isNull);
+      expect(state.textOf(WorkOrderField.requiredParts), '12-inch mesh');
+    });
+
     // The ordinary path through the same code: answering *with the button* pops
     // with a choice, so the tail never reaches the dismissal branch at all.
     testWidgets('answering with the button does not dismiss anything', (
