@@ -400,21 +400,25 @@ class _DictateButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final controller = ref.read(dictationControllerProvider.notifier);
-    final listening = dictation.phase == DictationPhase.listening;
-    final starting = dictation.phase == DictationPhase.starting;
+    final active = dictation.isActive;
 
     return IconButton.filledTonal(
       key: DiagnoseKeys.dictateButton,
-      // Disabled while *starting* as well as while a run is in flight: the model
-      // load is 359–530ms (Task 2.2) and a second tap in that window would reach
-      // `start`'s own re-entry guard and do nothing, which reads as a dead button.
-      onPressed: busy || starting
+      // **Live during `starting` too**, which it was not. The comment here used to
+      // argue that a second tap in that window "would reach `start`'s own re-entry
+      // guard and do nothing, which reads as a dead button" — true when it was
+      // written, and no longer: review findings R1-F1 and R2-F1 gave `start` a
+      // cancellation edge, so a stop during the load now genuinely stops. With the
+      // wait made visible (it is 1227ms of microphone plus 458ms of model on the
+      // demo device), a button that cannot be taken back during it is worse than
+      // one that can.
+      onPressed: busy
           ? null
-          : () => listening ? controller.stop() : controller.start(),
-      tooltip: listening ? 'Stop dictating' : 'Dictate the fault',
-      icon: Icon(listening ? Icons.stop : Icons.mic_none),
+          : () => active ? controller.stop() : controller.start(),
+      tooltip: active ? 'Stop dictating' : 'Dictate the fault',
+      icon: Icon(active ? Icons.stop : Icons.mic_none),
       style: IconButton.styleFrom(
-        foregroundColor: listening ? theme.colorScheme.error : null,
+        foregroundColor: active ? theme.colorScheme.error : null,
         // Square with the two-line text field beside it, so the row does not
         // change height when the icon does.
         minimumSize: const Size(56, 56),
@@ -442,7 +446,13 @@ class _DictationStatus extends StatelessWidget {
     ) = switch (dictation.phase) {
       DictationPhase.starting => (
         Icons.hourglass_empty,
-        'Preparing the recogniser…',
+        // **"Wait" is the operative word and it is there for a measured reason.**
+        // Opening the input takes 1227ms on the demo iPad and the recogniser load
+        // another 458ms; a technician who talks over that window loses the start
+        // of their sentence, which is what "IN VIBRATING" was. The status now
+        // names the thing to wait for, and `listening` does not appear until audio
+        // is genuinely arriving.
+        'Getting the microphone ready — wait for “Listening”',
         theme.colorScheme.outline,
       ),
       DictationPhase.listening => (

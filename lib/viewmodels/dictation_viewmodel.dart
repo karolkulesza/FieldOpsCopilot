@@ -46,7 +46,20 @@ enum DictationPhase {
   /// 1.11's whole screen is written to avoid.
   starting,
 
-  /// Audio is flowing and transcripts are arriving.
+  /// **Audio is actually arriving.**
+  ///
+  /// Not "the microphone was asked for" — measured on the demo iPad,
+  /// `MicCapture.start()` takes **1227ms** to return, and the recogniser load
+  /// after it is only 458ms of that. A technician who taps a microphone button
+  /// starts talking, and everything said in that window was never recorded: it is
+  /// what turned "cabin vibrating" into "IN VIBRATING", every time, on the first
+  /// capture of a session and never on the second.
+  ///
+  /// So this phase is entered on the **first frame**, which is the earliest moment
+  /// at which the claim "listening" is true. The wait moves in front of the
+  /// invitation to speak rather than behind it. A capture that never produces a
+  /// frame is not left here for ever — `MicCapture.stallTimeout` faults it after
+  /// five seconds and it arrives as [failed].
   listening,
 
   /// Dictation is not available on this device, or was refused.
@@ -301,9 +314,11 @@ class DictationController extends Notifier<DictationState> {
     // **Step 4 — attach.** The backlog replays from the first frame captured in
     // step 2, so the recogniser hears the whole utterance including whatever was
     // said while it was loading.
+    // The phase deliberately stays `starting` here — see [DictationPhase.listening].
+    // Attaching is not hearing, and on the demo device the difference is a second
+    // and a quarter of a technician's first sentence.
     _listen(engine, session);
     _log('attached');
-    state = state.copyWith(phase: DictationPhase.listening);
   }
 
   /// Closes a session this [start] opened and never attached anything to.
@@ -331,6 +346,11 @@ class DictationController extends Notifier<DictationState> {
       if (!_loggedFirstFrame) {
         _loggedFirstFrame = true;
         _log('first audio frame (${frame.bytes.length}B)');
+        // **The moment "Listening" becomes true**, and the reason this hook is
+        // more than diagnostics — see [DictationPhase.listening].
+        if (ref.mounted && state.phase == DictationPhase.starting) {
+          state = state.copyWith(phase: DictationPhase.listening);
+        }
       }
       return frame;
     });

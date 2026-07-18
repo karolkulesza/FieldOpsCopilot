@@ -152,6 +152,16 @@ void main() {
 
   Future<void> tapMic(WidgetTester tester) async {
     await tester.tap(find.byKey(DiagnoseKeys.dictateButton));
+    // Settle *first*: `start()` is a chain of awaits and the input does not exist
+    // until `startStream` has been called, so an emit before this lands nowhere.
+    await settleAsync(tester);
+    // A real microphone delivers audio the moment it is open, and
+    // `DictationPhase.listening` now means *audio is arriving* rather than "the
+    // input was asked for" — the demo device takes 1227ms to hand one over, and a
+    // technician talking over that window loses the start of their sentence. A
+    // double that never delivers a frame can no longer reach `listening`, and that
+    // is right: neither can a real microphone that never delivers one.
+    input.emit(List<int>.filled(320, 1));
     await settleAsync(tester);
   }
 
@@ -810,6 +820,10 @@ class _ScriptedAudioInput implements AudioInput {
   bool permission = true;
   int startStreamCalls = 0;
   StreamController<Uint8List>? _raw;
+
+  /// Pushes raw PCM as the plugin would. Even-length only: `MicCapture` emits
+  /// whole frames and carries a partial one over.
+  void emit(List<int> bytes) => _raw?.add(Uint8List.fromList(bytes));
 
   @override
   Future<bool> hasPermission({bool request = true}) async => permission;
