@@ -372,7 +372,6 @@ void main() {
     // has to reach the technician.
     test('a real failure after a cancelled capture is still reported', () async {
       final gate = Completer<SttEngine?>();
-      var resolutions = 0;
       final c = ProviderContainer(
         overrides: [
           micCaptureProvider.overrideWith((ref) {
@@ -380,12 +379,20 @@ void main() {
             ref.onDispose(capture.dispose);
             return capture;
           }),
-          dictationEngineProvider.overrideWith((ref) async {
-            // The first resolution is held open so the stop lands inside it; the
-            // second answers at once, so the second capture fails uncancelled.
-            resolutions++;
-            return resolutions == 1 ? gate.future : null;
-          }),
+          // **One resolution, not two — review finding R4-F1.** This was written as
+          // a counter and a ternary, under a comment claiming the second capture got
+          // a fresh answer. It does not: `start()` reads
+          // `dictationEngineProvider.future`, which creates no lasting subscription
+          // and is served the *cached, already-completed* future the second time. The
+          // reviewer measured it two ways — the body ran once across both captures,
+          // and handing the phantom second branch a working engine changed nothing.
+          // An inert fixture argument reads as coverage, which is this repo's own
+          // R6-F3 one file over.
+          //
+          // What actually happens, and it is still exactly the case the property
+          // needs: held open so the stop lands inside it, completed with `null`, and
+          // re-served from cache to a second capture nobody cancelled.
+          dictationEngineProvider.overrideWith((ref) => gate.future),
         ],
       );
       addTearDown(c.dispose);
