@@ -1,0 +1,16 @@
+# Build configuration for drift's code generator.
+#
+# `modules: [fts5]` teaches drift's SQL analyzer about the FTS5 virtual-table
+# module and its auxiliary functions (`MATCH`, `bm25`, `highlight`, `snippet`).
+# Without it, `CREATE VIRTUAL TABLE ... USING fts5(...)` in
+# `lib/services/database/database_service.drift` fails to analyze with
+# `Unknown module "fts5"`. FTS5 is compiled into the SQLite3MultipleCiphers
+# build bundled by the `sqlite3` package (see `hooks:` in pubspec.yaml).
+targets:
+  $default:
+    builders:
+      drift_dev:
+        options:
+          sqlite:
+            modules:
+              - fts5

@@ -1,0 +1,428 @@
+import 'dart:io';
+
+import 'package:field_ops_copilot/services/database/database_service.dart';
+import 'package:field_ops_copilot/services/database/fts_query_sanitizer.dart';
+import 'package:field_ops_copilot/services/database/tables/manual_fts_table.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:sqlite3/sqlite3.dart';
+
+/// Unit-tier coverage for Task 1.2 (FTS5 manual index + query sanitizer).
+///
+/// Every test runs against a real encrypted database file and the real FTS5
+/// module from the bundled SQLite3MultipleCiphers build — the tokenizer, the
+/// Porter stemmer and `bm25()` ranking are the things under test, so faking
+/// them out would test nothing.
+void main() {
+  late Directory tempDir;
+  late DatabaseService db;
+
+  setUp(() async {
+    tempDir = await Directory.systemTemp.createTemp('fieldops_fts_test');
+    db = DatabaseService.encrypted(
+      file: File('${tempDir.path}/manual.db'),
+      encryptionKey: 'fts-test-key',
+    );
+  });
+
+  tearDown(() async {
+    await db.close();
+    if (tempDir.existsSync()) {
+      await tempDir.delete(recursive: true);
+    }
+  });
+
+  Future<void> seed() => db.upsertManualEntries(_seedEntries);
+
+  Future<List<String>> search(String raw, {int limit = 10}) async {
+    final rows = await db.searchManualEntries(raw, limit: limit);
+    return rows.map((r) => r.id).toList();
+  }
+
+  group('seeding', () {
+    // TC-FTS-SEED-01: bulk insert of the seed manual populates the FTS index.
+    test('bulk insert indexes every seed entry', () async {
+      await seed();
+
+      expect(await db.manualFtsRowCount(), 3);
+      expect(await db.select(db.manualEntries).get(), hasLength(3));
+    });
+
+    test('re-inserting the same ids does not duplicate index rows', () async {
+      await seed();
+      await seed();
+
+      expect(await db.manualFtsRowCount(), 3);
+    });
+
+    test('the update trigger keeps the index in sync', () async {
+      await seed();
+
+      // "ledger" occurs only in E-204's symptom prose, so rewriting that column
+      // must make the term unfindable — proving the update trigger unwound the
+      // old terms instead of leaving a stale index entry behind.
+      expect(await search('ledger'), ['apex_9_err_204']);
+
+      final entry = _seedEntries
+          .firstWhere((e) => e.id == 'apex_9_err_204')
+          .copyWith(
+            symptoms: 'Levelling inaccuracies, rough ride transitions.',
+          );
+      await db.upsertManualEntries([entry]);
+
+      expect(await search('ledger'), isEmpty);
+      expect(await db.manualFtsRowCount(), 3);
+    });
+
+    test('deleting an entry removes it from the index', () async {
+      await seed();
+
+      await (db.delete(
+        db.manualEntries,
+      )..where((t) => t.id.equals('apex_9_err_204'))).go();
+
+      expect(await db.manualFtsRowCount(), 2);
+      expect(await search('hydraulic'), isEmpty);
+    });
+  });
+
+  group('migration', () {
+    // The manual table, its FTS5 index and the sync triggers arrive in schema
+    // v2; an app installed before Task 1.2 upgrades into them. Exercised by
+    // tearing the v2 objects back down, rewinding user_version, and reopening.
+    test('v1 database upgrades to the manual index', () async {
+      final file = File('${tempDir.path}/migrate.db');
+      final v1 = DatabaseService.encrypted(
+        file: file,
+        encryptionKey: 'migrate-key',
+      );
+      for (final stmt in const [
+        'DROP TRIGGER manual_entries_after_insert',
+        'DROP TRIGGER manual_entries_after_delete',
+        'DROP TRIGGER manual_entries_after_update',
+        'DROP TABLE manual_fts',
+        'DROP TABLE manual_entries',
+        'PRAGMA user_version = 1',
+      ]) {
+        await v1.customStatement(stmt);
+      }
+      await v1.close();
+
+      final v2 = DatabaseService.encrypted(
+        file: file,
+        encryptionKey: 'migrate-key',
+      );
+      addTearDown(v2.close);
+
+      // Upgrading recreates the table, the index and the triggers: a fresh
+      // insert must be searchable immediately.
+      await v2.upsertManualEntries(_seedEntries);
+
+      expect(await v2.manualFtsRowCount(), 3);
+      final ids = await v2.searchManualEntries('squeal');
+      expect(ids.map((r) => r.id), hasLength(2));
+    });
+  });
+
+  group('full-text matching', () {
+    setUp(seed);
+
+    // TC-FTS-MATCH-01: symptom search across the porter-stemmed, title-indexed
+    // columns. "vibrating" only reaches E-102 through the stemmer (the manual
+    // says "vibration"), and "brake" only through the indexed title/procedure.
+    test('vibrating brake finds the brake-wear entry', () async {
+      expect(await search('vibrating brake'), ['apex_9_err_102']);
+    });
+
+    // TC-FTS-MATCH-03: a stem shared by two entries returns both.
+    test('squeal matches squealing in two entries', () async {
+      expect(
+        await search('squeal'),
+        containsAll(<String>['apex_9_err_102', 'apex_9_err_305']),
+      );
+      expect(await search('squeal'), hasLength(2));
+    });
+
+    test('title-only terms are searchable (title is indexed)', () async {
+      expect(await search('clutches'), ['apex_9_err_305']);
+    });
+
+    test('section is searchable', () async {
+      expect(await search('valving'), ['apex_9_err_204']);
+    });
+
+    test('ranking puts the title match first', () async {
+      // "belt" appears in E-305's title *and* prose; "brake" only in E-102.
+      // Both entries match, and the stronger, title-weighted hit leads.
+      final ids = await search('belt brake');
+      expect(ids.first, 'apex_9_err_305');
+      expect(ids, containsAll(<String>['apex_9_err_102', 'apex_9_err_305']));
+    });
+
+    test('unknown terms return no rows rather than throwing', () async {
+      expect(await search('unknown machinery broken'), isEmpty);
+    });
+
+    test('limit caps the result set', () async {
+      expect(await search('squeal', limit: 1), hasLength(1));
+    });
+
+    test('blank input returns no rows without touching MATCH', () async {
+      // An empty MATCH expression is itself an FTS5 syntax error, so the guard
+      // in searchManualEntries must short-circuit before the query runs.
+      expect(await search('   '), isEmpty);
+      expect(await search('?!?'), isEmpty);
+    });
+  });
+
+  group('fault-code lookup (structured, not FTS)', () {
+    setUp(seed);
+
+    // TC-FTS-MATCH-02: exact match on the structured column.
+    test('exact code lookup returns the entry', () async {
+      final row = await db.manualEntryByCode('E-204');
+
+      expect(row?.id, 'apex_9_err_204');
+    });
+
+    test('lookup normalizes case and surrounding whitespace', () async {
+      expect((await db.manualEntryByCode('  e-204 '))?.id, 'apex_9_err_204');
+    });
+
+    test('unknown or blank code yields null', () async {
+      expect(await db.manualEntryByCode('E-999'), isNull);
+      expect(await db.manualEntryByCode('   '), isNull);
+    });
+
+    test('codes are not reachable through FTS', () async {
+      // The code column is deliberately outside the index: searching for the
+      // code as text must not be how a caller finds the entry. ("204" does
+      // appear in E-204's symptom prose, which is fine — the point is that the
+      // structured column is the lookup path.)
+      expect(await search('E-102'), isNot(contains('apex_9_err_204')));
+    });
+
+    test('stored codes are canonicalised on write', () async {
+      await db.upsertManualEntries([
+        _seedEntries.first.copyWith(id: 'apex_9_err_777', code: ' e-777 '),
+      ]);
+
+      final row = await db.manualEntryByCode('E-777');
+      expect(row?.code, 'E-777');
+    });
+  });
+
+  group('sanitizer', () {
+    setUp(seed);
+
+    // TC-FTS-SAN-01: hostile punctuation must not reach the FTS5 parser.
+    test(
+      'hostile input does not throw and still finds the door entry',
+      () async {
+        const hostile = 'door won\'t close - "stuck" (E-305)';
+
+        // The raw string really is a syntax error — this is the bug being fixed.
+        await expectLater(
+          db.searchManualEntriesRanked(hostile, 10).get(),
+          throwsA(isA<SqliteException>()),
+        );
+
+        // Sanitized, the same input runs and ranks the door entry first.
+        final ids = await search(hostile);
+        expect(ids, isNotEmpty);
+        expect(ids.first, 'apex_9_err_305');
+      },
+    );
+
+    // TC-FTS-SAN-02: FTS5 operator words are neutralised into plain terms.
+    test('operator words are searched literally', () async {
+      const operators = 'belt AND door OR NEAR';
+
+      final ids = await search(operators);
+      expect(ids, contains('apex_9_err_305'));
+
+      // Every term is quoted, so nothing is left to parse as an operator.
+      expect(
+        FtsQuerySanitizer.sanitize(operators),
+        '"belt" OR "AND" OR "door" OR "OR" OR "NEAR"',
+      );
+    });
+
+    test('sanitizes syntax characters out of terms', () async {
+      expect(
+        FtsQuerySanitizer.sanitize('door won\'t close - "stuck" (E-305)'),
+        '"door" OR "won\'t" OR "close" OR "stuck" OR "E-305"',
+      );
+    });
+
+    test('column filters, wildcards and quotes cannot escape a term', () {
+      expect(
+        FtsQuerySanitizer.sanitize('symptoms:brake* OR "x" ^start'),
+        '"symptoms" OR "brake" OR "OR" OR "x" OR "start"',
+      );
+    });
+
+    test('input with no searchable term sanitizes to empty', () {
+      expect(FtsQuerySanitizer.sanitize(''), isEmpty);
+      expect(FtsQuerySanitizer.sanitize('  \n\t '), isEmpty);
+      expect(FtsQuerySanitizer.sanitize('()*:^-- ""'), isEmpty);
+    });
+
+    test('keeps intra-word hyphens and apostrophes, drops edge ones', () {
+      expect(FtsQuerySanitizer.terms("-lockout-tagout- 'won't'"), [
+        'lockout-tagout',
+        "won't",
+      ]);
+    });
+
+    test('unicode letters and digits survive', () {
+      expect(FtsQuerySanitizer.terms('winda głośno piszczy 305'), [
+        'winda',
+        'głośno',
+        'piszczy',
+        '305',
+      ]);
+    });
+
+    test('term count is capped', () {
+      final many = List.generate(
+        FtsQuerySanitizer.maxTerms + 20,
+        (i) => 'term$i',
+      ).join(' ');
+
+      expect(
+        FtsQuerySanitizer.terms(many),
+        hasLength(FtsQuerySanitizer.maxTerms),
+      );
+    });
+
+    test('a hand-built term containing a quote is escaped, not injected', () {
+      // terms() can never emit a double quote, but sanitizeTerms is public for
+      // the retrieval router (Task 1.4); it must still be injection-proof.
+      expect(FtsQuerySanitizer.sanitizeTerms(['a" OR b']), '"a"" OR b"');
+    });
+
+    test('every sanitized query is accepted by FTS5', () async {
+      const hostileInputs = [
+        'door won\'t close - "stuck" (E-305)',
+        'belt AND door OR NEAR',
+        'NOT belt',
+        'brake*',
+        'symptoms:brake',
+        '"unterminated phrase',
+        'a OR (b AND c',
+        'NEAR(belt door, 3)',
+        r'^title door',
+        'E-305 -- comment',
+        "100%'; DROP TABLE manual_entries;--",
+      ];
+
+      for (final input in hostileInputs) {
+        await expectLater(
+          db.searchManualEntries(input),
+          completes,
+          reason: 'sanitized query for "$input" must be valid FTS5',
+        );
+      }
+
+      // The injection attempt above must not have destroyed anything.
+      expect(await db.manualFtsRowCount(), 3);
+    });
+  });
+
+  group('list columns', () {
+    setUp(seed);
+
+    test('required tools and parts round-trip as decoded lists', () async {
+      final row = await db.manualEntryByCode('E-102');
+
+      expect(row!.requiredPartsList, ['BRK-990-XP']);
+      expect(row.requiredToolsList, [
+        'Torx T20',
+        'Digital Caliper',
+        'Lockout Tagout Kit',
+      ]);
+    });
+
+    test('malformed list JSON degrades to an empty list', () async {
+      await db.upsertManualEntries([
+        _seedEntries.first.copyWith(
+          id: 'apex_9_err_888',
+          code: 'E-888',
+          requiredParts: 'not json',
+        ),
+      ]);
+
+      final row = await db.manualEntryByCode('E-888');
+      expect(row!.requiredPartsList, isEmpty);
+    });
+  });
+}
+
+/// The three Apex-9 manual entries from `assets/elevator_manual_seed.json`.
+/// Inlined rather than loaded from the asset bundle: asset loading is Task 1.3's
+/// concern, and these tests must pin the index behaviour, not the loader.
+final List<ManualEntryRow> _seedEntries = [
+  ManualEntryRow(
+    id: 'apex_9_err_102',
+    section: 'Brake Systems',
+    code: 'E-102',
+    title: 'Traction Brake Pad Wear & Vibration',
+    symptoms:
+        'High-pitched squealing during deceleration, cabin vibration at '
+        'terminal landings, fault code E-102 displayed on machine room '
+        'controller.',
+    procedure:
+        '1. Isolate the main elevator power bus. 2. Lockout/tagout machine room '
+        'breaker 4A. 3. Remove the magnetic brake cowl using a Torx T20 driver. '
+        '4. Inspect brake pad wear indicators. If thickness is less than 2.0mm, '
+        'replace the assemblies. 5. Adjust caliper clearance to exactly 0.5mm.',
+    requiredTools: encodeStringList([
+      'Torx T20',
+      'Digital Caliper',
+      'Lockout Tagout Kit',
+    ]),
+    requiredParts: encodeStringList(['BRK-990-XP']),
+  ),
+  ManualEntryRow(
+    id: 'apex_9_err_204',
+    section: 'Hydraulics & Valving',
+    code: 'E-204',
+    title: 'Proportional Valve Flow Discrepancy',
+    symptoms:
+        'Levelling inaccuracies exceeding 5mm, rough ride transitions, '
+        'temperature warning E-204 on hydraulic manifold ledger.',
+    procedure:
+        '1. Read hydraulic oil temperature from manifold gauge. 2. If '
+        'temperature is above 60C, activate the cooling bypass valve. '
+        '3. Inspect proportional valve solenoid connections for resistance '
+        'drift. 4. Clean pilot valve filter mesh with isopropyl spray. '
+        '5. Recalibrate flow curves using the console controller.',
+    requiredTools: encodeStringList([
+      'Multimeter',
+      'Hex Key 5mm',
+      'Isopropyl Cleaner',
+    ]),
+    requiredParts: encodeStringList(['FLT-440-HYD']),
+  ),
+  ManualEntryRow(
+    id: 'apex_9_err_305',
+    section: 'Door Operators',
+    code: 'E-305',
+    title: 'Door Clutches & Belt Slippage',
+    symptoms:
+        'Elevator doors cycle three times and throw obstruction warning, belt '
+        'squealing during door open sequences, fault code E-305.',
+    procedure:
+        '1. Switch door operator controller to Manual. 2. Check door clutch '
+        'alignment relative to hoistway rollers; gap must be 6mm. 3. Inspect '
+        'operator belt tension; tighten tension bolt by 2 full rotations if '
+        'slack exceeds 10mm. 4. Clean optical door curtain lenses with a '
+        'microfiber cloth.',
+    requiredTools: encodeStringList([
+      'Microfiber Cloth',
+      'Wrench 10mm',
+      'Steel Ruler',
+    ]),
+    requiredParts: encodeStringList(['BELT-330-DRV']),
+  ),
+];

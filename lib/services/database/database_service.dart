@@ -6,7 +6,9 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
 
+import 'fts_query_sanitizer.dart';
 import 'tables.dart';
+import 'tables/manual_fts_table.dart';
 
 part 'database_service.g.dart';
 
@@ -35,7 +37,10 @@ enum DatabaseKeyKind {
 /// before drift issues any statement. A `SELECT` against `sqlite_master` inside
 /// the same callback forces the cipher to attempt decryption at open time, so an
 /// incorrect key fails fast with a [SqliteException] instead of surfacing later.
-@DriftDatabase(tables: [Technicians, InventoryParts, WorkOrders])
+@DriftDatabase(
+  tables: [Technicians, InventoryParts, WorkOrders, ManualEntries],
+  include: {'database_service.drift'},
+)
 class DatabaseService extends _$DatabaseService {
   DatabaseService(super.e);
 
@@ -66,7 +71,22 @@ class DatabaseService extends _$DatabaseService {
   }
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  /// v1 shipped the technician/inventory/work-order tables; v2 (Task 1.2) adds
+  /// the manual table, its FTS5 index and the triggers that keep them in sync.
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        await m.createTable(manualEntries);
+        await m.create(manualFts);
+        await m.create(manualEntriesAfterInsert);
+        await m.create(manualEntriesAfterDelete);
+        await m.create(manualEntriesAfterUpdate);
+      }
+    },
+  );
 
   /// Inserts a technician, or replaces the existing row with the same id.
   Future<void> upsertTechnician(TechnicianRow row) =>
@@ -75,6 +95,65 @@ class DatabaseService extends _$DatabaseService {
   /// Returns the technician with [id], or `null` if none exists.
   Future<TechnicianRow?> technicianById(String id) =>
       (select(technicians)..where((t) => t.id.equals(id))).getSingleOrNull();
+
+  /// Inserts or replaces manual entries in a single transaction, canonicalising
+  /// each fault code on the way in so [manualEntryByCode] can match exactly.
+  ///
+  /// Replacing a row fires the update trigger, so the FTS5 index follows.
+  Future<void> upsertManualEntries(Iterable<ManualEntryRow> entries) {
+    final normalized = entries
+        .map((e) => e.copyWith(code: normalizeFaultCode(e.code)))
+        .toList(growable: false);
+    return batch((b) => b.insertAllOnConflictUpdate(manualEntries, normalized));
+  }
+
+  /// Exact fault-code lookup — the structured path, **not** full-text search.
+  ///
+  /// [code] is canonicalised before comparison and the stored value is compared
+  /// case-insensitively, so `" e-204 "` finds `E-204`. Returns `null` when the
+  /// code is unknown, and the first match (by id) in the pathological case of a
+  /// code shared by several entries.
+  Future<ManualEntryRow?> manualEntryByCode(String code) {
+    final normalized = normalizeFaultCode(code);
+    if (normalized.isEmpty) return Future.value();
+    final query = select(manualEntries)
+      ..where((t) => t.code.upper().equals(normalized))
+      ..orderBy([(t) => OrderingTerm.asc(t.id)])
+      ..limit(1);
+    return query.getSingleOrNull();
+  }
+
+  /// Ranked full-text search over the manual's prose columns.
+  ///
+  /// [rawQuery] is free technician text: it is sanitized by
+  /// [FtsQuerySanitizer] before it reaches `MATCH`, because raw input can be an
+  /// FTS5 *syntax error*, not merely a bad query. Text with no searchable term
+  /// (whitespace, `"???"`) yields an empty list rather than an empty `MATCH`,
+  /// which FTS5 rejects.
+  Future<List<ManualEntryRow>> searchManualEntries(
+    String rawQuery, {
+    int limit = 10,
+  }) async {
+    final match = FtsQuerySanitizer.sanitize(rawQuery);
+    if (match.isEmpty) return const [];
+    return searchManualEntriesRanked(match, limit).get();
+  }
+
+  /// Number of rows in the FTS5 index. Distinct from `manual_entries` row count:
+  /// this reads the index itself, so it proves the sync triggers ran.
+  Future<int> manualFtsRowCount() => countManualFtsRows().getSingle();
+}
+
+/// Decoding helpers for the JSON-encoded list columns on `manual_entries`.
+///
+/// Declared here rather than beside the table because `ManualEntryRow` is
+/// generated into this library's `part` file.
+extension ManualEntryLists on ManualEntryRow {
+  /// Tool names required by this procedure.
+  List<String> get requiredToolsList => decodeStringList(requiredTools);
+
+  /// Part SKUs required by this procedure.
+  List<String> get requiredPartsList => decodeStringList(requiredParts);
 }
 
 /// Number of KDF iterations pinned for the ChaCha20 key-derivation. Pinned

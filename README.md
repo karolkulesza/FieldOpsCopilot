@@ -36,6 +36,10 @@ database to help technicians diagnose faults and produce structured repair plans
 - **Encrypted local database** — a [drift](https://drift.simonbinder.eu/)
   schema (technician profile, parts inventory, work orders) stored in an
   encrypted SQLite file. See _Data persistence & encryption_ below.
+- **Offline manual retrieval** — an FTS5 index over the manual's prose with the
+  `porter` stemmer and `bm25()` ranking, an exact-match column for fault codes,
+  and a query sanitizer that stops raw dictated text from becoming an FTS5
+  syntax error. See _Offline retrieval_ below.
 - **Test suite** — a widget smoke test plus unit tests for all four fakes.
 - **CI** — GitHub Actions running `dart format`, `flutter analyze`, and
   `flutter test` on every push and pull request.
@@ -60,8 +64,12 @@ lib/
 │   └── fakes/                # In-memory implementations for tests + skeleton
 └── services/
     └── database/
-        ├── tables.dart           # Drift table definitions
-        ├── database_service.dart # Encrypted drift database (+ .g.dart codegen)
+        ├── tables.dart               # Drift table definitions
+        ├── tables/
+        │   └── manual_fts_table.dart # Structured manual entries (backs the FTS index)
+        ├── fts_query_sanitizer.dart  # Free text → safe FTS5 MATCH expression
+        ├── database_service.drift    # FTS5 virtual table, sync triggers, ranked query
+        ├── database_service.dart     # Encrypted drift database (+ .g.dart codegen)
         └── ...
 ```
 
@@ -94,6 +102,45 @@ cipher PRAGMAs run under `flutter test` as on device.
 - **At rest:** the file header and row contents are ciphertext — verified by
   unit tests that assert the raw bytes carry neither the `SQLite format 3`
   magic nor plaintext row data, and that reopening with a wrong key fails.
+
+## Offline retrieval: FTS5 + a structured fault-code column
+
+The manual is searched locally with SQLite's **FTS5** full-text index — no vector
+embedding model, no extra weights in RAM. Two lookup paths sit side by side, and
+they are deliberately different:
+
+- **Symptom prose → FTS5.** `manual_fts` indexes `title`, `symptoms`,
+  `procedure` and `section` with the **`porter` tokenizer**, so morphological
+  variants match: a technician's "squealing" finds "squeal", "vibrating" finds
+  "vibration". `title` is indexed too — a spoken complaint echoes the heading at
+  least as often as the symptom paragraph. Results are ranked with `bm25()`,
+  weighted to favour a title hit over the procedure body.
+- **Fault code → exact match.** The `code` column (`E-102`) is a **structured
+  column, queried by equality**, and is deliberately *not* in the index. Codes
+  tokenize badly — `E-102` becomes the junk token `e` plus `102`, which both
+  dilutes the index and throws away the identifier's precision. Codes are
+  canonicalised (trimmed, upper-cased) on write and on lookup.
+
+The index is an **external-content** FTS5 table: the text is stored once in
+`manual_entries`, and three triggers (`AFTER INSERT`/`UPDATE`/`DELETE`) keep the
+index in sync — including the `'delete'` command that unwinds previously indexed
+terms on update, so a rewritten row leaves no stale terms behind.
+
+### Why raw user text can't reach `MATCH`
+
+FTS5's query language is not a word list. Bare `AND`/`OR`/`NOT`/`NEAR` are
+operators, `(` `)` group, `"` quotes phrases, `*` is a prefix wildcard, `:` binds
+a column filter. Real dictated input — `door won't close - "stuck" (E-305)` — is
+therefore not merely a bad query, it is a **syntax error**: SQLite raises
+`SqliteException: fts5: syntax error near "..."` and the search fails outright.
+
+`FtsQuerySanitizer` (`fts_query_sanitizer.dart`) strips every character that
+could be syntax, wraps each surviving term in a quoted phrase (keeping
+intra-word hyphens and apostrophes: `E-305`, `won't`), caps the term count, and
+joins with `OR`. `OR` rather than `AND` is the deliberate choice: symptom text is
+noisy, so `"squealing noise"` must still find the belt entry even though the
+manual never says "noise" — recall comes from `OR`, precision from `bm25()`
+ranking. Strict `AND` would let one unmatched word return nothing.
 
 ## Getting started
 
