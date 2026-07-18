@@ -288,6 +288,81 @@ void main() {
       expect(input.startStreamCalls, 1);
     });
 
+    // **Review finding R2-F1, and the reachable row of it.** R1-F1's counter was
+    // read on the way *forward*, after each await — but three of `start`'s exits
+    // report a failure and return before the next such check, so a cancelled start
+    // still repainted. A device with no verified STT set is exactly the device the
+    // message is written for, and `dictationEngineProvider` awaits a status
+    // provider that hashes files, so the window is real rather than theoretical.
+    test(
+      'a cancelled start does not report on a capture that is gone',
+      () async {
+        final gate = Completer<SttEngine?>();
+        final c = ProviderContainer(
+          overrides: [
+            micCaptureProvider.overrideWith((ref) {
+              final capture = MicCapture(input: input, stallTimeout: null);
+              ref.onDispose(capture.dispose);
+              return capture;
+            }),
+            // Held open, so the stop lands while the engine is still resolving.
+            dictationEngineProvider.overrideWith((ref) => gate.future),
+          ],
+        );
+        addTearDown(c.dispose);
+
+        unawaited(controllerOf(c).start());
+        await pumpEventQueue();
+        expect(stateOf(c).phase, DictationPhase.starting);
+
+        await controllerOf(c).stop();
+        expect(stateOf(c).phase, DictationPhase.idle);
+
+        // The device answers: there are no verified weights.
+        gate.complete(null);
+        await pumpEventQueue();
+
+        expect(
+          stateOf(c).phase,
+          DictationPhase.idle,
+          reason:
+              'a red "dictation is unavailable" line under an idle microphone, '
+              'about a capture the technician cancelled',
+        );
+        expect(stateOf(c).message, isNull);
+      },
+    );
+
+    test(
+      'a load failure on a cancelled start is not reported either',
+      () async {
+        final c = container();
+        final gate = Completer<void>();
+        engine.initializeGate = gate;
+        engine.initializeError = Exception('encoder-epoch-99: no such file');
+
+        unawaited(controllerOf(c).start());
+        await pumpEventQueue();
+        await controllerOf(c).stop();
+        gate.complete();
+        await pumpEventQueue();
+
+        expect(stateOf(c).phase, DictationPhase.idle);
+        expect(stateOf(c).message, isNull);
+      },
+    );
+
+    // The control that keeps both of the above from passing on a controller that
+    // has simply stopped reporting: with no stop, the same failure *is* reported.
+    test('control: an uncancelled start still reports the failure', () async {
+      final c = container(stt: () => null);
+
+      await controllerOf(c).start();
+
+      expect(stateOf(c).phase, DictationPhase.unavailable);
+      expect(stateOf(c).message, contains('No verified speech model'));
+    });
+
     // The microphone is a real resource, so "abandoned" has to mean released. If
     // the stop lands while `MicCapture.start` is in flight, the session that opens
     // must be closed rather than forgotten.
