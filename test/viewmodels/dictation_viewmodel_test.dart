@@ -363,6 +363,53 @@ void main() {
       expect(stateOf(c).message, contains('No verified speech model'));
     });
 
+    // **The other half of R2-F1's guard, which the reviewer measured by hand and
+    // left unbound.** The control above settles "it has not simply stopped
+    // reporting", but it runs on a fresh controller where the generation is 1 and
+    // matches trivially — so it cannot catch a guard comparing against something
+    // staler than the live counter. The case that can: cancel a capture, then let a
+    // *new* one genuinely fail. A real error after any number of cancellations still
+    // has to reach the technician.
+    test('a real failure after a cancelled capture is still reported', () async {
+      final gate = Completer<SttEngine?>();
+      var resolutions = 0;
+      final c = ProviderContainer(
+        overrides: [
+          micCaptureProvider.overrideWith((ref) {
+            final capture = MicCapture(input: input, stallTimeout: null);
+            ref.onDispose(capture.dispose);
+            return capture;
+          }),
+          dictationEngineProvider.overrideWith((ref) async {
+            // The first resolution is held open so the stop lands inside it; the
+            // second answers at once, so the second capture fails uncancelled.
+            resolutions++;
+            return resolutions == 1 ? gate.future : null;
+          }),
+        ],
+      );
+      addTearDown(c.dispose);
+
+      unawaited(controllerOf(c).start());
+      await pumpEventQueue();
+      await controllerOf(c).stop();
+      gate.complete(null);
+      await pumpEventQueue();
+      expect(stateOf(c).phase, DictationPhase.idle);
+
+      // Capture two, cancelled by nobody.
+      await controllerOf(c).start();
+
+      expect(
+        stateOf(c).phase,
+        DictationPhase.unavailable,
+        reason:
+            'the counter must be read live at the write; a guard comparing '
+            'against a stale generation would silence this forever',
+      );
+      expect(stateOf(c).message, contains('No verified speech model'));
+    });
+
     // The microphone is a real resource, so "abandoned" has to mean released. If
     // the stop lands while `MicCapture.start` is in flight, the session that opens
     // must be closed rather than forgotten.
