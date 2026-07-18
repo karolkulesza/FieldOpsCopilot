@@ -23,6 +23,8 @@
 /// the device one.
 library;
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../engines/impl/sherpa_stt_engine.dart';
@@ -66,8 +68,35 @@ final sttConfigProvider = FutureProvider<SttConfig?>(retry: noRetry, (
   // and `SttConfig.forInstallDirectory` composes the four paths from the names the
   // catalog installs them under. `stt_config_test.dart` asserts those names agree
   // with the catalog's, so the two halves cannot drift apart silently.
-  return SttConfig.forInstallDirectory(storage.installDir(descriptor).path);
+  return SttConfig.forInstallDirectory(
+    storage.installDir(descriptor).path,
+  ).copyWith(primer: await _loadPrimer());
 });
+
+/// Asset path of the speech the recogniser is warmed with.
+@visibleForTesting
+const sttPrimerAsset = 'assets/audio/stt_primer.pcm';
+
+/// Reads [sttPrimerAsset], or answers `null` if it cannot be read.
+///
+/// **Null rather than a throw**, and this is the one judgement in the function:
+/// the primer is a workaround for a first-word weakness, so a build that cannot
+/// load it should dictate slightly worse — not refuse to dictate. Throwing here
+/// would turn a missing 32KB asset into "no speech input on this device", which
+/// is a much larger failure than the one being worked around.
+///
+/// `Uint8List.sublistView` and not `.buffer.asUint8List()`: `rootBundle.load`
+/// answers a `ByteData` that may be a window onto a larger buffer, and `.buffer`
+/// discards the offset and length to hand back the whole thing. That is the same
+/// mistake, in the other direction, as the `Int16List` view that crashed dictation
+/// on a frame at an odd offset.
+Future<Uint8List?> _loadPrimer() async {
+  try {
+    return Uint8List.sublistView(await rootBundle.load(sttPrimerAsset));
+  } on Object {
+    return null;
+  }
+}
 
 /// The on-device recogniser, or `null` when this device has no verified weights.
 ///
