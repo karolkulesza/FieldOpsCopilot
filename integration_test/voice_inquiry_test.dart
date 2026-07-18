@@ -23,6 +23,13 @@ import 'package:integration_test/integration_test.dart';
 ///
 /// ```sh
 /// flutter test integration_test/voice_inquiry_test.dart -d <device>
+///
+/// # On a WIRELESSLY tethered iOS device the above cannot launch the app
+/// # ("Cannot start app on wirelessly tethered iOS device"), and `flutter test`
+/// # has no `--publish-port` flag despite the error suggesting one. Run the file
+/// # through `flutter run`, which does — the README says the same at greater
+/// # length, and a cable avoids the whole thing.
+/// flutter run integration_test/voice_inquiry_test.dart -d <device> --publish-port
 /// ```
 ///
 /// **No `--dart-define`s.** The STT source and its four SHA-256 pins are committed
@@ -80,13 +87,22 @@ void main() {
 
       final watch = Stopwatch()..start();
       await tester.tap(find.byKey(DiagnoseKeys.dictateButton));
-      await _settle(tester);
+      await _waitFor(
+        tester,
+        () =>
+            container.read(dictationControllerProvider).phase !=
+            DictationPhase.starting,
+        describe: 'the capture to leave `starting`',
+      );
       expect(
         container.read(dictationControllerProvider).phase,
         DictationPhase.listening,
         reason:
-            'a device with no verified speech weights answers `unavailable` '
-            'here — provisioning above should have made that impossible',
+            'two different failures land here and the phase tells them apart: '
+            '`unavailable` means no verified weights, which the provisioning '
+            'above should have made impossible; `starting` means the microphone '
+            'opened and no audio followed, because `listening` means audio is '
+            'arriving rather than that the input was asked for',
       );
 
       // Let the fixture play out through the real recogniser.
@@ -154,7 +170,13 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(DiagnoseKeys.dictateButton));
-      await _settle(tester);
+      await _waitFor(
+        tester,
+        () =>
+            container.read(dictationControllerProvider).phase !=
+            DictationPhase.starting,
+        describe: 'the capture to leave `starting`',
+      );
       await input.playToEnd();
       await _settle(tester, rounds: 40);
       await tester.tap(find.byKey(DiagnoseKeys.dictateButton));
@@ -185,6 +207,33 @@ void main() {
 /// by 800ms left the stop unresolved, and eight real 20ms slices resolved it.
 Future<void> _settle(WidgetTester tester, {int rounds = 10}) async {
   for (var i = 0; i < rounds; i++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 25)),
+    );
+    await tester.pump();
+  }
+}
+
+/// Pumps until [condition] holds, or fails after [within].
+///
+/// A **condition rather than a duration**, because every number this wait could be
+/// written as is a number measured on one device. The demo iPad takes 727ms from
+/// the tap to the recogniser attaching — 190ms of it opening the microphone and
+/// 536ms loading the model — and a fixed settle that happens to exceed that on one
+/// machine is a test that passes by luck and fails on a colder run or a slower
+/// disk. Task 2.2's own row records the load varying 359–530ms across ten runs on
+/// one host.
+Future<void> _waitFor(
+  WidgetTester tester,
+  bool Function() condition, {
+  Duration within = const Duration(seconds: 15),
+  required String describe,
+}) async {
+  final deadline = DateTime.now().add(within);
+  while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) {
+      fail('timed out after ${within.inSeconds}s waiting for $describe');
+    }
     await tester.runAsync(
       () => Future<void>.delayed(const Duration(milliseconds: 25)),
     );
@@ -247,10 +296,29 @@ class _FixtureAudioInput implements AudioInput {
 
   final Uint8List _pcm;
   StreamController<Uint8List>? _raw;
+  Future<void>? _playing;
 
   @override
   Future<bool> hasPermission({bool request = true}) async => true;
 
+  /// **Playback begins when the pipeline subscribes, not when a test asks for it.**
+  ///
+  /// It used to begin in [playToEnd], and that made this input unlike a microphone
+  /// in the one way that now matters: a real one delivers from the moment it is
+  /// open, and `DictationPhase.listening` means *audio is arriving* rather than
+  /// *the input was asked for*. So the assertion between the tap and the playback —
+  /// the one checking the screen reached `listening` — could never pass, and the
+  /// first hardware run of this file failed on it with the app behaving correctly.
+  ///
+  /// The same gap, in the same direction, that let a crash reach a device: a double
+  /// gentler than the hardware is a test that cannot fail. Recorded on Task 2.3's
+  /// row in the sprint plan.
+  ///
+  /// `onListen` rather than a call inside [startStream], and the difference is not
+  /// stylistic — this is a **broadcast** controller, so anything added before the
+  /// consumer subscribes is dropped on the floor. Starting playback here is what
+  /// makes "the first chunk of the fixture" and "the first frame the recogniser
+  /// sees" the same bytes.
   @override
   Future<Stream<Uint8List>> startStream(PcmAudioFormat format) async {
     expect(
@@ -258,18 +326,43 @@ class _FixtureAudioInput implements AudioInput {
       PcmAudioFormat.sttMono16k,
       reason: 'the fixture is 16 kHz mono; anything else decodes as noise',
     );
-    final raw = StreamController<Uint8List>.broadcast();
+    late final StreamController<Uint8List> raw;
+    // Cleared first: one playback per capture, so a second `start()` on this input
+    // plays again instead of handing back the previous session's finished future.
+    _playing = null;
+    raw = StreamController<Uint8List>.broadcast(
+      onListen: () => _playing ??= _play(raw),
+    );
     _raw = raw;
     return raw.stream;
   }
 
-  /// Feeds the whole fixture through, one 100ms chunk at a time.
+  /// Waits for the fixture to finish playing.
   Future<void> playToEnd() async {
-    final raw = _raw;
-    if (raw == null) fail('playToEnd before startStream');
+    final playing = _playing;
+    if (playing == null) {
+      fail(
+        'playToEnd before anything subscribed — the capture never attached, so '
+        'no audio was ever going to arrive',
+      );
+    }
+    await playing;
+  }
+
+  /// Feeds the whole fixture through, one 100ms chunk at a time.
+  ///
+  /// The wait comes **before** each chunk rather than after it, which is both the
+  /// safer and the truer order. Safer: this runs from `onListen`, and adding an
+  /// event synchronously inside that callback relies on the subscription already
+  /// being registered when it fires — true of `dart:async` today, and not a
+  /// property worth depending on. Truer: a capture device fills a buffer and then
+  /// delivers it, so the first frame lands one buffer period after the input opens,
+  /// which is what the device logs show (~50ms behind `attached`).
+  Future<void> _play(StreamController<Uint8List> raw) async {
     const chunk = Duration(milliseconds: 100);
     final size = PcmAudioFormat.sttMono16k.byteCountFor(chunk);
     for (var offset = 0; offset < _pcm.length; offset += size) {
+      await Future<void>.delayed(chunk);
       if (raw.isClosed) return;
       raw.add(
         Uint8List.sublistView(
@@ -278,7 +371,6 @@ class _FixtureAudioInput implements AudioInput {
           offset + size > _pcm.length ? _pcm.length : offset + size,
         ),
       );
-      await Future<void>.delayed(chunk);
     }
   }
 
