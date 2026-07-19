@@ -6,15 +6,15 @@ governed by [Google's Gemma terms](https://ai.google.dev/gemma/terms). So the ap
 ships a *description* of the artifact it expects and fetches the bytes at runtime.
 
 Whether a **download** needs an access token is a per-repository fact, not a
-property of Gemma, and this is worth stating precisely because the task this was
-built from assumed otherwise. Measured against the live hosts on 2026-07-30: the
+property of Gemma, and this is worth stating precisely because the first draft of
+this feature assumed otherwise. Measured against the live hosts on 2026-07-30: the
 LiteRT-LM rebuild `litert-community/gemma-4-E2B-it-litert-lm` reports
 `gated: false` and serves an anonymous request, while
 `litert-community/Gemma3-1B-IT` reports `gated: auto` and does need a token.
 Accepting the licence still governs *using* the model either way. Provisioning
 therefore treats the URL and the token as independent inputs and assumes neither.
 
-## Getting the weights (what a reviewer has to do)
+## Getting the weights (what a fresh checkout has to do)
 
 1. **Accept the [Gemma terms](https://ai.google.dev/gemma/terms)** — this governs
    use of the model regardless of how you obtain it.
@@ -102,11 +102,11 @@ page). `FIELDOPS_MODEL_URI` and `FIELDOPS_MODEL_SHA256` apply to that active
 > development or demo build, and not a shipping pattern, since anyone with the app
 > has the credential. The fleet answer is in _OTA model delivery_ below.
 
-## The second model: a committed STT file set (Task 2.0)
+## The second model: a committed STT file set
 
-Task 2.2 needs a **second** model resident — a streaming speech-to-text
-zipformer — and Task 2.0 extends provisioning to carry it. It differs from the
-LLM in both of the ways that shaped 1.7, and each difference is deliberate:
+Speech-to-text needs a **second** model resident — a streaming
+zipformer — and provisioning was extended to carry it. It differs from the
+LLM in both of the ways that shaped the original design, and each difference is deliberate:
 
 * **It is a set of four files, not one** — served individually from the
   repository, not as an archive, so there is no unpacking step and no
@@ -135,8 +135,8 @@ warning row while Diagnose stays enabled (TC-PROV-MULTI-01).
 
 **On-disk layout moved to per-model directories** —
 `models/<model id>/<file>` with a `<file>.receipt.json` sidecar each — because
-two models' files must not be able to collide. A Task 1.7 flat-layout install
-(the demo iPad's 2.59GB Gemma) is migrated by `rename` on the first status
+two models' files must not be able to collide. A flat-layout install from before
+the move (the demo iPad's 2.59GB Gemma) is migrated by `rename` on the first status
 check: same volume, milliseconds, no re-download, and the receipt moves with its
 file so the install stays `ready` without re-hashing.
 
@@ -218,7 +218,7 @@ pinned* — so a glance before the demo is enough.
 Weights can also be side-loaded onto a device with the platform tooling (Xcode's
 device container browser; on a debuggable Android build, `adb push` followed by
 `adb shell run-as com.karolkulesza.field_ops_copilot cp …` into
-`files/models/<model id>/` — the per-model directory, since Task 2.0). A
+`files/models/<model id>/` — the per-model directory). A
 hand-copied file arrives with no receipt, so it reports *present but unverified*
 until provisioning hashes it in place — which is the point: bytes nobody
 verified are never treated as ready. A file dropped at the old flat
@@ -227,7 +227,7 @@ the model's directory by rename.
 
 ## OTA model delivery (designed, not built)
 
-Task 1.7 is the **client half** of the delivery story, and it is deliberately the
+What is built is the **client half** of the delivery story, and it is deliberately the
 half worth building: fetch, verify, install, report. The server half is a design
 discussion rather than code — bucket layout and revision naming, device-capability
 based model selection (E2B vs. 1B by available RAM), staged rollout with a kill
@@ -236,10 +236,10 @@ no long-lived credential ever ships inside the app. That last one slots in behin
 `modelAccessTokenProvider` without the provisioner changing at all.
 
 The transport is a first-party `dart:io` downloader rather than the model plugin's
-network-install API (the sprint plan mentions the latter): `flutter_gemma` is not a
-dependency until Task 1.8, and keeping the transfer here means the credential
+network-install API: provisioning predates `flutter_gemma` as a
+dependency, and keeping the transfer here means the credential
 scoping and the verification order are covered by this repo's own tests against a
-loopback server. If 1.8 prefers the plugin's installer, it slots in behind
+loopback server. If the plugin's installer is ever preferred, it slots in behind
 `ModelDownloader` with those tests still guarding the contract.
 
 Two things this deliberately does *not* do yet, both cheap to add and neither

@@ -2,7 +2,8 @@
 
 `sherpa-onnx` running a **streaming zipformer** (en, 20M params, int8) on a
 dedicated background isolate, behind `SttEngine`. Four files, 43.65MB, provisioned
-by Task 2.0 from a committed ungated source — no build-time defines.
+from a committed ungated source (see
+[docs/model-provisioning.md](model-provisioning.md)) — no build-time defines.
 
 ```
 MicCaptureSession.frames ─▶ SherpaSttEngine ─▶ IsolateSttHost ═╗ isolate boundary
@@ -13,7 +14,7 @@ MicCaptureSession.frames ─▶ SherpaSttEngine ─▶ IsolateSttHost ═╗ iso
                           isFinal, segment)
 ```
 
-The layering is Task 1.8's, deliberately: `sherpa_recognizer.dart` is the only file
+The layering repeats the inference engine's, deliberately: `sherpa_recognizer.dart` is the only file
 in `lib/` that imports `package:sherpa_onnx`, `stt_config.dart` speaks this app's
 vocabulary rather than the plugin's, and `SherpaSttEngine` takes an `SttHost` rather
 than building one — so the engine's contract is verified on the host and the device
@@ -21,15 +22,15 @@ tests only have to prove the device part.
 
 ## The isolate is load-bearing here, not insurance
 
-Task 1.8's isolate is a guarantee about *our* architecture rather than a bet on a
+The LLM's isolate is a guarantee about *our* architecture rather than a bet on a
 dependency: LiteRT-LM already keeps its worst work off the caller. sherpa-onnx has
 nothing to insure. **Every entry point of its Dart API is a synchronous FFI call
 that runs to completion on the calling thread**, read in
 `sherpa_onnx-1.13.5/lib/src/`:
 
 - `OnlineRecognizer(config)` is a *constructor* that loads three ONNX graphs —
-  359–530ms (median 384) over ten consecutive runs here, 371–476ms over four on the
-  reviewer's host.
+  359–530ms (median 384) over ten consecutive runs here, 371–476ms over four on a
+  second host.
 - `decode(stream)` runs the encoder, decoder and joiner.
 - `acceptWaveform` allocates native memory and copies the samples into it.
 
@@ -60,7 +61,7 @@ Recognition is **one request, one reply, every time**. A chunk of audio goes ove
 and the transcripts it produced come back — frequently none, and the reply arrives
 anyway, because *the reply is the sender's permission to send again*.
 
-That is the back-pressure, and it composes with what Task 2.1 already built:
+That is the back-pressure, and it composes with what the capture layer already built:
 
 1. `SherpaSttEngine` **pauses its subscription for the whole hand-off** and resumes
    it on the reply, so at most one chunk is ever in flight.
@@ -71,17 +72,17 @@ That is the back-pressure, and it composes with what Task 2.1 already built:
    duration, before the audio that followed it**.
 
 Step 4 is the reason `SttEngine.transcribe` was widened from `Stream<Uint8List>` to
-`Stream<MicFrame>`. Task 0.2 declared it over raw buffers, before 2.1 established
+`Stream<MicFrame>`. The interface was first declared over raw buffers, before capture established
 that dropped audio has to travel *with* the audio; a caller bridging the two with
 `.map((f) => f.bytes)` would discard the gap in one inconspicuous line, which is
-exactly the loss 2.1 carries the field to prevent. A recogniser fed a silent splice
+exactly the loss the field exists to prevent. A recogniser fed a silent splice
 returns a fluent transcript of a sentence nobody said. Bridging **before** rather
 than after matters too: silence placed after the audio moves the pause past the
 words it separated and changes where the endpointer splits them.
 
 `MicFrame` moved to its own file so `lib/engines/` can name it without importing
 `mic_capture.dart` and dragging `package:record` into the layer that exists to keep
-plugins out. `mic_capture.dart` re-exports it, so every Task 2.1 import still
+plugins out. `mic_capture.dart` re-exports it, so every existing import still
 resolves.
 
 ## The model cannot say "102", and that is not cosmetic
@@ -91,11 +92,11 @@ digit** — the only two entries with digits are the `#0` and `#1` blank placeho
 at ids 500 and 501. A technician saying "E one oh two" is transcribed
 `E ONE OH TWO`, and no amount of configuration changes that.
 
-Left alone, that silently breaks the feature this app is *for*. Task 1.4's
+Left alone, that silently breaks the feature this app is *for*.
 `RetrievalRouter` is why a fault code reaches the manual's indexed `code` column
 ahead of full-text search, and its `faultCodePattern` requires `\d{2,4}`. So every
 dictated inquiry would skip the structured lookup and fall through to FTS —
-returning a plausible answer grounded in whatever bm25 ranked first. Task 1.9's
+returning a plausible answer grounded in whatever bm25 ranked first. The agent loop's
 device run already recorded how reachable that is: stop words match, so almost any
 English sentence is a full-text hit.
 
@@ -104,8 +105,8 @@ consecutive digit words, or **two** when a single-letter designator immediately
 precedes them (`B THREE FOUR` → `B 34`).
 
 It was two flat, justified by "a run of two or more is not prose — English says 'one
-oh two' only when spelling something out", and **review finding R0-F3 refuted that by
-running the shipped function**:
+oh two' only when spelling something out", and **running the shipped function
+refuted that**:
 
 ```
 OH TWO OF THEM ARE LOOSE   →  02 OF THEM ARE LOOSE
@@ -126,8 +127,8 @@ router's** `[A-Za-z]{1,2}`, because `NO`, `IS`, `AT`, `IN` and `OF` are all two-
 English words and it was a two-letter word in front of a two-word run that produced
 those candidates.
 
-**What remains is a class, not a curiosity, and review finding R1-F2 made that
-correction.** This paragraph used to offer one artificial input (`A ONE TWO` → `A 12`).
+**What remains is a class, not a curiosity, and that too is a correction.**
+This paragraph used to offer one artificial input (`A ONE TWO` → `A 12`).
 Measured, the residue is the approximation idiom of the register this app is used in,
 plus a single-letter word nobody had named, plus the two-letter hazard surviving at run
 length three:
@@ -142,8 +143,8 @@ IS O ONE TWO OF THE DOORS           →  IS 012 OF THE DOORS    → IS-012
 
 It is kept rather than chased, on a bound rather than a hope: `RetrievalRouter`
 verifies every candidate by lookup, so one resolving to no row lands in `unresolved`
-and the text survives in the residual — a wasted lookup, not a wrong answer. R0-F3's
-actual harm is gone: the *silent* skip of the structured lookup, and codes fabricated
+and the text survives in the residual — a wasted lookup, not a wrong answer. The
+actual harm measured above is gone: the *silent* skip of the structured lookup, and codes fabricated
 out of a bare `OH TWO`. Every case above is pinned in the residue group of
 `spoken_digits_test.dart`, so a future narrowing cannot widen it unnoticed.
 
@@ -185,7 +186,7 @@ unpadded  "… THE FALK CODE IS E ONE OH TWO PLEASE"
 padded    "… THE FALK CODE IS E ONE OH TWO PLEASE ADVISE"
 ```
 
-Same shape as Task 1.6's recurring failure — a correct check described at the wrong
+Same shape as this project's recurring failure — a correct check described at the wrong
 width — caught by running the comparison instead of asserting the conclusion.
 
 ## Endpointing, segments, and partials
@@ -208,8 +209,8 @@ of the chunks produced nothing new. The live test prints that on every run.
 
 What *holds* the filter is that test's property assertion — no partial repeats its
 predecessor within a segment — together with a bound below **half** the frame count.
-This paragraph used to claim the guard was "the ratio below 1:1", and review finding
-R0-F2 refuted it: a chunk emits nothing until decoding begins, so the count is
+This paragraph used to claim the guard was "the ratio below 1:1", and measurement
+refuted it: a chunk emits nothing until decoding begins, so the count is
 structurally under the frame count whatever the filter does, and deleting the filter
 left all five tests green at 101 → 90 transcripts. It now fails at partial 1.
 
@@ -217,7 +218,7 @@ left all five tests green at 101 → 90 transcripts. It now fails at partial 1.
 
 The one suite in `test/` that loads the real native library and the real weights.
 It exists because the alternative was shipping TC-STT-STRM-01 written and unrun, the
-way Task 2.1 had to ship TC-MIC-01 — and it is possible only because
+way TC-MIC-01 once shipped — and it is possible only because
 `sherpa_onnx_macos` ships a macOS framework in the pub cache.
 
 ```bash
@@ -250,8 +251,8 @@ Production leaves it null. On Android that is the only value that *works* (the b
 `libsherpa-onnx-c-api.so` resolves from the app's lib directory); on iOS it is the
 only value that *means* anything, because that branch of `init_native.dart`
 discards the parameter and returns the bare-name open regardless. This sentence
-said "on iOS and Android the only value that works" until review finding R0-F8 —
-true of Android, false of iOS for that second reason.
+said "on iOS and Android the only value that works" until review checked the
+plugin — true of Android, false of iOS for that second reason.
 The whole-stack leg needs it because the worker builds its own runtime *after* the
 isolate hop, so a library path held on the host side never reaches it — and macOS
 cannot resolve `SherpaOnnxC.framework/SherpaOnnxC` by bare name.
@@ -272,8 +273,8 @@ the device suite cannot drift onto different audio. The cost is 322KB of release
 bundle, stated in `pubspec.yaml` rather than hidden.
 
 The transcript is imperfect and deliberately quoted with its warts (`U K` for
-"okay", `FALK CODE` for "fault code"): the ACs are **fuzzy containment**, per the
-sprint plan, and pinning the whole string would turn a library upgrade into a
+"okay", `FALK CODE` for "fault code"): the acceptance criteria are **fuzzy
+containment**, deliberately, and pinning the whole string would turn a library upgrade into a
 failure.
 
 ## What the mutation pass found
@@ -282,19 +283,19 @@ failure.
 **confirmed by the test its `expect` names** — run with `--concurrency=1` against
 `test/services/audio` and `test/engines` (baseline 277 passing, 5 skipped).
 
-The pass was **re-run after review round 1, not before it** — 1.6's rule, and 2.1's
-row is blunter about why: six of its fifteen findings were claims or values introduced
-in a *fixing* round with nothing holding them, and the only one caught before handback
-was the one whose mutation was run after the fix. Two rows had gone stale against the
-changed source and were repaired rather than dropped (`M04` keyed to
-`minimumDigitRun = 2`, which R0-F3 raised to 3; `M22` keyed to the `await drain()` that
-R0-F1's rewrite deleted — its *property* survives, so the row now breaks the emission
+The pass was **re-run after the review-driven fixes, not before them** — a rule this
+project keeps re-learning, and for a blunt reason: fixes made in a correction
+round introduce claims and values with nothing holding them, and the only ones
+caught cheaply are the ones whose mutations run after the fix. Two rows had gone stale against the
+changed source and were repaired rather than dropped (one keyed to
+`minimumDigitRun = 2`, which the digit-floor correction raised to 3; one keyed to the `await drain()` that
+the deadlock fix deleted — its *property* survives, so the row now breaks the emission
 ordering directly and a new test binds it). Thirteen rows were added over the code the
-fixes introduced, including **the reviewer's own two surviving mutations** (`N08`,
-`N09`), kept as rows so that regression cannot return quietly.
+fixes introduced, including **two surviving mutations written from outside the
+set**, kept as rows so that regression cannot return quietly.
 
-A focused set rather than a 1.6-style full sweep, chosen the way Task 2.0 chose its
-ten — one mutation per decision that would fail *silently* if it were wrong. The ones
+A focused set rather than a full sweep, chosen on one principle
+— one mutation per decision that would fail *silently* if it were wrong. The ones
 worth naming, because each is a claim made elsewhere in this section and these are what
 hold it:
 
@@ -315,46 +316,47 @@ hold it:
 | `_loading ??=` → `=` | two concurrent loads, two recognisers resident |
 | fake revives after dispose | the host suite tests a more forgiving world than the device |
 | fake emits on the first frame | the fake's ordering stops matching the real engine's |
-| the digit floor back to 2 | the six fabricated fault codes R0-F3 found return |
+| the digit floor back to 2 | the six fabricated fault codes measured above return |
 | a two-letter word counts as a designator | `NO-12` and `IS-01` come back |
 | the run swallows non-whitespace again | `ONE 5 TWO` → `12`, deleting content |
 | `toWire` drops `nativeLibraryPath` | the field's whole purpose — crossing the hop — is void |
 | the slot taken at the call site again | an unlistened stream wedges the engine until disposal |
-| the fake's `onCancel` stops releasing | R0-F1's deadlock returns as a leak |
+| the fake's `onCancel` stops releasing | a fixed deadlock returns as a leak |
 
-**The harness is a recorded artifact, not a tracked file.** It lives in `ledgers/`,
-which is untracked in this repo exactly as Tasks 1.5, 1.6, 1.9, 1.10, 2.0 and 2.1 left
-theirs — so "the committed harness" means the archived copy beside its results, and the
-only way to tie a results JSON to the harness that produced it is to re-run. Round 3 did
-exactly that and got a byte-identical JSON after normalising the worktree path. Worth
-knowing if Task 2.3 copies this pattern: tracking the harness would make the record
+**The harness is a recorded artifact, not a tracked file.** It lives outside
+version control, as every mutation harness in this project has — so "the committed
+harness" means the archived copy beside its results, and the
+only way to tie a results JSON to the harness that produced it is to re-run. That
+was done once and got a byte-identical JSON after normalising the worktree path. Worth
+knowing for anyone copying the pattern: tracking the harness would make the record
 diffable instead of reproducible-on-demand.
 
 The harness refuses a dirty baseline, asserts the match count on every edit,
 refuses duplicate labels and duplicate edits, verifies each edit actually changes
 the source before believing a survivor, and re-checks the whole tracked surface by
-`st_mtime_ns` after every row — each of those guards is one that an earlier task's
-harness lacked and paid for (1.5, 1.6, 1.9, 1.10, 2.1 respectively).
+`st_mtime_ns` after every row — each of those guards is one that an earlier harness
+in this project lacked and paid for.
 
 **The harness checks its own claims, and that check found three things — all of them
-in the round-1 fixes, twenty minutes old.** Review round 1 noted that "killed" did not
+in fixes twenty minutes old.** Review noted that "killed" did not
 establish *which* test held a property, because the harness only kept the last six
 failure lines. It now compares each row's `expect` against the tests that actually
 failed, and the first run of that check reported three survivors and three mismatches:
 
 * **`if (!begun) return;` in `release` was dead** — every path reaching it had
   `begun == true`, because the only way it could be false was a begin that threw, which
-  returns earlier. Deleted rather than kept as decoration (1.4's rule).
+  returns earlier. Deleted rather than kept as decoration.
 * **`if (!settled) begun = true;` changed nothing observable** — after that cancel
   `_transcribing` is false, so no later `release` reads `begun` again. Removed.
 * **One row measured the mutation rather than the suite** — it inserted a statement
-  immediately before a `return`, so it changed nothing. 1.9's recorded shape, where a
+  immediately before a `return`, so it changed nothing. A shape this project has
+  recorded before, where a
   survivor reads as "untested" when it means "this edit does nothing". Dropped.
 
 **And the checker itself was wrong twice before it was right**, which is the part worth
 carrying. It first read failing test names out of `flutter test`'s `Failing tests:`
-block — which the default reporter **truncates** ("… and 14 more"), Task 1.4's recorded
-instrument defect verbatim — so it flagged killed rows as mismatches. Rewritten to read
+block — which the default reporter **truncates** ("… and 14 more"), an instrument
+defect this project had already recorded, verbatim — so it flagged killed rows as mismatches. Rewritten to read
 the expanded reporter's `[E]` lines, it then matched nothing at all, because this suite
 always reports 5 skips and the pattern required the pass and fail counters to be
 adjacent. A checker that cannot parse its input reports on itself.
@@ -362,16 +364,16 @@ adjacent. A checker that cannot parse its input reports on itself.
 So the pattern is now checked **inside the harness**, against four reporter lines it must
 accept (with the exact name it must capture from each) and four it must reject, and the
 run aborts before touching the tree if any of them disagrees. That guard exists because
-review finding **R2-F3** caught this paragraph claiming it while the committed harness had
+review caught this paragraph claiming it while the harness had
 none — the check had only ever run in a shell — which is the same shape as the prose
 findings above, aimed at the instrument instead of the code.
 
-Two further tightenings came from round 2's notes. A row whose `expect` names several
+Two further tightenings came out of review. A row whose `expect` names several
 tests now needs **all** of them in the failure list rather than any one, and each row
 records *which* failing tests confirmed it, so a reader can see whether the confirming
 test covers the mutated file at all. What string matching cannot settle is whether a
-confirming test failed *because of* the mutation or merely as collateral — the reviewer
-demonstrated a row reaching CONFIRMED off pure collateral — so the confirming names are
+confirming test failed *because of* the mutation or merely as collateral — a row
+was demonstrated reaching CONFIRMED off pure collateral — so the confirming names are
 recorded rather than asserted, which is what let that audit be done by hand across all
 forty rows.
 
@@ -387,18 +389,18 @@ of this paragraph gave.** A note fires on a transition to a different mutated fi
 the detector rebases its reference when it fires* (`baseline_stamps = stamps_now`) — so
 a file used by exactly **one** row has its post-revert mtime captured in that new
 reference and leaves nothing stale for the next transition to report. The 40-row set has
-**twelve** file transitions and `N12` is its only single-row group, so the transition
+**twelve** file transitions and exactly one single-row group, so the transition
 out of it is silent: twelve minus one is eleven.
 
-That clause is review finding **R3-F1**, and it is worth more than the arithmetic. The
+That clause is worth more than the arithmetic. The
 count itself had said "six" since the 24-row pass — exact then, carried unchanged
 through the 37-, 39- and 40-row re-runs in a section whose other figures were updated
-each time. Round 3 corrected the number and shipped it with a *rule that predicts
-twelve*, which the reviewer caught by applying the rule and getting the wrong answer.
+each time. The correction then shipped with a *rule that predicts
+twelve*, caught by applying the rule and getting the wrong answer.
 Both halves are the same failure at different scales: **a number that is not re-derived
 goes stale, and a rule that is not applied is not checked.**
 
-## Wired into the app by Task 2.3 — and not through the seam that was there
+## Wired into the app — and not through the seam that was there
 
 The hazard this section used to hand forward has been taken rather than repeated,
 so it is worth stating what was done with it. `sttEngineProvider` **still binds
@@ -406,7 +408,7 @@ so it is worth stating what was done with it. `sttEngineProvider` **still binds
 What the screen resolves is a different provider, `dictationEngineProvider`, which
 answers the real recogniser or `null`.
 
-The reason is the one 1.11 gave for `agentEngineProvider`, and it is *stronger*
+The reason is the one the demo screen gives for `agentEngineProvider`, and it is *stronger*
 here rather than weaker: a scripted transcript fakes the **question**, so retrieval,
 the compiled prompt, the tool call and the form are all genuine work done on words
 nobody said — nothing looks wrong anywhere. `SttEngine`, `SttHost` and
@@ -420,7 +422,7 @@ See [Voice input and the work order](voice-and-work-order.md).
 
 ✅ **Both ACs passed on the demo iPad (Air M4 / iOS 26.5), 3/3, on 2026-07-12** — load 430ms (worker 249ms) from an `absent` install, then 101 frames → 25 transcripts in 391ms with a transcript **byte-identical to the host run**.
 
-**They failed on the first attempt, on a defect no host test could see**, which is the clearest justification this task has for the device tier existing. `IsolateSttHost._teardown` completed `_workerLost` with an error on a *clean* shutdown; `IntegrationTestWidgetsFlutterBinding` reported that as an unhandled error and failed all three tests **after their bodies had passed**. My first fix was also wrong — a real `onError` handler instead of `ignore()`, which the device rejected identically — and the design answer was that the completion was never needed at all, because `_gate` serialises requests so a clean teardown has no racer to release. Every host suite was green throughout, *including* the whole-stack live run that spawns a real isolate, loads the real weights and disposes the engine.
+**They failed on the first attempt, on a defect no host test could see**, which is the clearest justification this stack has for the device tier existing. `IsolateSttHost._teardown` completed `_workerLost` with an error on a *clean* shutdown; `IntegrationTestWidgetsFlutterBinding` reported that as an unhandled error and failed all three tests **after their bodies had passed**. My first fix was also wrong — a real `onError` handler instead of `ignore()`, which the device rejected identically — and the design answer was that the completion was never needed at all, because `_gate` serialises requests so a clean teardown has no racer to release. Every host suite was green throughout, *including* the whole-stack live run that spawns a real isolate, loads the real weights and disposes the engine.
 
 Still device-unverified: **more than one utterance through the endpointer** (the fixture is one segment, one final), the gap bridge against a real dropped buffer, and the `recognizerLost` distinction.
 
@@ -441,8 +443,9 @@ The host run above covers the logic, so what the device run adds is specific:
    — with `nativeLibraryPath` null. The host suite has to supply a path, so that is
    precisely the thing it cannot verify.
 2. `initBindings` on a spawned isolate in a real engine build.
-3. Load and decode times on arm64 mobile silicon **next to the LLM**. Task 1.8
-   measured process RSS at 1.67GB with Gemma resident and refuted §3.4's 500MB cap;
+3. Load and decode times on arm64 mobile silicon **next to the LLM**. Process RSS
+   measured at 1.67GB with Gemma resident refuted the 500MB design cap (see
+   [docs/on-device-inference.md](on-device-inference.md));
    whether a 43MB recogniser alongside it is free is unmeasured.
 
 Also unrun on hardware: the endpoint path with **more than one utterance** (the

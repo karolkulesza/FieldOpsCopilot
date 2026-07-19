@@ -1,25 +1,24 @@
 # Voice input and the work order
 
-Task 2.3 is two features that share a screen, and the sprint plan defines it twice
-because of that: its task card is *dynamic form auto-fill*, and the sequencing
-section adds *"2.3 owns the mic → STT → inquiry wiring as well as the form fill"*.
+This is two features that share a screen: *dynamic form auto-fill*, and the
+mic → STT → inquiry wiring.
 Both are here. They meet in one place — the agent's turn — and nowhere else: the
 microphone writes the **question**, the tool fills the **form**, and neither ever
 writes into the other's field.
 
 ## Structured output goes through the tool registry, not through the prose
 
-The spec's §2.3 asks the agent to convert spoken observations into structured JSON.
+The design asks the agent to convert spoken observations into structured JSON.
 The obvious implementation is to look for a `{"form_updates": …}` blob in the
 answer and parse it out. This ships a tool instead — `record_work_order_fields` —
 and the argument is not tidiness:
 
-* **The schema is enforced at generation time.** Task 1.8 established that this
+* **The schema is enforced at generation time.** On-device runs established that this
   build's model emits native function-call tokens, and setting tools switches on
   constrained decoding driven by the declared schema. A scraped blob has no such
   constraint; it has a regex.
-* **A malformed call is already handled.** Task 1.6's guard recovers a call the
-  model spelled as prose, and 1.9's loop feeds every refusal back so the model can
+* **A malformed call is already handled.** The tool-call guard recovers a call the
+  model spelled as prose, and the agent loop feeds every refusal back so the model can
   correct itself. A scraped blob would need a second brace scanner and a second
   recovery path, neither of which anyone would write.
 * **It lands in the goldens.** `test/golden/snapshots/form_autofill.json` pins the
@@ -56,7 +55,7 @@ Those refusals reach the screen as a counted line under the work-order header
 ("The assistant sent 1 value this form has no field for"), not as their messages:
 `RejectedFieldUpdate.message` is written *for the model* ("send the value as text"),
 which is `_ResultPanel`'s decision about refused tool calls applied to refused
-fields. Wiring them there is review finding **R0-F4** — before it the list reached
+fields. That wiring was itself a correction — before it the list reached
 nothing at all, under a docstring naming a reader that did not exist.
 
 A non-string value is **refused rather than coerced**, quoting
@@ -112,15 +111,15 @@ code: `PromptCompiler.noMatchNotice` told the model "do not call any tool", whic
 meant "do not look up a part you have no SKU for" when there was one tool and
 silently became "and do not fill in the work order" when there were two — on the one
 path where the technician's own words are the only source of work-order data. It now
-names the lookup and permits the recording (review finding **R0-F6**); the grounding
+names the lookup and permits the recording; the grounding
 rule is unchanged, because recording a fault code the technician said out loud is
 the opposite of inventing one.
 
 **What answering deliberately does not do is resume the agent's run.**
 `AgentLoop.run` is a single stream over one inquiry, and feeding an answer back
 mid-run would mean a second input channel into a loop whose whole design is "the
-conversation is the prompt". The answer fills the field. That is §2.3's interaction
-minus the round trip, and it is stated rather than implied.
+conversation is the prompt". The answer fills the field. That is the designed
+interaction minus the round trip, and it is stated rather than implied.
 
 Two defects were found here rather than reasoned about. `AgentLoop` runs up to four
 turns and each may call the tool, so a **second** clarification can arrive while the
@@ -129,7 +128,7 @@ first question while the state held the second, so a tap would have written the
 option the technician read into the field they were not asked about. The route
 follows a listenable instead.
 
-The other is review finding **R0-F2**, and it is worse: the host popped the **root
+The other is worse: the host popped the **root
 navigator** whenever a presentation was pending, but the route is pushed one
 post-frame callback later — so a clarification cleared inside that window popped the
 app's *home* route and left a blank screen. Whether a presentation is *pending* and
@@ -152,7 +151,7 @@ controller's line stays a pure transcript.
 
 **And typing takes the field.** The inquiry stays editable while the microphone is
 open, because a technician watching `FALK CODE` land has to be able to fix it —
-which was a claim the code refuted until review finding R0-F1: the screen rebuilds
+which was a claim the code refuted until it was fixed: the screen rebuilds
 the whole line from `base + transcript` on every state change, so a correction was
 wiped by the next partial, and by the capture merely ending. An edit during a
 capture now releases the mirror and *then* stops the capture, in that order —
@@ -180,7 +179,7 @@ transcribes anything.
 * **The stall watchdog is disabled in the widget tests**, and the reason is
   recorded rather than hidden: it is a real `Timer(5s)` armed for the whole of a
   capture, and `flutter_test` fails any test that ends with one pending — which
-  Task 2.1's own source predicted in as many words. Its behaviour is bound at
+  the capture code's own comments predicted in as many words. Its behaviour is bound at
   millisecond scale by `mic_capture_test.dart`, where it is the subject rather than
   a fixture.
 
@@ -199,7 +198,7 @@ provisions the 43.65MB STT set first if it is absent.
 flutter test integration_test/voice_inquiry_test.dart -d <device>
 ```
 
-It substitutes the **microphone** (Task 2.1's `AudioInput` seam) and plays the
+It substitutes the **microphone** (the `AudioInput` seam) and plays the
 committed fixture in real time at `MicCapture`'s own frame size, for the reason
 `stt_test.dart` gives: a live microphone makes the assertion depend on the room.
 Everything above that seam is real — frame normalisation, the bounded backlog, the

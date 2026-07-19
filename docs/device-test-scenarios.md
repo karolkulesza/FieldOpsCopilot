@@ -16,7 +16,8 @@ flutter run -d <device> \
 ```
 
 The STT model needs **no defines** — its source and four SHA-256 pins are
-committed on Task 2.0's catalog entry. Wait for both rows of the readiness banner
+committed in the model catalog (see
+[docs/model-provisioning.md](model-provisioning.md)). Wait for both rows of the readiness banner
 to read **Model ready** before starting.
 
 ## The seeded world
@@ -196,7 +197,7 @@ exactly what made it convincing.
   technician's own words is not invention, and the no-match notice was narrowed
   to say so
 
-### 8 · Long answer, scroll release *(1.11 R12-F0 — the one still owed)*
+### 8 · Long answer, scroll release *(the one still owed)*
 
 Start a diagnosis that produces a long plan (scenario 1 or 2), and **drag the
 answer panel upward while tokens are still arriving**.

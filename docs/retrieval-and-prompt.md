@@ -29,7 +29,7 @@ candidates unconditionally would delete real search terms to buy nothing.
 **A code-only query has no residual, and an empty `MATCH` is a syntax error**
 rather than an empty result. `"E-102"` therefore takes the code leg alone and
 never builds an expression. The guard itself lives in
-`DatabaseService.searchManualEntriesByTerms` (Task 1.2 put it on the expression
+`DatabaseService.searchManualEntriesByTerms` (the guard sits on the expression
 builder for exactly this caller); the router's own branch just avoids the round
 trip.
 
@@ -42,9 +42,8 @@ nothing. The router shipped with that bug for one commit.
 
 ## What the prompt looks like
 
-The layout is the product spec's §5.2 — preamble, `[MANUAL DOCUMENT]` block,
-`[USER INQUIRY]` block — and the model is told to answer **only** from the
-document block.
+The layout is fixed — preamble, `[MANUAL DOCUMENT]` block, `[USER INQUIRY]`
+block — and the model is told to answer **only** from the document block.
 
 ```text
 You are an offline Field Service Assistant.
@@ -116,8 +115,9 @@ below.
 here stops a user simply *asking* the model to ignore its instructions, and it
 should not be described as if it did.
 
-**Documents are capped** (`maxDocuments`, default 2). Task 1.8 measured a
-~400-token grounded prompt for a single entry, and the router can return one row
+**Documents are capped** (`maxDocuments`, default 2). A grounded prompt for a
+single entry measured ~400 tokens on device (see
+[docs/on-device-inference.md](on-device-inference.md)), and the router can return one row
 per resolved code plus its full-text hits. The cap truncates from the end, so the
 code hits — which the merge puts first — are the last thing dropped.
 

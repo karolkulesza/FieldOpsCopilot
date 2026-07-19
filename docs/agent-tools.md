@@ -13,15 +13,16 @@ key are the *same* string, `definition.name`.
 
 Both hedges were earned in review rather than written up front. This paragraph used
 to say the halves were "impossible to disagree, by construction" while the dispatch
-key came from a separate overridable getter — precisely how they *could* disagree
-(R0-F2). Deleting that getter fixed it; documenting the one hazard left then showed
+key came from a separate overridable getter — precisely how they *could* disagree.
+Deleting that getter fixed it; documenting the one hazard left then showed
 "impossible" was *still* too strong, because the dispatch map is snapshotted at
-construction while the declarations are recomputed per call (R2-F2). Both corrections
+construction while the declarations are recomputed per call. Both corrections
 are described below.
 
 **The set is validated at construction**, not at the first `generate()`. That is
-the rule Task 1.8 arrived at from the other side: neither consumer of a tool
-definition rejects a bad one (see _Tool calling_ above), so a malformed schema
+the rule the inference layer arrived at from the other side: neither consumer of a tool
+definition rejects a bad one (see _Tool calling_ in
+[docs/on-device-inference.md](on-device-inference.md)), so a malformed schema
 surfaces two layers away as "the model is bad at tool calling". `ToolRegistry`
 runs the same `assertToolDefinitionsUsable` both `LlmEngine` implementations run,
 so a registry that *builds* cannot produce a definition the device rejects.
@@ -32,19 +33,19 @@ tools sharing a name and the duplicate check can fire. Hand it a name-keyed
 collection instead and that pair collapses into one entry, silently disarming the
 check. Making that substitution kills exactly one test,
 `rejects two tools registered under the same name`, which is the evidence for this
-paragraph. (An earlier version credited "the test suite's `M4`" — there is no `M4`
-in the test suite; it was a row in a review ledger that gets deleted when the review
-closes, so the reader could not follow it. R1-F2.)
+paragraph. (An earlier version cited that evidence by an id from a working
+document that does not ship with this repo, so the reader could not follow it;
+the test name is the reference that survives.)
 
 The statement *order* in the constructor is **not** load-bearing, and an earlier
 version of this section said it was — claiming "a test restores that ordering and
 fails" when no such test exists and swapping the two statements leaves all tests
-green. Caught in review as R0-F1, which is this project's most-repeated failure
+green. Caught in review, and it is this project's most-repeated failure
 mode: a claim asserting a regression guard that nothing implements. The mutation
 evidence was right; **four** prose descriptions of it were wrong — and the fourth,
-found only in the next review round, was the comment on the test the false claim had
+found only after the first correction, was the comment on the test the false claim had
 named as the guard. The count is stated as four rather than three because the first
-correction said three and missed one (R1-F1).
+correction said three and missed one.
 
 The dispatch key is `definition.name` — the same string the declaration carries.
 That is also a correction: `AgentTool` used to expose an overridable `name` getter
@@ -65,7 +66,7 @@ JSON payload, never as a throw: a hallucinated tool name, a missing or mistyped
 argument, a SKU that does not exist. The agent loop's recovery for all of them is
 identical — feed the payload back so the model can correct itself on the next
 turn — and a loop that had to catch exceptions here would be one `on Object` away
-from swallowing real defects. Task 1.3 had already applied the same reasoning one
+from swallowing real defects. The database layer had already applied the same reasoning one
 layer down: `inventoryPartBySku` returns `null` for an unknown SKU rather than
 throwing.
 
@@ -88,14 +89,14 @@ measurement corrected a guess:
 
 `ToolFailure.cause` carries the underlying error for logs and tests and is
 deliberately **absent from `payload`**. An exception's `toString()` routinely
-quotes file paths, SQL and row values, and the payload is prompt text — §3.2's
-device boundary includes the prompt. A test asserts the driver's message, which
+quotes file paths, SQL and row values, and the payload is prompt text — the
+design's device boundary includes the prompt. A test asserts the driver's message, which
 names the offending table, does not appear in the encoded payload.
 
 ## `get_local_parts_inventory`
 
-The first tool, and the one the spec's §5.2 walkthrough calls. It is thin because
-Task 1.3 built the query for this call site and put the properties it needs
+The first tool, and the one the canonical demo path calls. It is thin because
+the database layer built the query for this call site and put the properties it needs
 *inside* it: the SKU is canonicalised on the way in (trim + upper-case, because
 from here the argument arrives from the model in whatever casing the weights
 emitted), `inventory_parts.sku` is `COLLATE NOCASE` as a backstop for rows
@@ -131,12 +132,12 @@ resolves to nothing and is indistinguishable from a real miss. It is also
 unnecessary on the primary path, where Gemma 4's constrained decoding is driven
 by this very schema.
 
-**Scope note, because the spec is two-minded about this tool's signature.** §2.2
-describes `get_local_parts_inventory(sku_or_name)`, but the only lookup that
+**Scope note, because the design was two-minded about this tool's signature.** One
+description gives `get_local_parts_inventory(sku_or_name)`, but the only lookup that
 exists is exact-SKU. A name search needs a different query (full-text over
 `inventory_parts.name`, which is not indexed) and a different answer shape —
-several rows, or the disambiguation question §2.3 describes. The tool declares
-`sku` only, which is what the acceptance criteria specify. Name search is a
+several rows, or a disambiguation question. The tool declares
+`sku` only — the narrower reading, deliberately. Name search is a
 separate tool, not a widened parameter.
 
 ---

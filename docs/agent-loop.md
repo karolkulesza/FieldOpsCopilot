@@ -48,7 +48,7 @@ runtime that closed without emitting one.
 
 ## What a `GuardFailure` means for a turn
 
-Task 1.6 built `GuardFailureReason` "for the loop to branch on" and deliberately
+The guard built `GuardFailureReason` "for the loop to branch on" and deliberately
 left the branch open. It is decided here, and it is not a single rule:
 
 - **`noToolCallFound`** means *there was no call here*. The turn is a plain
@@ -78,8 +78,8 @@ of one condition, rather than two that differ by which layer noticed first.
   and a message that *reports the failure* rather than summarising a diagnosis
   the loop never obtained. It is **clamped**, not asserted — an `assert` is
   compiled out in release and would make the clamp unreachable from any test.
-- **The repeat short circuit** is not what makes the loop terminate, and the
-  README says so because the code reads as though it might. The same call twice
+- **The repeat short circuit** is not what makes the loop terminate, and this
+  document says so because the code reads as though it might. The same call twice
   in one run executes once and replays the recorded outcome; a model that asks
   the same question forever still runs to the cap, it just stops paying for the
   query. It also keeps the second answer *identical* to the first, which a
@@ -127,8 +127,8 @@ value can start one:
   copy of that rule would be a second thing to keep true.
 
 Only the *prompt* copy is neutralised. `AgentTurn.text` keeps what the model
-actually said, because that is what the technician saw and what Task 1.10 will
-snapshot.
+actually said, because that is what the technician saw and what the golden suite
+snapshots.
 
 **The echo is dropped whenever the guard read the turn's text** — that is,
 whenever no native event arrived. Neutralising that text brace-mangles it, so
@@ -153,7 +153,7 @@ than losing a sentence of preamble, and the canonical `[TOOL CALL]` block
 carries what the next turn actually needs.
 
 One change this forced upstream: the compiled prompt's `[USER INQUIRY]` block
-used to be wrapped in **unescaped** quotes, which Task 1.4 recorded as safe
+used to be wrapped in **unescaped** quotes, recorded at the time as safe
 "only while that block is last". It no longer is, so `PromptCompiler.escapeQuotes`
 now escapes the backslash and then the quote — that order, because escaping
 quotes first doubles the backslash it just emitted and leaves a live quote
@@ -163,7 +163,7 @@ are the delimiters the compiler wrote.
 
 ## What propagates rather than being fed back
 
-Two things, both for the reason Task 1.5 established — a value the model can
+Two things, both for the rule the tool registry established — a value the model can
 act on is data, and everything else is a defect:
 
 - **An error on the engine's stream.** A broken runtime is not something the
@@ -176,8 +176,8 @@ act on is data, and everything else is a defect:
 
 ## The prompt budget, measured
 
-Task 1.9's brief was to measure `maxDocuments` against a real context window
-rather than inherit Task 1.4's reasoning about it. Measured on the shipped seed
+`maxDocuments` had to be measured against a real context window
+rather than inherited from the compiler's reasoning about it. Measured on the shipped seed
 (`test/services/ai/agent_loop_test.dart`, printed on every run):
 
 | Prompt | Characters |
@@ -194,8 +194,8 @@ The bound is `maxTurns`-scaled, and the number that matters is the last one.
 
 It is approximate for a reason worth naming: each turn appends an echo of what
 the model said, so the ceiling moves with the *script*, not just with the loop.
-This suite's script measures `[1581, 2038, 2469, 2900]`; a reviewer's, with
-longer per-turn text, measured `[1581, 2066, 2525, 2984]`. The shape — one
+This suite's script measures `[1581, 2038, 2469, 2900]`; an independent
+re-measurement with longer per-turn text gave `[1581, 2066, 2525, 2984]`. The shape — one
 grounded prompt plus three transcript blocks, monotonically growing — is the
 property the test pins; the last digit is not.
 
@@ -211,13 +211,13 @@ failing if the turn does not complete.
 29 mutations across `agent_loop.dart` and the `escapeQuotes` change it forced
 into `prompt_compiler.dart`, each run against the **whole** suite under
 `--reporter expanded` — the default reporter truncates its failing list, which
-produced two wrong counts in Task 1.4. The harness names a file per mutation
-because this task's behaviour spans two, and it refuses a dirty baseline,
+had already produced two wrong counts in an earlier mutation pass. The harness names a file per mutation
+because this change's behaviour spans two, and it refuses a dirty baseline,
 duplicate mutation *edits* and duplicate mutation *labels*.
 
 **27 killed on the first pass; 2 survived, and both were gaps in the tests
 rather than in the code.** (Review then found a third and fourth hole the set
-did not probe at all — see the round-1 additions below.) Both are failure modes this repo had already
+did not probe at all — see the later additions below.) Both are failure modes this repo had already
 recorded, which is the interesting part:
 
 - **Deleting the loop's engine-readiness check killed nothing**, because
@@ -236,15 +236,15 @@ recorded, which is the interesting part:
 **After both fixes, all 29 die** — re-measured by running the whole set again
 against the tree at the last commit, not carried over from the first pass.
 
-Review round 0 then showed the set had a hole of its own: nothing in it touched
-`AgentToolCallRejected` or `AgentToolCallStarted.repeated`, and two probes the
-reviewer added survived with zero failing tests. **Five** mutations were added
-(M30–M34) — two for the line-terminator re-escaping, two for the unbound stream
+Adversarial review then showed the set had a hole of its own: nothing in it touched
+`AgentToolCallRejected` or `AgentToolCallStarted.repeated`, and two probes written
+from outside the set survived with zero failing tests. **Five** mutations were
+added — two for the line-terminator re-escaping, two for the unbound stream
 signals, one for the dropped echo on the degraded path.
 
 One of the five was itself a bad mutation before it was a passing one, which is
 worth recording because it is the harness's own version of the failure this
-section keeps describing. M30's first form inserted a *no-op* `replaceAllMapped`
+section keeps describing. Its first form inserted a *no-op* `replaceAllMapped`
 before the real one, so the re-escaping still ran; it reported `SURVIVED`, which
 would have read as "the tests do not cover this" when what it actually showed
 was "this edit changes nothing". A mutation that does not mutate measures the
@@ -252,13 +252,13 @@ mutation, not the suite. Rewritten as two edits that disable the rule for real �
 one voiding the pattern, one narrowing the category class to `Cc` so only the
 separators slip through.
 
-Review round 1 then found a defect in one of *those* fixes, and with it the
-second hole in the set. The R0-F5 fix asked "does any invocation have a text
+A second review pass then found a defect in one of *those* fixes, and with it the
+second hole in the set. The dropped-echo fix asked "does any invocation have a text
 source", which is exact everywhere except when there are no invocations — the
-turn where every text-path attempt was refused, which is the case the finding
-was about. The reviewer's `.any` → `.every` probe survived with zero failing
+turn where every text-path attempt was refused, which is the case the fix
+was about. An `.any` → `.every` probe survived with zero failing
 tests, because the two formulations differ *only* on the empty list. Two more
-mutations (M35–M36) pin the replacement, and the reviewer's probe is one of
+mutations pin the replacement, and that probe is one of
 them: promoted into the harness so it is re-run rather than remembered.
 
 **36 mutations, 0 survivors**, one run, whole suite, against the tree at the
@@ -320,12 +320,12 @@ instructing the model to answer only from them. That is a plausible route to a
 confident wrong answer, which is the failure the whole retrieval path exists to
 prevent.
 
-It is **not** fixed in Task 1.9, because the fix belongs to the router and the
+It is **not** fixed in the loop, because the fix belongs to the router and the
 obvious versions are all bad: a hand-written stop-word list is the
-enumerate-the-attacks shape Task 1.4 already learned to avoid, and any
+enumerate-the-attacks shape this repo already learned to avoid, and any
 document-frequency or bm25 threshold tuned against a **three-document** corpus
 would be a number with no evidence behind it. It needs a real decision and
-probably a bigger corpus. Recorded here, in the sprint plan, and pinned by
+probably a bigger corpus. Recorded here and pinned by
 `test/services/ai/tc_agent_e2e_premises_test.dart` so it cannot be rediscovered
 by accident.
 
