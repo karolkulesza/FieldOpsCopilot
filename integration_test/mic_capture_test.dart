@@ -12,14 +12,14 @@ import 'package:integration_test/integration_test.dart';
 /// flutter test integration_test/mic_capture_test.dart -d <device>
 /// ```
 ///
-/// No `--dart-define`s: unlike Task 1.7's provisioning test there is nothing
-/// licensed or gated here. What it does need is the **microphone permission**,
+/// No `--dart-define`s: unlike the LLM provisioning test there is nothing licensed
+/// or gated here. What it does need is the **microphone permission**,
 /// and that cannot be granted from inside the test — the OS dialog is not part of
 /// the Flutter view hierarchy, so no `WidgetTester` gesture can reach it. The
 /// first run therefore raises the prompt and skips with the remedy; grant it and
-/// run again. A skip rather than a failure, for the reason Task 1.7 gives: a test
-/// that did not execute must say so, not report red as though the code were
-/// wrong.
+/// run again. A skip rather than a failure, for the reason the provisioning test
+/// gives: a test that did not execute must say so, not report red as though the
+/// code were wrong.
 ///
 /// **What this asserts that the host suite cannot.** Every host test drives
 /// [MicCapture] over a scripted [AudioInput], so each is a statement about this
@@ -33,8 +33,8 @@ import 'package:integration_test/integration_test.dart';
 /// 3. the samples are **not all zero** — a plugin can hand back correctly shaped
 ///    buffers of silence when the input is dead, which passes every structural
 ///    check there is;
-/// 4. and the whole capture closes cleanly, which is what Task 2.2's
-///    `SttEngine.transcribe` needs in order to ever emit a final transcript.
+/// 4. and the whole capture closes cleanly, which is what `SttEngine.transcribe`
+///    needs in order to ever emit a final transcript.
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -111,8 +111,8 @@ void main() {
           // milliseconds after the engine starts, and `stop` is asked for after the
           // delay rather than at the last sample.
           //
-          // **Narrowed by review finding R0-F3 and its companion note.** An earlier
-          // version called this "the failure it exists to catch", meaning a
+          // **Narrowed deliberately.** An earlier version called this "the failure
+          // it exists to catch", meaning a
           // silently substituted format. That claim was wider than the code: a
           // silent rate substitution is not a state either platform reaches — iOS
           // resamples to the requested rate through `AVAudioConverter` and throws if

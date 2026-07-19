@@ -38,8 +38,8 @@ import 'package:integration_test/integration_test.dart';
 /// `BELT-330-DRV`) *and* then asked the technician which part they had fitted —
 /// the two things the argument exists to prevent, in one turn.
 ///
-/// So the modal is verified as a UI and unverified as an *interaction*, and the
-/// sprint plan says so in those words. A test that pretended otherwise by driving
+/// So the modal is verified as a UI and unverified as an *interaction*, and this
+/// file says so in those words. A test that pretended otherwise by driving
 /// the model until it happened to comply would be measuring the prompt it took to
 /// get there.
 void main() {
