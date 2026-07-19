@@ -17,7 +17,7 @@ import 'package:integration_test/integration_test.dart';
 
 import 'e2e_fixtures.dart';
 
-/// TC-UI-DEMO-01 — the whole Tier 1 slice, driven through the real UI on a real
+/// TC-UI-DEMO-01 — the whole retrieve-to-answer slice, driven through the real UI on a real
 /// device, against real weights and the app's own durable database.
 ///
 /// ```sh

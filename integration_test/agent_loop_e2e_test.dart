@@ -20,7 +20,7 @@ import 'package:integration_test/integration_test.dart';
 
 import 'e2e_fixtures.dart';
 
-/// TC-AGENT-E2E-01 — the whole Tier 1 slice on a real device, against real
+/// TC-AGENT-E2E-01 — the whole retrieve-to-answer slice on a real device, against real
 /// weights and the real seeded database.
 ///
 /// ```sh

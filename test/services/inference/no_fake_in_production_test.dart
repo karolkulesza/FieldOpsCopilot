@@ -846,7 +846,7 @@ void main() {
       expect(
         fakeBearing,
         contains('lib/engines/providers.dart'),
-        reason: 'the Tier 0 seam binds the fake, so it must be discovered',
+        reason: 'the DI seam binds the fake, so it must be discovered',
       );
       expect(
         fakeBearing,
