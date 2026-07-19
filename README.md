@@ -201,6 +201,88 @@ cause, and it is the most useful thing in this repo:
 
 → [Speech to text](docs/speech-to-text.md) · [Microphone capture](docs/microphone-capture.md)
 
+## Designed, not built
+
+Everything above this line is code with tests behind it. This section is the
+opposite and says so: these are the decisions a real fleet deployment forces, and
+what the answer would be. They are here because the gap between a working demo and
+a deployable product is mostly *these*, and a README that quietly omits them is
+claiming to have closed it.
+
+**Key management — the one that matters most.** The database cipher is real
+(ChaCha20-Poly1305, KDF iterations pinned explicitly, verified in CI). The key
+management is not: the passphrase is a `--dart-define`, and it falls back to a
+constant literally named `demoDatabaseKey = 'fieldops-demo-key-not-a-secret'`.
+That protects a stolen **file**; it does not protect a stolen **device**, because
+anyone who can read the app bundle can read the key. The fleet answer is a random
+key generated on first launch, held in the iOS Keychain or the Android Keystore
+behind device-passcode protection, and never present in the binary — and it slots
+in behind `databaseEncryptionKeyProvider` without touching a line above it. That
+provider exists at that seam for this reason. The constant is named the way it is
+for the same reason: hiding it behind something innocuous would satisfy the letter
+and invert the intent.
+
+**Credential delivery for model downloads.** Same shape, one layer out. The
+provisioner takes its access token from a `--dart-define`, which means the token
+is in the binary. The fleet answer is a short-lived signed URL issued per device
+by a fetch service, which slots in behind `modelAccessTokenProvider` — again
+without touching the provisioner, which already strips `Authorization` on a
+cross-origin redirect so a signed URL to a CDN cannot leak the credential that
+minted it.
+
+**Thermal and battery governor.** A 2.59GB model generating tokens is the hottest
+thing on the device, and a rugged handset in a machine room has no airflow. The
+design is a telemetry interface over iOS `ProcessInfo.thermalState` and Android
+`PowerManager.getThermalHeadroom()`, feeding a policy that enters a `throttled`
+state and reduces the generation rate. The testable version asserts the *state
+transition and its effect on rate*, never a magic millisecond constant — the same
+rule the rest of this suite follows. This is where the measured 1.67GB RSS and the
+frame-budget numbers stop being trivia and start being inputs.
+
+**Offline sync queue and conflict resolution.** Work orders are written offline by
+definition. The design is a write-ahead transaction log, a network-aware
+background worker, and an explicit conflict policy — server-authoritative,
+technician-priority, or a CRDT merge — chosen per field rather than per record,
+because a technician's own labour hours and a dispatcher's assignment do not want
+the same rule. Deliberately not built: it needs a server, and a server would be
+the least interesting half of it.
+
+**Signed, append-only audit ledger.** "Which manual entry grounded this answer,
+and when" is an OpenTelemetry span model over `FTS_Search` and `LLM_Inference`,
+written to a signed append-only log and exported on reconnect. The observability
+design is the transferable part; the signing is ordinary cryptography.
+
+**Full OTA model pipeline.** The client half is built and proven on device —
+download with progress, streaming SHA-256, atomic install, `doNotBackup`, and an
+install receipt so readiness costs no re-hash. The rest is design: bucket layout,
+device-capability-based model selection (a 4GB Android device gets Gemma 3 1B,
+not E2B), staged rollout, and the App Store size constraints that decide whether
+weights ship in the bundle at all.
+
+**Wake-word activation.** Hands-free matters when both hands are inside a
+controller cabinet. `sherpa_onnx` ships keyword spotting, so the model is not the
+question; the power budget of always-on listening is, and on a shift-long battery
+a hardware-button trigger may simply win.
+
+**Ambient noise suppression.** A speech-enhancement pre-pass (GTCRN or DPDFNet,
+both available in `sherpa_onnx`) between the microphone and the recogniser, traded
+off against added latency — in a machine room the noise floor is the dominant
+error source, well ahead of the model's own accuracy.
+
+**One thing deliberately not designed away: FTS5 instead of embeddings.** The easy
+vector path was one dependency away — `flutter_gemma` ships an embeddings package
+and two RAG stores. SQLite FTS5 with a porter tokenizer plus a structured
+exact-match column for fault codes was chosen anyway, because field-service
+retrieval is dominated by deterministic identifiers (`E-102`, `BELT-330-DRV`) and
+short symptom phrases, where lexical matching with stemming is near-perfect, fully
+deterministic, testable with exact-match assertions, and adds no second model to
+the memory and battery budget. The embedding path stays a documented extension
+point behind the retrieval interface. The honest caveat is recorded in
+[offline retrieval](docs/offline-retrieval.md): stop words match, so the
+seed corpus would retrieve on almost any English sentence — a property of a
+three-entry manual, and one that a real corpus and a real ranking threshold would
+have to answer.
+
 ## Getting started
 
 Requires the Flutter SDK (stable, Dart 3.12+). iOS 16.0+ or a 64-bit Android
