@@ -51,14 +51,17 @@ import 'package:integration_test/integration_test.dart';
 /// exactly as it does on a live capture, so what is bypassed is the driver and not
 /// the pipeline.
 ///
-/// ⚠️ **This has run on hardware once, and it failed — on a defect in its own
-/// fixture, not in the app.** `_FixtureAudioInput` opened a stream and delivered
-/// nothing until `playToEnd()` was called, which happens *after* the assertion that
-/// the screen has reached `DictationPhase.listening`; since that phase means *audio
-/// is arriving*, the screen was correct and the double was not. The fixture now
-/// starts playback on `onListen` and the waits are conditions rather than fixed
-/// durations. **The run has not been repeated, so this test has never been observed
-/// to pass on a device**, and it stays in the owed-device-run category until it is.
+/// ✅ **This passes on hardware, and it did not on the first attempt.** The failure
+/// is worth keeping: `_FixtureAudioInput` opened a stream and delivered nothing
+/// until `playToEnd()` was called, which happens *after* the assertion that the
+/// screen has reached `DictationPhase.listening` — and since that phase means
+/// *audio is arriving*, the screen was correct and the double was not. Playback now
+/// starts on `onListen`, when the pipeline subscribes, because that is when a
+/// microphone starts delivering; and the waits after the tap are conditions rather
+/// than fixed durations. **A double gentler than the hardware is a test that cannot
+/// fail**, which is the same gap, in the same direction, that let a `RangeError`
+/// reach a device two commits earlier.
+///
 /// It asserts nothing on the host, because the recogniser cannot load there without
 /// a `nativeLibraryPath` and production always passes null.
 void main() {

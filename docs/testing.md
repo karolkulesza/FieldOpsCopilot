@@ -252,9 +252,9 @@ a local pass proves nothing. Delete `.dart_tool/build`, or use a fresh clone.
   - `voice_inquiry_test.dart` (TC-VOICE-FILL-01) — dictated audio becoming the
     text in the inquiry field, through the real recogniser and the real screen,
     with the **microphone** substituted for the committed fixture so the assertion
-    does not depend on the room. ⚠️ **Run once, failed on a defect in its own
-    fixture, not re-run since the fix** — so it has never been observed to pass.
-    See [voice and work order](voice-and-work-order.md).
+    does not depend on the room. ✅ **Passes on device** — after a first attempt
+    that failed on the double being gentler than the hardware, which is the whole
+    reason this tier exists. See [voice and work order](voice-and-work-order.md).
   - `clarification_test.dart` (TC-UI-CLAR-01) — the clarification modal under a
     real finger. Verified as a UI and **unverified as an interaction**, and the
     file says so in those words: Gemma 4 E2B does not use the `clarification`

@@ -188,17 +188,19 @@ children below the fold, so a field the agent filled would not exist in the tree
 until someone scrolled to it — unreachable by a test and by assistive technology.
 Four fields is not a list worth virtualising.
 
-## Owed on a device
+## On a device
 
-⚠️ **TC-VOICE-FILL-01 has run on hardware once, failed on a defect in its own
-fixture, and has not been re-run since the fix.** So it has never been observed to
-pass on a device. The first run asserted that the screen had reached
+✅ **TC-VOICE-FILL-01 passes on hardware.** It did not on the first attempt, and
+that failure is the more useful half: the test asserted the screen had reached
 `DictationPhase.listening` before the fixture delivered its first frame — and that
 phase means *audio is arriving*, so the app was right and the double was wrong. The
-fixture now starts playback when the pipeline subscribes, and the waits are
-conditions rather than fixed durations; what is not yet on the record is a green
-run. `integration_test/voice_inquiry_test.dart` needs no defines; it provisions the
-43.65MB STT set first if it is absent.
+fixture had opened a stream and delivered nothing until a later call asked it to.
+It now starts playback when the pipeline subscribes, which is when a microphone
+starts delivering, and the waits after the tap are conditions rather than fixed
+durations. **A double gentler than the hardware is a test that cannot fail**, and
+this one had been gentler in exactly the direction that let a `RangeError` reach a
+device two commits earlier. `integration_test/voice_inquiry_test.dart` needs no
+defines; it provisions the 43.65MB STT set first if it is absent.
 
 ```bash
 flutter test integration_test/voice_inquiry_test.dart -d <device>
