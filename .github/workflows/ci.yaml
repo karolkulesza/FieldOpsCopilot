@@ -33,8 +33,8 @@ jobs:
 
       # Generated Drift code (`*.g.dart`) is committed, so it can silently drift
       # from the table/`.drift` sources it is generated from — which already
-      # happened once in Task 1.2 and was caught only by human review. Rebuilding
-      # and asserting a clean tree makes stale codegen a CI failure instead.
+      # happened once and was caught only by human review. Rebuilding and
+      # asserting a clean tree makes stale codegen a CI failure instead.
       #
       # Runs before `analyze`/`test` deliberately: if generation *changes* the
       # sources, everything after this step should be judged against the
