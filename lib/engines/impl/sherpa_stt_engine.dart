@@ -125,9 +125,9 @@ class SherpaSttEngine implements SttEngine {
 
     /// The `beginSession()` round trip while it is still in flight, or `null`.
     ///
-    /// **Held because a cancel can land inside that window — review finding R1-F1.**
-    /// `beginSession` is a real isolate round trip, and 1.8 measured the UI isolate
-    /// stalling 1445–1728ms while a model loads, which is exactly when a user taps
+    /// **Held because a cancel can land inside that window.**
+    /// `beginSession` is a real isolate round trip, and the UI isolate measurably
+    /// stalls 1445–1728ms while a model loads, which is exactly when a user taps
     /// twice. `begun` is still `false` for the whole of it, so a `release` that
     /// guarded only on `begun` dropped the cancel: the worker opened its
     /// `OnlineStream`, nothing was left holding a reference to it, and because
@@ -148,9 +148,9 @@ class SherpaSttEngine implements SttEngine {
         // **Reachable, and by exactly one path: a `beginSession` that threw
         // synchronously**, before the line that publishes its future ran. `fail` then
         // brings us here with `_transcribing` still set and nothing to cancel, because
-        // no session was ever opened. An earlier version of this comment called the
-        // branch unreachable and kept it only to satisfy Dart's null check — true while
-        // the call sat outside the `try`, which is the defect R2-F1 records.
+        // no session was ever opened. It is tempting to call the
+        // branch unreachable and keep it only to satisfy Dart's null check — true only
+        // while the call sat outside the `try` (see `onListen`).
         return;
       }
 
@@ -166,10 +166,10 @@ class SherpaSttEngine implements SttEngine {
           // second, less informative one.
           //
           // This used to be followed by a separate `if (!begun) return;`. Mutation
-          // testing after round 1 showed that line was **dead** — every path reaching
+          // testing showed that line was **dead** — every path reaching
           // it had `begun == true`, because the only way it could be false was a begin
-          // that threw, which returns here. Deleted rather than kept as decoration
-          // (1.4's rule), and `M15` now targets this `return`, which is where the
+          // that threw, which returns here. Deleted rather than kept as decoration;
+          // this `return` is where the
           // property actually lives.
           return;
         }
@@ -205,13 +205,13 @@ class SherpaSttEngine implements SttEngine {
         // out — so there is nothing left to cancel.
         //
         // The sentence above is the point; there is deliberately no `begun = false`
-        // under it. Review finding R2-F2 measured that assignment surviving mutation in
+        // under it. Mutation testing measured that assignment surviving in
         // **both** directions, which is the stronger form of dead: after `settled` is
         // set, `begun` is read only by `release` under `cancelSession: true`, reachable
         // only from `fail` and `onCancel`, both of which return early on `settled` — and
         // the call below clears `_transcribing`, so any later `release` returns at its
-        // first line regardless. It was the third instance of the class this task
-        // deleted two of, and 1.4's rule applies the same way: decoration rots.
+        // first line regardless. It was the third such dead assignment here, and the
+        // same rule applies to all of them: decoration rots.
         await release(cancelSession: false);
         if (!out.isClosed) await out.close();
       } on Object catch (error, stack) {
@@ -250,8 +250,8 @@ class SherpaSttEngine implements SttEngine {
     }
 
     out.onListen = () async {
-      // **The in-flight slot is taken here, not in [transcribe] — review finding
-      // R0-F6.** Taking it at the call site meant a stream that was built and never
+      // **The in-flight slot is taken here, not in [transcribe].**
+      // Taking it at the call site meant a stream that was built and never
       // listened to held it forever: nothing leaks on the worker (no session was ever
       // opened), but the engine refuses every later `transcribe` until it is disposed,
       // recoverable only by rebuilding the provider graph.
@@ -277,13 +277,13 @@ class SherpaSttEngine implements SttEngine {
 
       try {
         // Published *before* it is awaited, so a cancel landing inside the round trip
-        // can find it and release the session it opens — R1-F1.
+        // can find it and release the session it opens.
         //
-        // **Inside the `try`, not above it — review finding R2-F1.** R1-F1's fix hoisted
+        // **Inside the `try`, not above it.** An earlier revision hoisted
         // this call out of the block that used to catch it, so a host whose
         // `beginSession` threw *synchronously* lost the error to the zone handler: the
         // stream never completed, `_transcribing` was never cleared, and the engine was
-        // wedged for life — the same permanent refusal R0-F6 was about, through a
+        // wedged for life — the same permanent refusal described above, through a
         // different door. A strict regression, and one only a synchronous throw can
         // reach.
         final begin = _host.beginSession();
@@ -336,11 +336,11 @@ class SherpaSttEngine implements SttEngine {
   /// The cost is that a partial can carry a **code-shaped** intermediate. Measured:
   /// `AN ERROR THE FALK CODE IS E ONE OH` → `AN ERROR THE FALK CODE IS E 10`, and
   /// `E 10` is a well-formed `faultCodePattern` candidate for a code nobody said.
-  /// Review finding R1-F3 corrected this example — it previously read `E 1`, which is
-  /// both wrong (the run is two digit words, so two digits are emitted) and
-  /// understated, because `E 1` matches nothing while `E 10` matches. Harmless today
-  /// because nothing consumes partials; it is Task 2.3's to know before one reaches
-  /// the retrieval path.
+  /// (Not `E 1`: the run is two digit words, so two digits are emitted — and the
+  /// difference is not pedantry, because `E 1` matches nothing while `E 10`
+  /// matches.) Harmless today
+  /// because nothing consumes partials; whatever first consumes them must know it
+  /// before one reaches the retrieval path.
   ///
   /// [SttTranscript.rawText] carries the recogniser's verbatim output, so nothing
   /// is hidden by this and a caller comparing against a reference run has the

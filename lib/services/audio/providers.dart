@@ -6,11 +6,12 @@
 /// the difference between "it worked" and "it looked like it worked" is invisible
 /// on a screen recording.
 ///
-/// **The Tier 0 seam is not the one to wire, and that is the whole point of this
+/// **The fake-bound seam is not the one to wire, and that is the whole point of
+/// this
 /// file.** `engines/providers.dart`'s `sttEngineProvider` binds `FakeSttEngine` and
-/// still does. Task 2.2's row states the hazard exactly: *"Pointing a microphone at
-/// that Tier 0 seam yields a demo that transcribes from a script — voice input that
-/// looks like it works on a device where the recogniser never ran."* So the screen
+/// still does. The hazard, exactly: pointing a microphone at
+/// that seam yields a demo that transcribes from a script — voice input that
+/// looks like it works on a device where the recogniser never ran. So the screen
 /// resolves [dictationEngineProvider], which answers the **real** engine or `null`,
 /// on precisely the argument `agentEngineProvider` makes for refusing to fall back
 /// to `FakeLlmEngine`. A scripted transcript is a worse failure than a scripted
@@ -19,7 +20,7 @@
 /// nobody said.
 ///
 /// `sttEngineProvider` keeps the fake because every existing host test resolves it
-/// and none of them can load 43MB of ONNX graphs. It is the Tier 0 seam; this is
+/// and none of them can load 43MB of ONNX graphs. It is the host-test seam; this is
 /// the device one.
 library;
 
@@ -64,7 +65,7 @@ final sttConfigProvider = FutureProvider<SttConfig?>(retry: noRetry, (
   if (status != ModelInstallStatus.ready) return null;
 
   final storage = await ref.watch(modelStorageProvider.future);
-  // The install *directory*, because Task 2.0 provisions this model as a file set
+  // The install *directory*, because this model is provisioned as a file set
   // and `SttConfig.forInstallDirectory` composes the four paths from the names the
   // catalog installs them under. `stt_config_test.dart` asserts those names agree
   // with the catalog's, so the two halves cannot drift apart silently.
@@ -101,8 +102,8 @@ Future<Uint8List?> _loadPrimer() async {
 /// The on-device recogniser, or `null` when this device has no verified weights.
 ///
 /// Returned **uninitialised**, exactly as `deviceLlmEngineProvider` is: building
-/// the recogniser is three ONNX graphs and 359–530ms of blocking FFI (Task 2.2
-/// measured it), so it happens on a deliberate action rather than because
+/// the recogniser is three ONNX graphs and 359–530ms of blocking FFI (measured;
+/// see `sherpa_recognizer.dart`), so it happens on a deliberate action rather than because
 /// something read a provider. `DictationController.start` is that action.
 ///
 /// Disposal is wired here because forgetting it leaks a whole isolate holding the
@@ -142,8 +143,8 @@ final dictationEngineProvider = FutureProvider<SttEngine?>(
 ///
 /// Left at its defaults: 16 kHz mono (what `SttConfig` declares and what the
 /// recogniser is built at), a two-second backlog, and the five-second stall
-/// watchdog that Task 2.1's R0-F1/R0-F2 established is the only "the microphone
-/// went away" condition either platform actually produces.
+/// watchdog — which `MicCapture.stallTimeout`'s doc establishes is the only "the
+/// microphone went away" condition either platform actually produces.
 final micCaptureProvider = Provider<MicCapture>((ref) {
   final capture = MicCapture(input: RecordAudioInput());
   ref.onDispose(capture.dispose);

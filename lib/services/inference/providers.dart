@@ -10,7 +10,8 @@
 /// would make the app try to load a model on the way to the first frame. The real
 /// engine is [deviceLlmEngineProvider].
 ///
-/// **How Task 1.11 actually flipped the app over, which is not what this paragraph
+/// **How the app actually flipped over to the device engine, which is not what
+/// this paragraph
 /// used to predict.** The prediction was "override `llmEngineProvider` with
 /// [deviceLlmEngineProvider] inside a `ProviderScope`", and that override does not
 /// type-check: `llmEngineProvider` is a synchronous `Provider<LlmEngine>` and
@@ -38,8 +39,8 @@ import 'inference_config.dart';
 ///
 /// `null` is a first-class answer here, and the condition is deliberately strict:
 /// only [ModelInstallStatus.ready] — weights present *and* vouched for against the
-/// pinned SHA-256 — produces a config. `unverified` does not. That rule is the reason
-/// Task 1.7 exists: an engine that loads bytes nothing has hashed turns "the model is
+/// pinned SHA-256 — produces a config. `unverified` does not. That rule is the whole
+/// reason provisioning verifies at all: an engine that loads bytes nothing has hashed turns "the model is
 /// ready" into a statement about a file that happens to be at the right path, which
 /// is exactly what a half-finished download leaves behind.
 final inferenceConfigProvider = FutureProvider<InferenceConfig?>(
@@ -70,7 +71,7 @@ final inferenceConfigProvider = FutureProvider<InferenceConfig?>(
 /// than by something reading a provider. Disposal is wired here because forgetting it
 /// leaks a whole isolate holding the model.
 ///
-/// [noRetry] added by Task 1.11: this sits on the path to the first interactive
+/// [noRetry], deliberately: this sits on the path to the first interactive
 /// frame, and Riverpod 3's default would hold the screen in `AsyncLoading` for
 /// around half a minute over a failure that is settled on the first attempt. See
 /// `retry_policy.dart`.
@@ -95,13 +96,13 @@ final deviceLlmEngineProvider = FutureProvider<GemmaLlmEngine?>(
 /// answers a technician's inquiry fluently, in well-formatted prose, from a
 /// scripted list — on a machine where the model never ran. There is no failure
 /// mode of this project worse than that, because it is indistinguishable from
-/// success in a screen recording, which is the artefact this task exists to make.
+/// success in a screen recording, which is the artefact this app exists to make.
 /// So `null` is a first-class answer and the screen renders it as "no verified
 /// weights on this device", with the banner above it naming the next step.
 ///
 /// The fake is still exactly one line away from any test that wants it — an
 /// override of *this* provider — which is a deliberate act in a test file rather
-/// than a default nobody chose. Task 1.8's rule makes that safe: the fake enforces
+/// than a default nobody chose. The fakes' house rule makes that safe: the fake enforces
 /// every contract the device engine does, at the same moment, so what passes here
 /// against the fake is not passing against a more forgiving world.
 ///

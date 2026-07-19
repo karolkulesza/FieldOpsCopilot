@@ -2,8 +2,8 @@
 ///
 /// **It is deliberately outside the answer panel**, and that is a layout decision
 /// with a mechanism behind it rather than a matter of taste. `_ResultPanel`
-/// auto-scrolls to its own bottom on every token (Task 1.11's R0-F6), and Task
-/// 1.11's R12-F0 records what putting an interactive surface inside that is worth:
+/// auto-scrolls to its own bottom on every token, and its `_readerIsDragging` doc
+/// records what putting an interactive surface inside that is worth:
 /// `jumpTo` opens with `goIdle()`, which **disposes the active drag**, so a
 /// technician editing a field inside the streaming panel would have every
 /// keystroke's worth of gesture cancelled underneath them. Text fields do not live
@@ -125,7 +125,7 @@ class WorkOrderFormPanel extends ConsumerWidget {
                       // is theirs — it says the agent heard something this form has
                       // no box for.
                       //
-                      // Added for review finding R0-F4: before it, the refusals
+                      // Before this line existed, the refusals
                       // reached nothing at all and the state field that held them
                       // documented a reader that did not exist.
                       child: Text(

@@ -7,7 +7,7 @@ import 'package:record/record.dart';
 import 'mic_frame.dart';
 import 'pcm_audio_format.dart';
 
-// Task 2.2 moved `MicFrame` to its own file so `lib/engines/` can name it without
+// `MicFrame` lives in its own file so `lib/engines/` can name it without
 // importing this one (which imports `package:record`). Re-exported so every
 // existing `import 'mic_capture.dart'` still sees it — the type did not move as
 // far as a caller is concerned.
@@ -63,8 +63,8 @@ abstract interface class AudioInput {
 
 /// The outcome of asking [MicCapture] to start.
 ///
-/// Sealed rather than "a session or an exception" for the reason Task 1.5
-/// established for tool calls: a denied permission and a busy microphone are
+/// Sealed rather than "a session or an exception" for the reason the tool-call
+/// outcomes are sealed: a denied permission and a busy microphone are
 /// ordinary runtime states the UI has to render, not programming errors. Only
 /// [MicCaptureUnavailable] describes something going wrong, and it too is a value
 /// — the caller that has to draw a message either way should not have to draw it
@@ -131,11 +131,11 @@ class MicCaptureSession {
   /// The stall timeout this session is actually running with.
   ///
   /// Exists so a test can bind [MicCapture]'s *default* reaching the session
-  /// without waiting out five seconds of wall clock. Round 2 of review measured
-  /// the alternative — a test that waits the real default — and found its marginal
-  /// mutation coverage to be **zero**: the value assertion on
+  /// without waiting out five seconds of wall clock. The alternative — a test
+  /// that waits the real default — was measured and its marginal
+  /// mutation coverage is **zero**: the value assertion on
   /// [MicCapture.stallTimeout] and the millisecond-scale watchdog tests already
-  /// kill every edit either party constructed, including one that breaks this
+  /// kill every edit constructed against it, including one that breaks this
   /// plumbing while leaving the public field reading correctly. This accessor
   /// binds that last edge directly and costs nothing.
   @visibleForTesting
@@ -167,7 +167,7 @@ class MicCaptureSession {
   /// What actually stops buffers being accepted is the `_rawSubscription.cancel()`
   /// that every path setting this flag performs in the same synchronous block — not
   /// the flag. The guard in [_onRawBuffer] that reads it is therefore
-  /// belt-and-braces and unreachable today (review finding R0-F6); it is kept
+  /// belt-and-braces and unreachable today; it is kept
   /// because an `await` introduced between the flag and the cancel would make it
   /// load-bearing again, and it costs one comparison.
   bool _finishing = false;
@@ -182,8 +182,8 @@ class MicCaptureSession {
   /// How long [stop] waits for the plugin to close its stream before giving up on
   /// the drain.
   ///
-  /// Bounded rather than open-ended on the principle Task 1.11 arrived at the
-  /// hard way: a seam that hangs reports nothing, and a frozen UI reads as a
+  /// Bounded rather than open-ended, on a principle this app applies
+  /// throughout: a seam that hangs reports nothing, and a frozen UI reads as a
   /// crash. A quarter-second is far longer than the close takes when it happens
   /// at all — it is already in flight when the release completes — and short
   /// enough that a plugin which never closes costs a perceptible pause rather
@@ -255,19 +255,19 @@ class MicCaptureSession {
       await _rawClosed.future.timeout(drainGrace, onTimeout: () {});
     } finally {
       _finishing = true;
-      // Hygiene, not mechanism (review finding R1-F5): `_onStalled` routes through
+      // Hygiene, not mechanism: `_onStalled` routes through
       // [_fail], which declines once `_stopRequested` is set, so a timer left
       // running would fire into a no-op and nothing observable would change.
       // Deleting this line leaves the host suite green. What it prevents is a
       // `Timer` outliving its session by up to `stallTimeout` — invisible here, and
       // *not* invisible in a widget test, where `flutter_test` fails a test that
-      // ends with a pending timer. A widget is where Task 2.3 puts this.
+      // ends with a pending timer. The dictation UI puts this inside a widget.
       _stallTimer?.cancel();
       _stallTimer = null;
       await _rawSubscription?.cancel();
       _rawSubscription = null;
       // Hygiene, not the mechanism: nothing reads the carry after the cancel
-      // above, so deleting this line changes no behaviour (review finding R0-F6).
+      // above, so deleting this line changes no behaviour.
       // The decision it used to claim — that a partial frame is dropped rather than
       // padded into samples the technician did not speak — is implemented by the
       // *absence* of a flush here, which no line can express.
@@ -287,7 +287,7 @@ class MicCaptureSession {
         // Completing this is what makes [stop] prompt rather than always paying the
         // full [drainGrace]; bound by *stop is prompt when the plugin closes its
         // stream*. Deleting it left every other test green and added 250ms to every
-        // utterance (review finding R0-F5).
+        // utterance.
         if (!_rawClosed.isCompleted) _rawClosed.complete();
         // A `done` arriving during [stop] is the expected end, not a fault:
         // releasing the input closes the plugin's stream (`record` 7.1.1,
@@ -295,10 +295,10 @@ class MicCaptureSession {
         // once a stop is under way, so that case needs no branch here — a second
         // guard for it would be a line no test could reach.
         //
-        // **A `done` at any other time cannot come from `record` 7.1.1.** An earlier
-        // version of this comment named three causes for it — a revoked permission,
-        // a route change, another app taking the input — and the plugin's source
-        // refutes all three (review finding R0-F1). `_startRecordStream` subscribes
+        // **A `done` at any other time cannot come from `record` 7.1.1.** The
+        // plausible causes — a revoked permission,
+        // a route change, another app taking the input — are all
+        // refuted by the plugin's source. `_startRecordStream` subscribes
         // to the platform stream with `onData` and `onError` and **no `onDone`**,
         // and neither native side ever ends its event channel (`endOfStream` and
         // `FlutterEndOfEventStream` appear nowhere in `record_ios` 2.1.1 or
@@ -373,8 +373,7 @@ class MicCaptureSession {
     if (wholeBytes == 0) {
       // Includes an empty buffer, which **iOS** can produce: `Pcm16BitsEncoder`
       // returns `[bytes]` with `bytes` empty when the converted buffer has no
-      // frames, and `handleTap` sends every element. Android cannot — review
-      // finding R0-F8.3 refuted that half of an earlier comment, because
+      // frames, and `handleTap` sends every element. Android cannot:
       // `RecordThread` guards `if (buffer.isNotEmpty()) encoder.encode(buffer)`, so
       // a zero-length read never reaches the sink.
       _carry = merged.isEmpty ? null : merged;
@@ -429,7 +428,7 @@ class MicCaptureSession {
     }
 
     // `|| _closed` is belt-and-braces: no path calls `_pump` after the close, so
-    // deleting it changes no behaviour (review finding R0-F6). Kept because it
+    // deleting it changes no behaviour. Kept because it
     // makes double-closing impossible by construction rather than by tracing every
     // caller.
     if (!_finishing || _backlog.isNotEmpty || _closed) return;
@@ -447,7 +446,7 @@ class MicCaptureSession {
     _stopRequested = true;
     _finishing = true;
     // Hygiene, for the reason given in [stop]: this cannot change an outcome, only
-    // whether a `Timer` outlives the session (review finding R1-F5).
+    // whether a `Timer` outlives the session.
     _stallTimer?.cancel();
     _stallTimer = null;
     _rawSubscription?.cancel();
@@ -480,7 +479,7 @@ class MicCaptureSession {
 ///   all. It is a broadcast controller fed from a platform callback (read in
 ///   `record` 7.1.1, `_StreamMixin`), so a subscriber that pauses buffers audio
 ///   in its subscription with no ceiling. In an app whose measured RSS already
-///   reaches 1.67GB with the LLM resident (Task 1.8), unbounded audio behind a
+///   reaches 1.67GB with the LLM resident (demo iPad), unbounded audio behind a
 ///   stalled recogniser is an out-of-memory kill; a bound plus a visible gap is
 ///   a degraded transcript.
 class MicCapture {
@@ -513,7 +512,7 @@ class MicCapture {
   /// `null` disables the check.
   ///
   /// **This is the only "the microphone went away" condition either real platform
-  /// produces, and it took review findings R0-F1/R0-F2 to establish that.** The
+  /// produces — established from the plugin's source, not assumed.** The
   /// obvious candidate does not happen: `record` 7.1.1 registers no `onDone` on the
   /// platform stream and neither native side ever ends its event channel, so a
   /// stream closing by itself is not a thing. What *does* happen, on iOS, is
@@ -575,8 +574,8 @@ class MicCapture {
     );
 
     try {
-      // **Before `startStream`, and that order is load-bearing** (raised in review
-      // round 0): on Android `notifyConfigChanged` fires immediately after the
+      // **Before `startStream`, and that order is load-bearing**:
+      // on Android `notifyConfigChanged` fires immediately after the
       // platform call `startStream` awaits resolves, so a watcher registered
       // afterwards can miss the only notification there will be.
       await _input.watchFormat(
@@ -594,7 +593,7 @@ class MicCapture {
       // The input may already be open — `watchFormat` can succeed and `startStream`
       // fail after the platform has taken the microphone — and a caller told
       // "unavailable" holds no session to stop with. Without this the recorder stays
-      // open until `dispose`. Raised as a non-blocking note in review round 0.
+      // open until `dispose`.
       try {
         await _input.stop();
       } on Exception catch (_) {
@@ -630,9 +629,8 @@ class MicCapture {
 ///   44100 Hz stereo, neither of which the STT model wants.
 /// * `audioInterruption` is left at `RecordConfig`'s default of
 ///   `AudioInterruptionMode.pause`, and **that default is what makes an
-///   interruption permanent** — which review finding R1-F6 established, because an
-///   earlier version of this list said the configuration was "three fields wide"
-///   while a fourth was quietly load-bearing. Both platforms gate resuming on
+///   interruption permanent** — a field that is quietly load-bearing without
+///   ever being set. Both platforms gate resuming on
 ///   `pauseResume`: iOS returns from its `.ended` handler unless
 ///   `audioInterruption == pauseResume` *and* the notification carries
 ///   `.shouldResume` (`RecorderSessionExtension.onAudioSessionInterruption`), and
@@ -642,8 +640,8 @@ class MicCapture {
 ///   [MicCapture.stallTimeout] detects is a consequence of this default, not a
 ///   platform fact.
 ///
-///   It stays `pause`, and the reason is stronger than the platform behaviour it is
-///   sometimes justified by — the argument is the reviewer's, in round 1. An
+///   It stays `pause`, and the reason is stronger than the platform behaviour it
+///   is sometimes justified by. An
 ///   auto-resume would restart the tap mid-utterance and **splice the stream with a
 ///   gap this class cannot see**: the missing audio never enters the backlog, so
 ///   nothing increments `precedingGapBytes`, and the recogniser receives a
@@ -659,13 +657,13 @@ class MicCapture {
 ///   own default rather than this app picking a figure that is right on one of
 ///   them.
 ///
-/// Noise suppression is *not* requested, and not because it would be unwelcome —
-/// the spec asks for it. It is because on the demo platform it would be
+/// Noise suppression is *not* requested, and not because it would be unwelcome.
+/// It is because on the demo platform it would be
 /// decoration: `record_ios` 2.1.1 parses `noiseSuppress` into its `RecordConfig`
 /// and never reads it again — the stream delegate applies only `echoCancel` and
 /// `autoGain`, via `setVoiceProcessingEnabled`. (`record_android` 2.1.2 does honour
-/// it, through `AudioEffectsManager`.) Ambient-noise filtering stays where the
-/// sprint plan puts it, in the narrated appendix, rather than becoming a flag that
+/// it, through `AudioEffectsManager`.) Ambient-noise filtering stays a documented
+/// limitation rather than becoming a flag that
 /// looks like a feature on the device this is demoed from.
 class RecordAudioInput implements AudioInput {
   RecordAudioInput({AudioRecorder? recorder})
@@ -730,8 +728,8 @@ class RecordAudioInput implements AudioInput {
   /// copies it only `if (containsKey)`). Faulting a good capture because the
   /// platform normalised an unused field would be worse than not watching at all.
   ///
-  /// **Which platform this is live on, corrected by review finding R0-F3.** An
-  /// earlier version claimed neither stream path mutates the format, so the callback
+  /// **Which platform this is live on.** It is tempting to claim neither stream
+  /// path mutates the format, so the callback
   /// should never fire. True on iOS, whose stream delegate resamples to the
   /// requested format through `AVAudioConverter` and throws if it cannot, never
   /// rewriting the config. **False on Android:** `FormatCodecSelector.findCodec`
