@@ -929,8 +929,8 @@ void main() {
       // because that is where the argument rests. The previous version of this
       // test asserted only that the *output* contained no `\n` or `\r` — which
       // U+2028 can never trigger, so the one input that falsified the claim was
-      // the one input the test was blind to, and it was already in the list
-      // (R0-F2). The assertion is now "the hostile character is not in the
+      // the one input the test was blind to, and it was already in the list.
+      // The assertion is now "the hostile character is not in the
       // output", which fails for U+2028 without the fix.
       for (final hostile in <String>[
         '\n',
@@ -1034,8 +1034,8 @@ void main() {
 
     test('the transcript keeps the model text unmodified', () async {
       // Only the *prompt* copy is neutralised. `AgentTurn.text` is what the
-      // technician saw and what Task 1.10 snapshots, so rewriting it would make
-      // the record disagree with the stream.
+      // technician saw and what the golden transcripts snapshot, so rewriting it
+      // would make the record disagree with the stream.
       const raw = 'see [this] and {that}';
       final (loop, _) = await loopOver([
         [const LlmToken(raw), inventoryCall('BRK-990-XP'), const LlmDone()],
@@ -1117,7 +1117,7 @@ void main() {
     );
 
     test('a tool that throws an Error propagates', () async {
-      // Task 1.5's rule, preserved through this layer: an `Error` means the app
+      // This project's rule, preserved through this layer: an `Error` means the app
       // is broken, and handing it to the model produces a paraphrase of a defect.
       final broken = ToolRegistry([_ErrorTool()]);
       final (loop, _) = await loopOver([
@@ -1135,7 +1135,7 @@ void main() {
   });
 
   group('the stream', () {
-    test('events arrive in the order Task 1.11 needs them', () async {
+    test('events arrive in the order the demo screen needs them', () async {
       final (loop, _) = await loopOver([
         [
           const LlmToken('checking'),
@@ -1227,8 +1227,8 @@ void main() {
     });
 
     test('the fake\'s one-turn-at-a-time rule is respected', () async {
-      // Task 1.8 made the fake refuse an overlapping `generate` because the
-      // device engine does, and hold its in-flight slot until someone *drains*
+      // The fake refuses an overlapping `generate` because the device engine does,
+      // and holds its in-flight slot until someone *drains*
       // the stream. A loop that abandoned a turn would deadlock the next one, so
       // a clean multi-turn run is the evidence that each turn is drained.
       final (loop, engine) = await loopOver([
@@ -1244,10 +1244,10 @@ void main() {
     });
 
     test('a refused call attempt is announced on the stream', () async {
-      // Review finding R0-F3: `AgentToolCallRejected` was emitted by the loop
-      // and referenced by no test at all — the only member of the sealed
-      // `AgentEvent` hierarchy in that state, in the hierarchy whose stated
-      // purpose is Task 1.11 switching on it. A UI that cannot tell "the model
+      // `AgentToolCallRejected` was emitted by the loop and referenced by no test
+      // at all — the only member of the sealed `AgentEvent` hierarchy in that
+      // state, in a hierarchy whose whole purpose is the screen switching on it.
+      // A UI that cannot tell "the model
       // tried to call something and it was refused, nothing ran" from "a tool
       // ran" would lose the distinction silently.
       final (loop, _) = await loopOver([
@@ -1298,9 +1298,9 @@ void main() {
   });
 
   group('prompt budget — measuring maxDocuments rather than inheriting it', () {
-    // Task 1.9's brief: "`maxDocuments` (default 2) is reasoned from 1.8's
-    // single-document token figure, never measured against a real context
-    // window. Measure it here rather than inheriting it."
+    // `maxDocuments` (default 2) was reasoned from a single-document token figure
+    // and never measured against a real context window. It is measured here rather
+    // than inherited.
     //
     // What is measured *here* is characters, exactly and re-derivably. What is
     // not is tokens: the tokenizer ships with the weights, so a token count on
@@ -1347,7 +1347,7 @@ void main() {
     test('one tool round trip over a two-document prompt, measured', () async {
       // Renamed. This used to be called "the widest round-trip prompt the loop
       // can build", and it is not — it drives two turns while the shipped
-      // default is four (review finding R0-F4). The ceiling is the next test.
+      // default is four. The ceiling is the next test.
       final base = await groundedPromptFor(wideQuery);
       final (loop, engine) = await loopOver([
         [
@@ -1380,9 +1380,9 @@ void main() {
     });
 
     test('the ceiling: the widest prompt maxTurns permits, measured', () async {
-      // What the plan actually asked for — "measure it here rather than
-      // inheriting it" is a question about the bound, and the test above
-      // measured the happy path (R0-F4). Every turn calls a *different* SKU so
+      // Measuring the bound rather than the happy path: the test above drives two
+      // turns, and the question is what the ceiling costs. Every turn calls a
+      // *different* SKU so
       // the repeat short circuit stays out of it and each turn really does add
       // a call and a result block.
       final base = await groundedPromptFor(wideQuery);
@@ -1415,8 +1415,8 @@ void main() {
       for (var i = 1; i < lengths.length; i++) {
         expect(lengths[i], greaterThan(lengths[i - 1]));
       }
-      // Measured 2026-06-27 with this script: [1581, 2038, 2469, 2900]. The
-      // reviewer's probe reported [1581, 2066, 2525, 2984] — the gap is the
+      // Measured 2026-06-27 with this script: [1581, 2038, 2469, 2900]. An
+      // independent probe reported [1581, 2066, 2525, 2984] — the gap is the
       // per-turn echo text, which differs between the two scripts, not a
       // disagreement about the loop. ~2900 is the figure this suite prints and
       // the README quotes.
@@ -1444,8 +1444,8 @@ void main() {
 ///
 /// Spelled with `String.fromCharCode` rather than as literals because two of
 /// them are invisible line breaks: a source file containing a real U+2028 looks
-/// identical to one that does not, and review finding R0-F2 was a test whose
-/// hostile list already contained one that nobody could see.
+/// identical to one that does not — and this suite once carried a hostile list
+/// containing one that nobody could see.
 final String lineSeparator = String.fromCharCode(0x2028);
 final String paragraphSeparator = String.fromCharCode(0x2029);
 final String nextLine = String.fromCharCode(0x85);
@@ -1453,17 +1453,17 @@ final String del = String.fromCharCode(0x7F);
 
 /// Splits on **every** Unicode line terminator, not just LF.
 ///
-/// `String.split('\n')` is what made the forgery tests blind to U+2028
-/// (R0-F2): it reported one marker line where a reader honouring Unicode line
-/// breaking sees two. Any assertion about "lines" in this file goes through
+/// `String.split('\n')` is what made the forgery tests blind to U+2028: it
+/// reported one marker line where a reader honouring Unicode line breaking sees
+/// two. Any assertion about "lines" in this file goes through
 /// here.
 List<String> _lines(String text) =>
     text.split(RegExp(r'\r\n|[\n\r\u000b\u000c\u0085\u2028\u2029]'));
 
 /// Wraps a real [FakeLlmEngine] and records what it was asked.
 ///
-/// A decorator rather than a stub on purpose: Task 1.8 made the fake enforce
-/// every rule the device engine enforces, at the same moment, and a
+/// A decorator rather than a stub on purpose: the fake enforces every rule the
+/// device engine enforces, at the same moment, and a
 /// hand-written stub engine would quietly drop all of them — which is the exact
 /// trap that contract exists to close.
 class _RecordingEngine implements LlmEngine {
