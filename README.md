@@ -5,9 +5,11 @@ describes a fault - by voice or by typing - and an **on-device** language model
 retrieves the relevant manual entry, checks the local warehouse, and fills in a
 structured work order.
 
-**Nothing leaves the device.** No network is required at any point after install:
-the manual, the parts inventory, the 2.59GB language model and the speech
-recogniser all live locally.
+**Nothing leaves the device at inference time.** The manual, the parts inventory,
+the 2.59GB language model and the speech recogniser all live locally, so the whole
+diagnose-and-fill flow runs in airplane mode. The one thing that does need a
+network is first-run provisioning: the model weights are fetched once, over a
+pinned URL and verified against a pinned SHA-256, and never again.
 
 ![A symptom description becomes a grounded repair plan and a warehouse answer, in airplane mode](docs/demo-out-of-stock.gif)
 
@@ -37,9 +39,11 @@ also real: on this run the model sent two values under field names the form does
 not have, and reporting that is deliberate - see design decision 3.
 
 Verified on real hardware - an iPad Air M4 (iOS 26.5) for the inference and
-frame-budget measurements, an iPad Pro 11 (iOS 17.5) for the voice and
-work-order runs. Every measured figure in the deep dives names the device it came
-from. The domain is fictional; the engineering is not.
+frame-budget measurements and the speech-to-text runs, an iPad Pro 11 (iOS 17.5)
+for the voice and work-order runs. Most measured figures in the deep dives name the
+device they came from; where one does not, it is because the device was not
+recorded at the time, not because it is an average. The domain is fictional; the
+engineering is not.
 
 ## Status
 
@@ -50,7 +54,12 @@ from. The domain is fictional; the engineering is not.
 | On-device LLM (Gemma 4 E2B / LiteRT-LM) with native function calling | ✅ shipped |
 | Agent loop, tool registry, defensive call guard | ✅ shipped |
 | Microphone capture + on-device speech-to-text | ✅ shipped |
-| Voice → inquiry → agent → auto-filled work order | ✅ shipped |
+| Voice → inquiry → agent → auto-filled work order | ✅ shipped \* |
+
+\* Demonstrated on a device and recorded above; the *automated* end-to-end device
+test for it (TC-VOICE-FILL-01) has run once, failed on a defect in its own fixture,
+and has not been re-run since the fix — so it has never been observed to pass. See
+[voice and work order](docs/voice-and-work-order.md).
 
 1179 host tests, 7 golden transcript snapshots, 9 device integration test files.
 
@@ -231,9 +240,13 @@ flutter run integration_test/<file>.dart -d <device> --publish-port
 Three things this project does that are worth stealing:
 
 - **Golden transcripts** over the whole agent loop, not just unit assertions.
-- **Targeted mutation testing.** Every mutation is a defect a reviewer proposed;
-  a fix whose own mutation survives has not been demonstrated, however good the
-  argument. One "fix" in this repo was reverted on exactly that basis.
+- **Targeted mutation testing.** Every mutation is a concrete defect someone
+  proposed; a fix whose own mutation survives has not been demonstrated, however
+  good the argument. One "fix" in this repo was reverted on exactly that basis.
+  **The harness that applies them is not in this repo** — it is a local script,
+  and the survivor counts quoted throughout these docs are therefore reported
+  rather than reproducible from a clone. The individual mutations are described in
+  the docs precisely enough to re-apply by hand, which is how they were checked.
 - **A live-model suite on the host.** `sherpa_onnx` ships a macOS framework, so
   the real recogniser runs against real weights in CI-free opt-in tests - which is
   how the first-word defect was finally reproduced without a device.
