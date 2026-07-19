@@ -257,7 +257,7 @@ void main() {
   });
 
   group('the router is what has to accept the output — so ask it', () {
-    test("the real faultCodePattern resolves the normalised text to E-102", () {
+    test('the real faultCodePattern resolves the normalised text to E-102', () {
       // The claim in `spoken_digits.dart` is that joining `E 102` into `E-102`
       // would be cosmetic, because the router's own pattern already spans the
       // space. This runs that pattern rather than restating the claim.

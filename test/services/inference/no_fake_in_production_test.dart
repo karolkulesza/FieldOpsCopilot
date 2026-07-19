@@ -499,7 +499,7 @@ void main() {
         // Exactly the shape `dart format` emits.
         'main.dart':
             "import 'seam_stub.dart'\n"
-            "    if (dart.library.io) "
+            '    if (dart.library.io) '
             "'package:field_ops_copilot/engines/providers.dart';\n",
       });
 
