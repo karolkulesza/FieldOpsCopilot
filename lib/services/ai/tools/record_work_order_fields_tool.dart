@@ -10,16 +10,17 @@ import '../base_tool.dart';
 /// Records what the agent extracted from the technician's words.
 ///
 /// **Why this is a tool rather than a JSON blob parsed out of the answer.** The
-/// spec's §2.3 calls for "structured JSON conversions", and Task 1.8 established
-/// that this build's model emits *native function-call tokens* — so the app already
-/// owns a validated, schema-driven, transcript-visible channel for structured
-/// output, and the alternative would be a second one with none of those properties.
-/// Concretely, going through the registry buys four things a scraped blob does not
-/// have: Gemma 4's constrained decoding is driven by [definition]'s schema, so the
-/// shape is enforced at generation time; a malformed call is caught by Task 1.6's
-/// guard instead of by a brace scan written here; every refusal is fed back to the
-/// model by Task 1.9's loop, so it can correct itself; and the whole exchange lands
-/// in the golden transcripts rather than in a string nobody snapshots.
+/// job is a structured JSON conversion of the technician's words, and this build's
+/// model emits *native function-call tokens* (verified on the device) — so the app
+/// already owns a validated, schema-driven, transcript-visible channel for
+/// structured output, and the alternative would be a second one with none of those
+/// properties. Concretely, going through the registry buys four things a scraped
+/// blob does not have: Gemma 4's constrained decoding is driven by [definition]'s
+/// schema, so the shape is enforced at generation time; a malformed call is caught
+/// by `ToolCallGuard` instead of by a brace scan written here; every refusal is fed
+/// back to the model by the agent loop, so it can correct itself; and the whole
+/// exchange lands in the golden transcripts rather than in a string nobody
+/// snapshots.
 ///
 /// **This tool is pure, and the form is filled from its payload.** It writes
 /// nothing and holds no sink — `WorkOrderFormViewModel` reads
@@ -31,15 +32,15 @@ import '../base_tool.dart';
 /// call — the one the model got and the one the technician sees — and nothing to
 /// keep them in step.
 ///
-/// **What that does not say, corrected by review finding R0-F3:** the screen and
-/// the model can still end up showing different *values*, and by design.
+/// **What that does not say:** the screen and the model can still end up showing
+/// different *values*, and by design.
 /// `WorkOrderFormState.applyUpdates` refuses to overwrite a field the technician
 /// holds, so a payload the model was told recorded `E-102` can leave the field
 /// reading the technician's `E-999` with `E-102` parked as a suggestion. That is
 /// the precedence rule working, and it is a deliberate divergence rather than an
-/// exception to a guarantee — an earlier version of this paragraph claimed the two
-/// "cannot disagree about what was recorded", which the rule two files away
-/// contradicts.
+/// exception to a guarantee — "cannot disagree about what was recorded" would
+/// overstate what the shared parse buys, and the rule two files away contradicts
+/// it.
 ///
 /// **A refused field is a successful call, not a [ToolFailure].** `{"fault_code":
 /// "E-102", "elevator_colour": "green"}` recorded one field and refused one, and
@@ -224,8 +225,8 @@ Map<WorkOrderField, String> recordedFieldsOf(Map<String, Object?> payload) {
 /// Reads the entries a [RecordWorkOrderFieldsTool] payload reports as refused.
 ///
 /// The inverse of [RecordWorkOrderFieldsTool._refusal], and it exists because
-/// review finding **R0-F4** caught `WorkOrderFormState.rejected` being dead on
-/// every production path while its docstring named a reader. The list reaches the
+/// `WorkOrderFormState.rejected` was once dead on every production path while its
+/// docstring named a reader. The list reaches the
 /// state, and the work-order panel draws a line when it is non-empty — so what the
 /// model got wrong is visible to the person watching the demo rather than only to
 /// the model.
@@ -234,15 +235,15 @@ Map<WorkOrderField, String> recordedFieldsOf(Map<String, Object?> payload) {
 /// payload arrives, so an unrecognised shape yields nothing rather than throwing.
 ///
 /// **An entry without both a `field` and a `message` is dropped as malformed, not
-/// as undrawable** — review finding R1-F4 caught the earlier wording ("there would
-/// be nothing to draw") describing a renderer that does not exist, since the panel
+/// as undrawable** — "there would be nothing to draw" would describe a renderer
+/// that does not exist, since the panel
 /// draws only the count. What the pair actually is: a well-formedness bar on a
 /// payload [RecordWorkOrderFieldsTool.execute] wrote, so a `refused` list from some
 /// other tool cannot inflate a count this app presents as the model's mistakes
 /// about *this* form.
 ///
 /// [RejectedFieldUpdate.reason] is resolved here and read by nothing in production
-/// today — only the length reaches the screen (note N5). It is kept because the
+/// today — only the length reaches the screen. It is kept because the
 /// type carries it and the tests assert it; recorded rather than left to look like
 /// coverage.
 List<RejectedFieldUpdate> refusedUpdatesOf(Map<String, Object?> payload) {

@@ -12,14 +12,14 @@
 /// registry can execute, because the declaration and the dispatch key are the *same*
 /// string, `definition.name`.
 ///
-/// Both hedges are deliberate and each was earned. The sentence used to claim the halves
-/// were impossible to disagree "by construction" while the dispatch key came from a
-/// separate overridable getter — exactly how they *could* disagree (R0-F2). Removing that
-/// getter fixed it, and then documenting the remaining hazard exposed that "impossible"
-/// was still too strong: `_byName` is snapshotted here in the constructor while
-/// [definitions] and [toolNames] re-read `tool.definition` on every access, so a
-/// definition whose `name` changed between calls would diverge them, and nothing enforces
-/// that it will not (R2-F2). See `AgentTool.definition`.
+/// Both hedges are deliberate and each was earned. An earlier design routed dispatch
+/// on a separate overridable getter while claiming the halves were impossible to
+/// disagree "by construction" — exactly how they *could* disagree. Removing that
+/// getter fixed it, and even so "impossible" would still be too strong: `_byName` is
+/// snapshotted here in the constructor while [definitions] and [toolNames] re-read
+/// `tool.definition` on every access, so a definition whose `name` changed between
+/// calls would diverge them, and nothing enforces that it will not. See
+/// `AgentTool.definition`.
 library;
 
 import 'package:flutter/foundation.dart';
@@ -33,8 +33,8 @@ class ToolRegistry {
   /// Builds a registry over [tools], rejecting an unusable set immediately.
   ///
   /// Validation happens **here**, at wiring time, rather than at the first
-  /// `generate()` call. Task 1.8 established why that matters: neither consumer of a
-  /// tool definition rejects a bad one. Gemma 4 hands the `parameters` map to a
+  /// `generate()` call, because neither consumer of a tool definition rejects a
+  /// bad one. Gemma 4 hands the `parameters` map to a
   /// native template (with no Dart stack to read when it fails), and Gemma 3
   /// `jsonEncode`s it into the prompt verbatim — teaching the model a shape this
   /// registry cannot read, which surfaces two layers away as "the model is bad at
@@ -53,20 +53,16 @@ class ToolRegistry {
     // collapses that pair into one entry and silently disarms the check. Making that
     // substitution kills exactly one test, 'rejects two tools registered under the
     // same name' — which is the evidence for this paragraph, stated inline because a
-    // reader can act on it. (An earlier version cited a mutation id, `M4`, that lives
-    // only in a review ledger deleted once the loop closes: a citation the reader
-    // cannot follow. R1-F2.)
+    // reader can act on it.
     //
-    // The statement *order* below is NOT load-bearing, and an earlier version of this
-    // comment claimed it was — in three documents, citing a regression guard that does
-    // not exist. Building `_byName` first leaves every test green (review finding
-    // R0-F1, reproduced before this correction was written). Validating first is only
-    // a fail-before-you-build preference.
+    // The statement *order* below is NOT load-bearing: building `_byName` first
+    // leaves every test green. Validating first is only a fail-before-you-build
+    // preference.
     assertToolDefinitionsUsable(definitions);
 
     // Keyed on `definition.name`: the same string `definitions` declares, and the only
-    // one the model is ever told. This is the fix for R0-F2, and it is a deletion
-    // rather than a check — `AgentTool` used to carry an overridable `name` getter that
+    // one the model is ever told. The fix here is a deletion rather than a
+    // check — `AgentTool` used to carry an overridable `name` getter that
     // the registry routed on, so a subclass overriding it was declared under one name
     // and dispatched under another. Removing it leaves no second name for the registry
     // to read, which is stronger than asserting two names agree. Precisely: a subclass
@@ -84,7 +80,7 @@ class ToolRegistry {
   ///
   /// Order is preserved because it is the order the model is shown the tools in, and
   /// a reordering would change the prompt on the Gemma 3 textual path — which the
-  /// golden suite (Task 1.10) snapshots.
+  /// golden suite snapshots.
   List<ToolDefinition> get definitions => [
     for (final tool in _tools) tool.definition,
   ];
@@ -92,8 +88,8 @@ class ToolRegistry {
   /// The registered tool names, in registration order.
   ///
   /// The **declared** names, so this list and [definitions] agree — given a stable
-  /// `AgentTool.definition`, which is the qualifier the rest of this file carries and
-  /// this line was left without (R3-F2). Both getters re-read `tool.definition` per
+  /// `AgentTool.definition`, the same qualifier the rest of this file carries.
+  /// Both getters re-read `tool.definition` per
   /// access, so a definition whose `name` changed between the two calls separates them.
   List<String> get toolNames => [
     for (final tool in _tools) tool.definition.name,
@@ -119,7 +115,7 @@ class ToolRegistry {
   /// Name matching is exact. On the primary path it has to be: Gemma 4's constrained
   /// decoding is driven by the declarations, so the name it emits comes from this
   /// registry. Anything else is a degraded-path question, and the degraded path is
-  /// Task 1.6's guard — one place, not two.
+  /// `ToolCallGuard` — one place, not two.
   Future<ToolOutcome> dispatch(LlmToolCall call) async {
     final tool = _byName[call.name];
     if (tool == null) {

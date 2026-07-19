@@ -1,9 +1,8 @@
 /// Dependency-injection seam for the agent half of the slice.
 ///
-/// Task 1.5 built `ToolRegistry` and `GetPartsInventoryTool` and left them
-/// without a production call site for the same reason Tasks 1.3, 1.4, 1.6 and 1.9
-/// did — the tool reads the local inventory, and the database needed a key. Task
-/// 1.11's `seededDatabaseProvider` supplies one.
+/// `ToolRegistry` and `GetPartsInventoryTool` were built without a production
+/// call site, like most of the agent stack — the tool reads the local inventory,
+/// and the database needed a key. `seededDatabaseProvider` supplies one.
 ///
 /// **`AgentLoop` deliberately has no provider.** It is constructed per run by
 /// `FieldJobViewModel`, from the registry here and the engine the warm-up
@@ -27,9 +26,9 @@ import 'tools/record_work_order_fields_tool.dart';
 
 /// The tools the agent may call, over the seeded database.
 ///
-/// Two tools. Task 2.3 added `record_work_order_fields`, and adding it was one
-/// line here plus one file — which is the property Task 1.5's registry was built
-/// for, now demonstrated rather than predicted. The spec's §2.2 lists three more
+/// Two tools. `record_work_order_fields` came second, and adding it was one
+/// line here plus one file — which is the property the registry was built
+/// for, now demonstrated rather than predicted. Three more are envisioned
 /// (`schedule_followup_appointment`, `raise_safety_hazard_alert`, and a
 /// name-based parts search) and each is the same one line.
 ///

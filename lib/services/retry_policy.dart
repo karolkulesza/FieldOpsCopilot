@@ -32,7 +32,8 @@
 /// Retrying any of them costs that half-minute and cannot change the outcome.
 /// Worse than the delay is what is on screen during it: the provider stays in
 /// `AsyncLoading`, so the UI reports "checking…" the whole time and *then*
-/// reports the failure. Task 1.3 asked for a malformed asset to "fail loudly at
+/// reports the failure. The seeding layer's contract is that a malformed asset
+/// "fails loudly at
 /// startup"; a wait that long before the message appears is the opposite of
 /// loudly, and it reads as a hang.
 ///
