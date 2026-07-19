@@ -5,7 +5,7 @@ import 'package:field_ops_copilot/services/database/database_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart';
 
-/// Unit-tier coverage for Task 1.1 (encrypted Drift database).
+/// Unit-tier coverage for the encrypted Drift database.
 ///
 /// These run on the host against the SQLite3MultipleCiphers build bundled by the
 /// `sqlite3` build hook (`source: sqlite3mc`), so the encryption PRAGMAs behave

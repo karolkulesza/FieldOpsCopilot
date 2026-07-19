@@ -6,11 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Widget coverage for the "model ready" state required by Task 1.7's demo-day
-/// risk control: the operator must be able to see, before tapping anything,
-/// whether verified weights are on the device.
+/// Widget coverage for the "model ready" state — a demo-day risk control: the
+/// operator must be able to see, before tapping anything, whether verified
+/// weights are on the device.
 ///
-/// Task 2.0 extends the banner to one row per provisioned model, so the pump
+/// Multi-model provisioning extends the banner to one row per model, so the pump
 /// takes a *list* of descriptors and a status per model id — and the multi-model
 /// scenarios (TC-PROV-MULTI-01's banner half) assert that the rows are
 /// independent.

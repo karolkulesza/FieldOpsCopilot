@@ -12,10 +12,11 @@ import 'package:field_ops_copilot/services/database/database_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart' show SqliteException;
 
-/// Unit-tier coverage for Task 1.5's tool registry.
+/// Unit-tier coverage for the tool registry.
 ///
 /// Every inventory assertion runs against a real encrypted database seeded from the
-/// **shipped** `assets/elevator_manual_seed.json`, following 1.3 and 1.4: the expected
+/// **shipped** `assets/elevator_manual_seed.json`, following the seeder and
+/// router suites: the expected
 /// payload in TC-TOOL-EXEC-01 (`in_stock: 2`, `Aisle 4, Shelf B`) is a property of that
 /// exact asset, and a fixture would let this suite stay green while the bundled data
 /// stopped producing it.
@@ -83,7 +84,7 @@ void main() {
       // is a shape the runtime accepts, using the same validator both `LlmEngine`
       // implementations run at registration. Without it, TC-TOOL-REG-01 would be a
       // restatement of the literal in `get_parts_inventory_tool.dart` — the exact
-      // failure Task 1.8's review named, where a definition passes the host suite
+      // failure mode worth guarding: a definition passes the host suite
       // and throws on device.
       expect(validateToolDefinition(registry.definitions.single), isEmpty);
     });
@@ -92,7 +93,7 @@ void main() {
       // The end of the chain the two tests above only approach: hand
       // `registry.definitions` to an actual `LlmEngine` and require that it does not
       // throw. `FakeLlmEngine` runs `assertToolDefinitionsUsable` at the call site
-      // for exactly this reason (Task 1.8, review round 2).
+      // for exactly this reason.
       final engine = FakeLlmEngine(
         turns: [
           const [LlmToken('ok'), LlmDone()],
@@ -110,7 +111,7 @@ void main() {
     });
 
     test('rejects a tool whose parameters are not a JSON-Schema object', () {
-      // The plausible mistake 1.8 documented: a bare name-to-type map. It reads like
+      // The plausible mistake: a bare name-to-type map. It reads like
       // a schema, passes analysis, and on the Gemma 3 path is written into the prompt
       // verbatim.
       expect(
@@ -138,7 +139,6 @@ void main() {
       // It was the **fourth** copy of that claim and the one that mattered most,
       // because the claim cited *this* test as its guard — so a reader landing here
       // learned the wrong thing about what deleting the `expect` below would cost.
-      // Raised as R0-F1, missed by the first fix, caught again as R1-F1.
       expect(
         () => ToolRegistry([
           GetPartsInventoryTool(db),
@@ -572,7 +572,7 @@ void main() {
     test('every declared name is dispatchable', () async {
       // The invariant the class doc claims, asserted rather than described: the set
       // the model is told about and the set `dispatch` can route are the same set.
-      // Review finding R0-F2 was that this rested on an overridable `AgentTool.name`
+      // This once rested on an overridable `AgentTool.name`
       // getter — declare under one name, route under another. `AgentTool` no longer
       // has a `name`, so the two cannot drift; this test is what notices if the
       // dispatch key stops being the declared name.
@@ -593,7 +593,7 @@ void main() {
       // Step 2 is the one worth having in writing, because an earlier version of this
       // comment claimed the mutation went green there and it does not — the literal
       // assertion added in the same commit had made the guard *stronger* than the
-      // comment describing it (review finding R2-F1). Two independent things therefore
+      // comment describing it. Two independent things therefore
       // have to be removed before the coverage is lost, which is the point.
       final many = ToolRegistry([
         GetPartsInventoryTool(db),
@@ -604,12 +604,11 @@ void main() {
       // Against literals, deliberately. Comparing `toolNames` to
       // `definitions.map((d) => d.name)` reads like a check and is nearly a tautology —
       // both are the same comprehension over the same getter, so no registry-*keying*
-      // mutation can separate them (raised in review round 1, which is why the literals
-      // came in).
+      // mutation can separate them — which is why the literals came in.
       //
       // That comparison used to sit here as well, justified as "the one assertion that
       // would catch an unstable `definition` getter". **That was false and it is now
-      // deleted** (R3-F1). Measured with a probe whose `definition` is a getter counting
+      // deleted.** Measured with a probe whose `definition` is a getter counting
       // its own accesses:
       //
       //   * A getter that changes on *every* access is caught by the literal list below,
@@ -625,9 +624,8 @@ void main() {
       //     at the wrong line — keeping the incidental assertion and dropping the
       //     `toolNamed` loop that actually holds the invariant.
       //
-      // Recorded because the claim came from a reviewer's suggestion and I shipped it
-      // into documentation without measuring it. **A reviewer's suggestion is not
-      // evidence either.**
+      // Recorded because the claim was shipped into documentation without being
+      // measured. **A plausible suggestion is not evidence either.**
       expect(many.toolNames, [
         'get_local_parts_inventory',
         'alpha',

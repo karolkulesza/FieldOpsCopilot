@@ -46,8 +46,8 @@ void main() {
       );
     });
 
-    // R0-F1: the STT id is a documented catalog value an operator can pass as
-    // FIELDOPS_MODEL_ID, and before the fix it crashed every reader of
+    // Regression: the STT id is a documented catalog value an operator can pass
+    // as FIELDOPS_MODEL_ID, and before the fix it crashed every reader of
     // `active` with a StateError out of `soleFile` — before the first frame.
     test('a multi-file FIELDOPS_MODEL_ID falls back to the primary LLM '
         'instead of throwing', () {
@@ -68,7 +68,7 @@ void main() {
       );
     });
 
-    // R0-F3: the access token pairs with the define-configured source; the
+    // The access token pairs with the define-configured source; the
     // committed STT entry must decline it, the Gemma entries (including the
     // gated 3 1B) must keep it.
     test('only the define-configured models send the access token', () {

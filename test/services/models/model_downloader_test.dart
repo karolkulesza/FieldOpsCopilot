@@ -8,7 +8,7 @@ import 'package:field_ops_copilot/services/models/model_provisioner.dart';
 import 'package:field_ops_copilot/services/models/model_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Unit-tier coverage for the HTTP half of Task 1.7.
+/// Unit-tier coverage for the HTTP half of model provisioning.
 ///
 /// These run against a real [HttpServer] on the loopback interface rather than a
 /// mocked client, because the behaviour worth testing *is* HTTP behaviour:
@@ -59,7 +59,7 @@ void main() {
   });
 
   group('transport encoding', () {
-    // Regression for R0-F2. With HttpClient's default `autoUncompress`, the
+    // Regression. With HttpClient's default `autoUncompress`, the
     // declared Content-Length describes the *encoded* body while the stream yields
     // *decoded* bytes — so a host (or a TLS-terminating proxy) that gzips the
     // artifact made every download fail as "truncated transfer: received 13000 of
@@ -124,7 +124,8 @@ void main() {
     });
 
     test('the declared length describes the bytes actually delivered', () async {
-      // The property R0-F2 broke: whatever the server says Content-Length is, the
+      // The property the gzip defect broke: whatever the server says
+      // Content-Length is, the
       // stream must deliver exactly that many bytes, or the provisioner's
       // truncation check is comparing two different quantities.
       final downloader = HttpModelDownloader();
@@ -418,7 +419,7 @@ class _FakeModelHost {
 
       if (gzipBody) {
         // A compressing origin: the declared length is the *encoded* length,
-        // which is the whole trap in R0-F2.
+        // which is the whole trap the gzip defect fell into.
         final encoded = gzip.encode(_body);
         response.headers.set(HttpHeaders.contentEncodingHeader, 'gzip');
         response.contentLength = encoded.length;

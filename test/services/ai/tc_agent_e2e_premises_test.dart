@@ -90,7 +90,7 @@ void main() {
       contains('apex_9_err_204'),
     );
 
-    // Reason 2, and the one that generalises: **stop words match.** Task 1.2's
+    // Reason 2, and the one that generalises: **stop words match.** The
     // sanitizer joins terms with `OR` and the porter tokenizer removes no stop
     // words, so a query is non-empty as soon as it contains one common English
     // word that appears anywhere in the manual prose.

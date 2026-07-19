@@ -8,13 +8,14 @@ import 'package:field_ops_copilot/services/models/providers.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-/// The voice half of Task 2.3's wiring, at the seam where "there is no model" has
+/// The voice half of the app's wiring, at the seam where "there is no model" has
 /// to be an ordinary answer rather than a crash.
 ///
 /// The engine providers themselves cannot be resolved on a host — building a
 /// `SherpaSttEngine` spawns an isolate that `dlopen`s a framework — so what is
 /// asserted here is the decision *above* it: which install states produce a config
-/// at all, and that the four paths point where Task 2.0 installs the files.
+/// at all, and that the four paths point where the provisioner installs the
+/// files.
 void main() {
   // `RecordAudioInput` builds an `AudioRecorder`, which touches `ServicesBinding`.
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -121,7 +122,7 @@ void main() {
   });
 
   group('the STT descriptor', () {
-    test('it is the catalog entry Task 2.0 committed', () {
+    test('it is the committed catalog entry', () {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 

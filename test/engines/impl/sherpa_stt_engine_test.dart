@@ -57,11 +57,11 @@ class ScriptedHost implements SttHost {
 
   /// Completes when [beginSession] is entered, and is awaited before it returns.
   ///
-  /// **The seam R1-F1 needed and this host did not have.** `acceptAudio` had a `gate`
-  /// from round 0, so the back-pressure window was reachable; `beginSession` returned
-  /// synchronously, so *no test could reach the window where a cancel lands mid-begin*
-  /// — which is why two mutation rows over the cancel path (M14, M15) both passed while
-  /// a real session leaked. A test double that cannot suspend where the real one does
+  /// **The seam this host was missing.** `acceptAudio` has always had a `gate`,
+  /// so the back-pressure window was reachable; `beginSession` returned
+  /// synchronously, so *no test could reach the window where a cancel lands
+  /// mid-begin* — which is how a real session leak in the cancel path went
+  /// undetected. A test double that cannot suspend where the real one does
   /// is a test double that hides a state.
   Completer<void>? beginGate;
 
@@ -292,7 +292,7 @@ void main() {
     });
 
     test('a stream that is never listened to does not wedge the engine', () async {
-      // **Review finding R0-F6.** The slot used to be taken synchronously in
+      // The slot used to be taken synchronously in
       // `transcribe`, so a stream built and discarded held it forever: nothing leaked
       // on the worker — no session was ever opened — but the engine refused every
       // later transcription until it was disposed, recoverable only by rebuilding the
@@ -455,8 +455,8 @@ void main() {
     });
 
     test('a cancel landing mid-beginSession still releases the session', () async {
-      // **Review finding R1-F1, and it was a real leak rather than a tidiness
-      // problem.** `beginSession` is an isolate round trip; `begun` is false for all
+      // **A real leak rather than a tidiness problem.** `beginSession` is an
+      // isolate round trip; `begun` is false for all
       // of it. A `release` guarding only on `begun` dropped the cancel, so the worker
       // opened its `OnlineStream` with nothing holding a reference — and because
       // `SherpaRecognizerRuntime.beginSession` throws while `_stream != null`, every
@@ -470,8 +470,7 @@ void main() {
       // controller in this test — the cancel lands before `frames.listen` — and
       // `close()` on an unlistened single-subscription controller returns a future
       // that never completes, so awaiting it in a teardown hangs the test for the
-      // full 30s timeout. That is the reviewer's own non-blocking note from round 1,
-      // and it cost this test one debugging round before the note was recalled.
+      // full 30s timeout — a lesson this test paid a debugging session to learn.
       // `unawaited` releases the controller without waiting for a done event that
       // has nobody to be delivered to.
       addTearDown(() => unawaited(frames.close()));
@@ -500,8 +499,8 @@ void main() {
     });
 
     test('a beginSession that throws synchronously is reported, not lost', () async {
-      // **Review finding R2-F1, and the test that was missing when it happened.**
-      // R1-F1's fix hoisted the `beginSession()` call out of the `try` that caught it,
+      // **The test that was missing when this regressed.** The mid-begin cancel
+      // fix hoisted the `beginSession()` call out of the `try` that caught it,
       // so a *synchronous* throw escaped to the zone handler: no error on the stream,
       // the stream never completing, and `_transcribing` never cleared — the engine
       // wedged for life. Every host in this suite was `async` before now, so nothing
@@ -530,8 +529,9 @@ void main() {
     test('a begin that fails during the cancel window is not cancelled', () async {
       // The other half, and the reason `release` cannot simply set `begun` before
       // awaiting: a begin that *failed* has no session, so cancelling it would replace
-      // the real failure with a less informative one. This is M15's property in the
-      // window M15 could not reach.
+      // the real failure with a less informative one. The same property the
+      // ordinary failed-begin test binds, now in the mid-begin window it could
+      // not reach.
       final host = ScriptedHost(failBegin: true)..beginGate = Completer<void>();
       final engine = SherpaSttEngine(config: config, host: host);
       await engine.initialize();
@@ -649,7 +649,8 @@ class _RetryableHost extends ScriptedHost {
 /// rejected future.
 ///
 /// Deliberately not `async`: that keyword is exactly what would convert the throw into
-/// a rejected future and make this host unable to reproduce R2-F1.
+/// a rejected future and make this host unable to reproduce the escaped-throw
+/// regression.
 class _SyncThrowBeginHost extends ScriptedHost {
   @override
   Future<void> beginSession() {

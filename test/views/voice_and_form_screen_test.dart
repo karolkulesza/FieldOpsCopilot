@@ -25,12 +25,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Task 2.3 on the screen: the microphone button, the transcript reaching the
-/// inquiry field, and the work order filling in.
+/// Voice and the work order on the screen: the microphone button, the transcript
+/// reaching the inquiry field, and the work order filling in.
 ///
-/// Separate from `diagnose_screen_test.dart` deliberately — that file owns Task
-/// 1.11's properties and its harness is built around injecting a `FieldJobState`.
-/// What is asserted here is what 2.3 added, over the *real* dictation and form
+/// Separate from `diagnose_screen_test.dart` deliberately — that file owns the
+/// diagnose flow's properties and its harness is built around injecting a
+/// `FieldJobState`. What is asserted here is the voice-and-form layer, over the
+/// *real* dictation and form
 /// viewmodels with only the two device seams scripted. The engine and the
 /// microphone are the only doubles: everything between the transcript and the
 /// characters in the text field is production code.
@@ -89,9 +90,9 @@ void main() {
           // **`stallTimeout: null`, and it is the test that is wrong without
           // it rather than the production default.** The watchdog is a real
           // `Timer(5s)` armed for the whole of a capture, and `flutter_test`
-          // fails any test that ends with one pending — which Task 2.1's own
-          // source predicted in as many words ("a widget is where Task 2.3 puts
-          // this"). Every test here ends mid-capture or just after one, so the
+          // fails any test that ends with one pending — which `mic_capture.dart`'s
+          // own source predicts in as many words ("the dictation UI puts this
+          // inside a widget"). Every test here ends mid-capture or just after one, so the
           // alternative is a tear-down that waits out five seconds of fake clock
           // in twelve tests to observe a timer that never fires. The watchdog's
           // behaviour is bound by `mic_capture_test.dart`, at millisecond scale,
@@ -138,7 +139,7 @@ void main() {
   /// it is duplicated rather than shared because these two files have no common
   /// harness and importing one test's private helper into another is worse.
   /// Real event-loop time, then frames. See [tapMic] for why `pump` alone is not
-  /// enough — and note that a *typed* edit now also closes a capture (R0-F1), so
+  /// enough — and note that a *typed* edit now also closes a capture, so
   /// this is needed after `enterText` during dictation for the same reason.
   Future<void> settleAsync(WidgetTester tester) async {
     for (var i = 0; i < 8; i++) {
@@ -231,8 +232,8 @@ void main() {
       expect(inquiryText(tester), '');
     });
 
-    // The screen's own no-animation rule, extended to what 2.3 added — Task 1.8
-    // measured the UI isolate dropping frames while tokens stream, and the
+    // The screen's own no-animation rule, extended to the dictation path — the
+    // UI isolate measurably drops frames while tokens stream, and the
     // recogniser's own state updates land on that isolate too.
     testWidgets('nothing on the dictation path animates', (tester) async {
       await pumpScreen(tester);
@@ -313,12 +314,12 @@ void main() {
       expect(inquiryText(tester), 'THE CABIN IS VIBRATING E 102');
     });
 
-    // **Review finding R0-F1.** The screen's own comment argues the field is not
+    // The screen's own comment argues the field is not
     // read-only while dictating "because a technician who sees `FALK CODE` land
-    // has to be able to fix it" — and until R0-F1 that was the one case that
-    // failed: `_onDictation` rebuilds the whole line from `base + transcript` on
+    // has to be able to fix it" — and that was the one case that used to
+    // fail: `_onDictation` rebuilds the whole line from `base + transcript` on
     // every state change, so the next partial wiped the correction. Two tests,
-    // because the reviewer measured two ways to lose it.
+    // because there are two ways to lose it.
     testWidgets('a mid-capture correction survives the next partial', (
       tester,
     ) async {
@@ -349,7 +350,7 @@ void main() {
     testWidgets('a mid-capture correction survives the capture ending', (
       tester,
     ) async {
-      // The second way the reviewer lost it: no further speech at all, just the
+      // The second way to lose it: no further speech at all, just the
       // phase change at the end of the capture firing `_onDictation` once more.
       await pumpScreen(tester);
       await tapMic(tester);

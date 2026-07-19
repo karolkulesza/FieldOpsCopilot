@@ -18,7 +18,7 @@ void main() {
       'refuses a malformed tool schema, exactly as a device engine does',
       () async {
         // The fake's parity with the real engine is what makes the host suite meaningful:
-        // Task 1.9's agent loop and Task 1.10's goldens are tested against this class, so
+        // the agent loop and the goldens are tested against this class, so
         // a fake that accepted `{'sku': 'String'}` would let a tool registry pass every
         // host test and throw on the demo device.
         final engine = FakeLlmEngine(
@@ -187,8 +187,8 @@ void main() {
       );
       await engine.initialize();
 
-      // `Stream<MicFrame>` since Task 2.2 widened the interface — the gap the
-      // capture reports has to be able to reach the recogniser.
+      // `Stream<MicFrame>`, not raw bytes — the interface is widened so the gap
+      // the capture reports can reach the recogniser.
       final audio = Stream<MicFrame>.fromIterable([
         MicFrame(bytes: Uint8List(4)),
       ]);
@@ -202,12 +202,13 @@ void main() {
       // **The ordering property, and it is the fake's whole parity obligation.** The
       // real engine cannot produce a final before `finishSession`, so a fake that
       // emitted on the first frame would let a consumer be written against an
-      // ordering the device never produces — 1.8's rule, in the direction that is
-      // easiest to break by accident.
+      // ordering the device never produces — the fakes' no-laxer-than-the-device
+      // rule, in the direction that is easiest to break by accident.
       //
-      // This replaces what mutation M22 used to bind. That row deleted
-      // `await frames.drain()`, which no longer exists after the R0-F1 rewrite, so
-      // the property needed an oracle that does not depend on the old shape.
+      // An earlier version of this property was bound by deleting
+      // `await frames.drain()`, which no longer exists after the cancel-path
+      // rewrite, so the property needed an oracle that does not depend on the
+      // old shape.
       final engine = FakeSttEngine();
       await engine.initialize();
 
@@ -268,7 +269,8 @@ void main() {
     });
 
     test('cancelling mid-utterance completes, and releases', () async {
-      // **The test that was missing, and its absence is why R0-F1 was invisible.**
+      // **The test that was missing, and its absence is why the deadlock below
+      // was invisible.**
       // The real engine's suite has `'when the consumer walks away mid-utterance'`;
       // this one had no cancel test at all, so a fake that deadlocked on cancel could
       // claim parity with the real engine in prose and nothing would disagree.
@@ -302,7 +304,7 @@ void main() {
     });
 
     test('a stream that is never listened to does not wedge the engine', () async {
-      // Review finding R0-F6, and it applies to both engines — the slot is taken in
+      // This applies to both engines — the slot is taken in
       // `onListen`, not at the call site, so a discarded stream costs nothing.
       final engine = FakeSttEngine();
       await engine.initialize();

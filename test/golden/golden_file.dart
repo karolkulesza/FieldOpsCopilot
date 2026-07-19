@@ -22,7 +22,7 @@
 /// * The decision is a parameter of [reconcileGolden], not a lookup inside it,
 ///   so both branches are reachable from an ordinary test. An environment read
 ///   buried in the comparison would be a line no test could bind — the defect
-///   class Task 1.4 paid for with its `assert`ed clamp.
+///   class the prompt compiler already paid for with its `assert`ed clamp.
 library;
 
 import 'dart:io';
@@ -261,8 +261,8 @@ String goldenPathFor(String scenario) =>
 /// rewrite, and returns the verdict **without failing anything**.
 ///
 /// The filesystem half, taken as parameters rather than read from the ambient
-/// environment and the committed directory — which is review finding R0-F2 and
-/// the same lesson [reconcileGolden] already learned one layer up. With the
+/// environment and the committed directory — the same lesson [reconcileGolden]
+/// already learned one layer up. With the
 /// `File` and the flag baked in, the write was a line **no test could reach**:
 /// `goldensAreBeingUpdated` reads the process environment, Dart cannot change it
 /// in-process, so under `flutter test` the rewrite branch never executed.

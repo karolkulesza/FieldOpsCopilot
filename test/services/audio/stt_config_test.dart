@@ -23,7 +23,7 @@ void main() {
         tailPadding: Duration(milliseconds: 111),
         maxGapBridge: Duration(milliseconds: 222),
         debug: true,
-        // Review finding R0-F5: this was the one field left at its default, so the
+        // This was once the one field left at its default, so the
         // comment below was false about it — and two mutations proved it, both
         // surviving 244 green tests: `toWire` sending `null` (which destroys the
         // field's entire reason for existing, carrying the path across the isolate
@@ -119,7 +119,7 @@ void main() {
     });
 
     test('an empty nativeLibraryPath — refused rather than read as null', () {
-      // The branch that had a three-sentence doc paragraph and no test (R0-F5). An
+      // The branch that had a three-sentence doc paragraph and no test. An
       // empty string is not "use the platform default": it reaches `dlopen` as a
       // relative path and fails somewhere far less legible than here.
       expect(
@@ -137,7 +137,7 @@ void main() {
   });
 
   group('forInstallDirectory', () {
-    test('composes the four paths Task 2.0 installs', () {
+    test('composes the four paths the provisioner installs', () {
       final config = SttConfig.forInstallDirectory(
         '/data/models/stt-zipformer',
       );
@@ -175,7 +175,7 @@ void main() {
   });
 
   group('defaults', () {
-    test('the audio format is the one Task 2.1 captures', () {
+    test('the audio format is the one the microphone captures', () {
       const config = SttConfig(files: files);
       expect(config.format, PcmAudioFormat.sttMono16k);
       expect(config.format.sampleRate, 16000);

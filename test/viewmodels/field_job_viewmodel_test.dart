@@ -19,10 +19,10 @@ import 'package:field_ops_copilot/viewmodels/field_job_viewmodel.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Unit-tier coverage for Task 1.11's viewmodel — TC-VM-STREAM-01 and everything
+/// Unit-tier coverage for the diagnose viewmodel — TC-VM-STREAM-01 and everything
 /// around it.
 ///
-/// **Only the model is faked**, which is Task 1.10's rule and the reason these
+/// **Only the model is faked** — the golden suite's rule — and it is the reason these
 /// tests are worth more than their length suggests: the database is real and seeded
 /// from the shipped asset, and retrieval, compilation, the loop, the guard and the
 /// registry are the production objects resolved through the production providers.
@@ -31,7 +31,7 @@ import 'package:flutter_test/flutter_test.dart';
 ///
 /// The fake is reached by overriding `agentEngineProvider`, which is the only way
 /// in — see that provider for why it does not fall back to the fake on its own.
-/// Task 1.8's rule is what makes it safe: `FakeLlmEngine` enforces every contract
+/// What makes the substitution safe: `FakeLlmEngine` enforces every contract
 /// `GemmaLlmEngine` does, at the same moment, so nothing here passes against a more
 /// forgiving world than the device.
 void main() {
@@ -212,7 +212,7 @@ void main() {
   });
 
   group('the tool-activity indicator', () {
-    // Task 1.9 emits `AgentToolCallStarted` *before* the query is in flight
+    // The agent loop emits `AgentToolCallStarted` *before* the query is in flight
     // specifically so this is possible, and bound the same way there: block the
     // tool on a completer and look at the state while it is stuck.
     test('activeTool is set while the lookup runs and cleared after', () async {
@@ -249,8 +249,8 @@ void main() {
       );
     });
 
-    // **The end-of-run assertion above is not enough, and mutation M5 proved it.**
-    // Dropping `activeTool: null` from the `AgentToolCallCompleted` row left every
+    // **The end-of-run assertion above is not enough.** Dropping
+    // `activeTool: null` from the `AgentToolCallCompleted` row left every
     // test green, because `AgentCompleted` clears it too — so the final state was
     // identical and the mask was total. What it changes is the *middle*: the
     // indicator would stay on "Checking inventory…" through the whole second turn,
@@ -375,7 +375,7 @@ void main() {
   });
 
   group('all three stop reasons are distinguishable', () {
-    // The gap Task 1.10 handed this task: `emptyResponse` has no golden, and this
+    // The gap the golden suite leaves open: `emptyResponse` has no golden, and this
     // screen is the thing that has to render all three. Each is asserted as a
     // *distinct* pair of (stopReason, isDiagnosis), because the loop already
     // authors non-empty text for all three — so "the answer is non-empty" cannot
@@ -418,7 +418,7 @@ void main() {
 
     test('iterationCapReached is not a diagnosis', () async {
       // Four turns, a different SKU each time, so the cap is what stops it rather
-      // than the repeat short circuit — the distinction Task 1.10's `iteration_cap`
+      // than the repeat short circuit — the distinction the `iteration_cap`
       // golden makes, borrowed here.
       final container = await containerOver([
         [inventoryCall('BRK-990-XP'), const LlmDone()],
@@ -499,8 +499,8 @@ void main() {
 
     // Both engines refuse an overlapping `generate` with a `StateError`, so this
     // guard is the difference between a wasted tap and a crash. The fake refuses it
-    // too — Task 1.8 made it no laxer than the device — which is exactly why this
-    // can be tested here at all.
+    // too — it is deliberately no laxer than the device — which is exactly why
+    // this can be tested here at all.
     test(
       'a second diagnose while one is running is ignored, not a crash',
       () async {
@@ -731,8 +731,8 @@ class _ThrowingEngine implements LlmEngine {
 }
 
 /// The real inventory tool, held open on a completer so the "checking inventory…"
-/// state can be observed while the query is in flight. Task 1.9's suite blocks the
-/// tool the same way and for the same reason.
+/// state can be observed while the query is in flight. The agent-loop suite
+/// blocks the tool the same way and for the same reason.
 ///
 /// Delegates rather than stubs, so the payload the viewmodel records is the one the
 /// seeded database actually produces — and [definition] forwards to the real one, so

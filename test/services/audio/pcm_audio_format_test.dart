@@ -3,8 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// Unit-tier coverage for the byte/duration arithmetic every audio path shares.
 ///
-/// Small, and worth having anyway: this is the type the backlog bound, the
-/// dropped-audio gap and Task 2.2's recogniser configuration all read their
+/// Small, and worth having anyway: this is the type the capture backlog bound,
+/// the dropped-audio gap and the recogniser configuration all read their
 /// numbers from, so an off-by-one here is an off-by-one everywhere at once.
 void main() {
   group('the STT format', () {
