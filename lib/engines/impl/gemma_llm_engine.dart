@@ -35,8 +35,8 @@ class GemmaLlmEngine implements LlmEngine {
   ///
   /// Not a nicety: the readiness banner and a "Diagnose" tap can both want the
   /// engine, and a second load of a 2.6GB model would either double the resident
-  /// footprint or fail — the same class of bug Task 1.7's provisioner had to
-  /// serialise away. One future, shared.
+  /// footprint or fail — the same class of bug the provisioner has to serialise
+  /// away. One future, shared.
   Future<LoadedRuntime>? _loading;
 
   bool _disposed = false;

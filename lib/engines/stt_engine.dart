@@ -17,7 +17,7 @@ class SttTranscript {
   ///
   /// Post-processed — for the on-device backend that means spoken digit runs have
   /// been rewritten as digits (`E ONE OH TWO` → `E 102`). That is not cosmetic:
-  /// the pinned model's vocabulary contains no digit tokens at all, and Task 1.4's
+  /// the pinned model's vocabulary contains no digit tokens at all, and the
   /// fault-code lookup needs digits, so without it every dictated inquiry would
   /// silently skip the structured lookup. See `spoken_digits.dart`.
   final String text;
@@ -54,11 +54,11 @@ abstract interface class SttEngine {
 
   /// Consumes captured audio and emits transcripts.
   ///
-  /// **Takes [MicFrame], not a bare `Uint8List` — widened by Task 2.2.** Task 0.2
-  /// declared this over raw buffers, before Task 2.1 established that the capture
-  /// backlog is bounded and that dropped audio has to travel *with* the audio. A
-  /// caller bridging the two with `.map((f) => f.bytes)` would be discarding
-  /// `precedingGapBytes` in one inconspicuous line — and the whole reason 2.1
+  /// **Takes [MicFrame], not a bare `Uint8List`.** This was first declared over raw
+  /// buffers, before microphone capture established that the backlog is bounded and
+  /// that dropped audio has to travel *with* the audio. A caller bridging the two
+  /// with `.map((f) => f.bytes)` would be discarding `precedingGapBytes` in one
+  /// inconspicuous line — and the whole reason [MicFrame]
   /// carries that field is that a recogniser fed a silent splice returns a fluent
   /// transcript of a sentence nobody said. Taking the frame makes the lossy
   /// conversion something a caller has to write on purpose rather than the path of

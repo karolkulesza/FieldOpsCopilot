@@ -5,8 +5,8 @@
 /// storage and provisioner providers are async because resolving the
 /// application-support directory is a platform call.
 ///
-/// **What changed in Task 2.0.** Task 1.7's providers described *the* model —
-/// one descriptor, one install status, one provisioning trigger. This build
+/// **Keyed by model, not global.** These providers once described *the* model —
+/// one descriptor, one install status, one provisioning trigger. The app
 /// provisions two (the active LLM and the committed-config STT set), so
 /// everything that was singular is now keyed by model id:
 /// [modelDescriptorProvider], [modelInstallStatusProvider] and
@@ -27,8 +27,8 @@ import 'model_storage.dart';
 /// The LLM this build provisions and the agent runs on, resolved from the
 /// build-time `--dart-define`s. See [ModelCatalog].
 ///
-/// Renamed from `activeModelDescriptorProvider` in Task 2.0, because "the active
-/// model" stopped being a coherent phrase the moment there were two: this is the
+/// Renamed from `activeModelDescriptorProvider`, because "the active model" stopped
+/// being a coherent phrase the moment there were two: this is the
 /// active **LLM**, the model `inferenceConfigProvider` loads and the one Diagnose
 /// cannot run without. The STT model is neither active nor inactive — it is
 /// simply provisioned — and a missing STT set must never gate the agent
@@ -122,8 +122,7 @@ final modelProvisionerProvider = FutureProvider<ModelProvisioner>(
 /// way to the first frame. An explicit re-hash is
 /// [ModelProvisioner.verifyInstalled], invoked on demand rather than at startup.
 ///
-/// [noRetry] added by Task 1.11, and it changes what the banner *does* rather than
-/// only how fast. Riverpod 3 retries a thrown `Exception` ten times with backoff,
+/// [noRetry] changes what the banner *does* rather than only how fast. Riverpod 3 retries a thrown `Exception` ten times with backoff,
 /// which for this provider means the banner sits on "Checking model…" for around
 /// half a minute and then shows "Model status unavailable" — a state its own doc
 /// says must be distinguishable from ready and absent, arriving so late it reads as

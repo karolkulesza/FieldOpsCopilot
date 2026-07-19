@@ -89,7 +89,7 @@ final class SttAudioRequest extends SttRequest {
 
   static const String kind = 'audio';
 
-  /// Signed 16-bit little-endian mono PCM, exactly as Task 2.1 captured it.
+  /// Signed 16-bit little-endian mono PCM, exactly as the microphone captured it.
   ///
   /// **Sent as bytes and decoded to floats on the far side**, which is the cheaper
   /// direction whatever the port does with typed data: 16-bit samples are half the
@@ -109,7 +109,7 @@ final class SttAudioRequest extends SttRequest {
   /// Bytes rather than samples so the unit does not change at the boundary: this
   /// is `MicFrame.precedingGapBytes` travelling unmodified, and the worker turns
   /// it into a sample count with the same [SttConfig.format] it decodes the audio
-  /// with. It travels *with* the audio for the reason Task 2.1 attaches it to the
+  /// with. It travels *with* the audio for the reason [MicFrame] attaches it to the
   /// frame — a counter someone has to remember to read is a counter nobody reads.
   final int precedingGapBytes;
 

@@ -1,7 +1,7 @@
 /// Converting the bytes the microphone produces into the samples the recogniser
 /// consumes.
 ///
-/// Task 2.1 delivers audio as **signed 16-bit little-endian** bytes, because that
+/// Capture delivers audio as **signed 16-bit little-endian** bytes, because that
 /// is what `record` emits and what `SttEngine.transcribe` is declared over.
 /// sherpa-onnx wants **`Float32List` normalised to `[-1, 1]`** — read in
 /// `sherpa_onnx-1.13.5/lib/src/online_stream.dart`, whose `acceptWaveform` doc

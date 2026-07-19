@@ -274,9 +274,8 @@ class ModelProvisioner {
   /// process-wide**, so two isolates in one process both produce
   /// `<pid>-0` — the shared staging path whose consequences this whole design
   /// exists to prevent (inode-preserving `rename` lets the loser's open sink write
-  /// into the installed artifact). Nothing in `lib/` runs on an isolate today, but
-  /// Task 1.8 puts inference on one and is also the task that will call
-  /// `provision()`.
+  /// into the installed artifact). Inference runs on an isolate, and the same code
+  /// path calls `provision()`.
   ///
   /// Dart has no `O_EXCL` file creation, so uniqueness cannot be *enforced* by the
   /// filesystem; it is made overwhelmingly likely instead. The pid and timestamp

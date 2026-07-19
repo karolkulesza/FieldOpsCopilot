@@ -7,7 +7,7 @@ library;
 ///
 /// Sample *depth* and byte order are deliberately not fields. They are constants
 /// of the contract, not configuration: `SttEngine.transcribe` is declared over
-/// "16-bit mono PCM frames", the streaming zipformer of Task 2.2 consumes 16-bit
+/// "16-bit mono PCM frames", the streaming zipformer consumes 16-bit
 /// samples, and `record`'s only raw stream encoder is `AudioEncoder.pcm16bits`.
 /// A field nothing can vary is a field that invites a caller to vary it.
 ///
@@ -22,7 +22,7 @@ class PcmAudioFormat {
 
   /// 16 kHz mono — the format the on-device STT path is built around.
   ///
-  /// 16 kHz because the model pinned in the sprint plan for Task 2.2
+  /// 16 kHz because the pinned recogniser
   /// (`sherpa-onnx-streaming-zipformer-en-20M-2023-02-17`) is a 16 kHz model, and
   /// mono because a single-channel stream is what an ASR front-end wants and half
   /// the bytes of the stereo default.

@@ -1386,8 +1386,8 @@ class InventoryPartRow extends DataClass
   /// upper-cased) via [normalizeSku] and matched by exact equality.
   ///
   /// `COLLATE NOCASE` for the same reason `manual_entries.code` carries it, and
-  /// it matters more here: from Task 1.5 onward the SKU in a lookup arrives from
-  /// the *model*, inside a native function call, so its casing is whatever the
+  /// it matters more here: the SKU in a lookup arrives from the *model*, inside a
+  /// native function call, so its casing is whatever the
   /// weights felt like emitting. The collation applies to the implicit primary-key
   /// index too, so case-insensitive equality goes *through* the index instead of
   /// forcing `upper(sku)` and a table scan.
