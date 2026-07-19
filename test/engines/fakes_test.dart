@@ -3,11 +3,8 @@ import 'dart:typed_data';
 
 import 'package:field_ops_copilot/services/audio/mic_frame.dart';
 import 'package:field_ops_copilot/engines/fakes/fake_llm_engine.dart';
-import 'package:field_ops_copilot/engines/fakes/fake_platform_telemetry.dart';
 import 'package:field_ops_copilot/engines/fakes/fake_stt_engine.dart';
-import 'package:field_ops_copilot/engines/fakes/fake_vision_engine.dart';
 import 'package:field_ops_copilot/engines/llm_engine.dart';
-import 'package:field_ops_copilot/engines/platform_telemetry.dart';
 import 'package:field_ops_copilot/engines/stt_engine.dart';
 import 'package:field_ops_copilot/engines/tool_schema.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -333,35 +330,6 @@ void main() {
       // If the guard leaked, this would throw — which is the failure mode a
       // `finally` exists to prevent and the one nothing would otherwise catch.
       await engine.transcribe(const Stream<MicFrame>.empty()).toList();
-    });
-  });
-
-  group('FakeVisionEngine', () {
-    test('returns scripted barcode and OCR text', () async {
-      final engine = FakeVisionEngine();
-      await engine.initialize();
-
-      final result = await engine.analyze(Uint8List(0));
-
-      expect(result.barcodes, contains('SKU-BRK-990'));
-      expect(result.text, contains('APEX-9'));
-    });
-  });
-
-  group('FakePlatformTelemetry', () {
-    test('emits pushed thermal and battery events', () async {
-      final telemetry = FakePlatformTelemetry();
-
-      final thermalFuture = telemetry.thermalState.first;
-      final batteryFuture = telemetry.battery.first;
-
-      telemetry.emitThermal(DeviceThermalState.serious);
-      telemetry.emitBattery(const BatteryStatus(level: 0.1, isCharging: false));
-
-      expect(await thermalFuture, DeviceThermalState.serious);
-      expect((await batteryFuture).level, 0.1);
-
-      await telemetry.dispose();
     });
   });
 }

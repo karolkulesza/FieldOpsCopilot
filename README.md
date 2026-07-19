@@ -61,7 +61,7 @@ test for it (TC-VOICE-FILL-01) has run once, failed on a defect in its own fixtu
 and has not been re-run since the fix — so it has never been observed to pass. See
 [voice and work order](docs/voice-and-work-order.md).
 
-1179 host tests, 7 golden transcript snapshots, 9 device integration test files.
+1177 host tests, 7 golden transcript snapshots, 9 device integration test files.
 
 ## Architecture
 
@@ -82,7 +82,7 @@ on a laptop with neither installed.
 │  services/rag/          │   retrieval_router · prompt_compiler
 └───────────┬─────────────┘
 ┌───────────▼─────────────┐   The interfaces: LlmEngine, SttEngine,
-│  engines/               │   VisionEngine, PlatformTelemetry
+│  engines/               │   InferenceHost, SttHost
 └─────┬──────────────┬────┘
       │              │
 ┌─────▼─────┐  ┌─────▼──────────┐   The only files that import a native
@@ -232,7 +232,7 @@ produce, see **[device test scenarios](docs/device-test-scenarios.md)**.
 ## Testing
 
 ```bash
-flutter test                                  # 1179 host tests
+flutter test                                  # 1177 host tests
 flutter test --tags live-stt --dart-define=…  # the real recogniser, on the host
 flutter run integration_test/<file>.dart -d <device> --publish-port
 ```
