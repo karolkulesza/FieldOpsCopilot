@@ -25,11 +25,17 @@ class FtsQuerySanitizer {
   /// leading terms carry the signal.
   static const int maxTerms = 24;
 
-  /// Characters kept inside a term: any Unicode letter or digit, plus the
-  /// intra-word apostrophe and hyphen (`won't`, `E-305`, `lockout-tagout`).
-  /// Everything else — quotes, parentheses, colons, asterisks, carets, commas —
-  /// is dropped before it can be parsed as FTS5 syntax.
-  static final RegExp _disallowed = RegExp(r"[^\p{L}\p{N}'\-]+", unicode: true);
+  /// Characters kept inside a term: any Unicode letter, digit or combining mark,
+  /// plus the intra-word apostrophe and hyphen (`won't`, `E-305`,
+  /// `lockout-tagout`). Everything else — quotes, parentheses, colons, asterisks,
+  /// carets, commas — is dropped before it can be parsed as FTS5 syntax.
+  ///
+  /// Combining marks (`\p{M}`) are kept so decomposed or non-Latin text is not
+  /// silently split into different tokens than the same word in composed form.
+  static final RegExp _disallowed = RegExp(
+    r"[^\p{L}\p{N}\p{M}'\-]+",
+    unicode: true,
+  );
 
   /// Trailing/leading punctuation left over once separators are stripped, e.g.
   /// the term `-` from a bare dash, or `close-` from `close - stuck`.

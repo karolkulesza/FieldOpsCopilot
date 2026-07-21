@@ -75,11 +75,17 @@ class DatabaseService extends _$DatabaseService {
 
   /// v1 shipped the technician/inventory/work-order tables; v2 (Task 1.2) adds
   /// the manual table, its FTS5 index and the triggers that keep them in sync.
+  ///
+  /// `createTable` emits only `CREATE TABLE`, so every non-table entity has to be
+  /// created explicitly — including [idxManualEntriesCode]. Miss one and upgraded
+  /// installs diverge permanently from fresh ones (which get everything via
+  /// `createAll`).
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onUpgrade: (m, from, to) async {
       if (from < 2) {
         await m.createTable(manualEntries);
+        await m.create(idxManualEntriesCode);
         await m.create(manualFts);
         await m.create(manualEntriesAfterInsert);
         await m.create(manualEntriesAfterDelete);
@@ -109,15 +115,18 @@ class DatabaseService extends _$DatabaseService {
 
   /// Exact fault-code lookup — the structured path, **not** full-text search.
   ///
-  /// [code] is canonicalised before comparison and the stored value is compared
-  /// case-insensitively, so `" e-204 "` finds `E-204`. Returns `null` when the
-  /// code is unknown, and the first match (by id) in the pathological case of a
-  /// code shared by several entries.
+  /// [code] is canonicalised before comparison, and `manual_entries.code` is
+  /// declared `COLLATE NOCASE`, so `" e-204 "` finds `E-204` *through*
+  /// `idx_manual_entries_code`. Comparing `upper(code)` instead would wrap the
+  /// column in a function and force a full table scan.
+  ///
+  /// Returns `null` when the code is unknown, and the first match (by id) in the
+  /// pathological case of a code shared by several entries.
   Future<ManualEntryRow?> manualEntryByCode(String code) {
     final normalized = normalizeFaultCode(code);
     if (normalized.isEmpty) return Future.value();
     final query = select(manualEntries)
-      ..where((t) => t.code.upper().equals(normalized))
+      ..where((t) => t.code.equals(normalized))
       ..orderBy([(t) => OrderingTerm.asc(t.id)])
       ..limit(1);
     return query.getSingleOrNull();
@@ -133,15 +142,52 @@ class DatabaseService extends _$DatabaseService {
   Future<List<ManualEntryRow>> searchManualEntries(
     String rawQuery, {
     int limit = 10,
+  }) => searchManualEntriesByTerms(
+    FtsQuerySanitizer.terms(rawQuery),
+    limit: limit,
+  );
+
+  /// Ranked full-text search over an already-extracted term list.
+  ///
+  /// This is the entry point for the retrieval router (Task 1.4), which pulls a
+  /// fault code out of the raw text, handles it through [manualEntryByCode], and
+  /// searches on what remains. Routing through here rather than the generated
+  /// `searchManualEntriesRanked` keeps the empty-expression guard attached to the
+  /// expression builder: a query consisting *only* of a fault code leaves no
+  /// residual terms, and an empty `MATCH` is an FTS5 syntax error, not an empty
+  /// result.
+  Future<List<ManualEntryRow>> searchManualEntriesByTerms(
+    Iterable<String> terms, {
+    int limit = 10,
   }) async {
-    final match = FtsQuerySanitizer.sanitize(rawQuery);
+    final match = FtsQuerySanitizer.sanitizeTerms(terms);
     if (match.isEmpty) return const [];
     return searchManualEntriesRanked(match, limit).get();
   }
 
-  /// Number of rows in the FTS5 index. Distinct from `manual_entries` row count:
-  /// this reads the index itself, so it proves the sync triggers ran.
-  Future<int> manualFtsRowCount() => countManualFtsRows().getSingle();
+  /// Number of documents present in the FTS5 **index**, which is not the same as
+  /// the `manual_entries` row count.
+  ///
+  /// On an external-content table an unconstrained `SELECT COUNT(*) FROM
+  /// manual_fts` is answered by scanning the *content* table, so it returns 3 even
+  /// with every sync trigger dropped. `manual_fts_docsize` is the shadow table
+  /// holding one row per indexed document, so reading it is what actually proves
+  /// the triggers ran.
+  Future<int> manualFtsIndexedDocumentCount() async {
+    final row = await customSelect(
+      'SELECT COUNT(*) AS c FROM manual_fts_docsize',
+      readsFrom: {manualFts},
+    ).getSingle();
+    return row.read<int>('c');
+  }
+
+  /// Rebuilds the FTS5 index from `manual_entries`.
+  ///
+  /// The index is keyed by `manual_entries.rowid`. Nothing in the app renumbers
+  /// rowids today, but an operation that does (`VACUUM INTO`, a table rewrite in
+  /// a future migration) would silently desync the index; this is the recovery.
+  Future<void> rebuildManualFtsIndex() =>
+      customStatement("INSERT INTO manual_fts(manual_fts) VALUES('rebuild')");
 }
 
 /// Decoding helpers for the JSON-encoded list columns on `manual_entries`.

@@ -116,10 +116,13 @@ they are deliberately different:
   least as often as the symptom paragraph. Results are ranked with `bm25()`,
   weighted to favour a title hit over the procedure body.
 - **Fault code → exact match.** The `code` column (`E-102`) is a **structured
-  column, queried by equality**, and is deliberately *not* in the index. Codes
-  tokenize badly — `E-102` becomes the junk token `e` plus `102`, which both
-  dilutes the index and throws away the identifier's precision. Codes are
-  canonicalised (trimmed, upper-cased) on write and on lookup.
+  column, queried by equality** through `idx_manual_entries_code`, and is
+  deliberately *not* in the FTS index. Codes tokenize badly — `E-102` becomes the
+  junk token `e` plus `102`, which both dilutes the index and throws away the
+  identifier's precision. Codes are canonicalised (trimmed, upper-cased) on
+  write, and the column is `COLLATE NOCASE` so lookups stay case-insensitive
+  *and* index-backed — comparing `upper(code)` instead would wrap the column in a
+  function and force a full table scan.
 
 The index is an **external-content** FTS5 table: the text is stored once in
 `manual_entries`, and three triggers (`AFTER INSERT`/`UPDATE`/`DELETE`) keep the

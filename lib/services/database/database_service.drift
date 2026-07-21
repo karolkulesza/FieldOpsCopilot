@@ -34,6 +34,10 @@ CREATE VIRTUAL TABLE manual_fts USING fts5 (
 -- on its own, so every mutation is mirrored here. Deletes/updates use the
 -- special `'delete'` command with the *old* values, which is how fts5 unwinds
 -- the previously indexed terms.
+--
+-- The index is keyed by `manual_entries.rowid`, so any operation that renumbers
+-- rowids (a `VACUUM INTO` backup, a table rewrite in a future migration) desyncs
+-- it silently. Recovery is `DatabaseService.rebuildManualFtsIndex`.
 CREATE TRIGGER manual_entries_after_insert AFTER INSERT ON manual_entries BEGIN
     INSERT INTO manual_fts (rowid, title, symptoms, procedure, section)
     VALUES (new.rowid, new.title, new.symptoms, new.procedure, new.section);
@@ -65,6 +69,8 @@ searchManualEntriesRanked(:match AS TEXT, :limit AS INT):
     ORDER BY bm25(manual_fts, 8.0, 4.0, 1.0, 1.0) ASC, manual_entries.id ASC
     LIMIT :limit;
 
--- Row count of the index itself (not of `manual_entries`), so a test can assert
--- the triggers actually populated fts5.
-countManualFtsRows: SELECT COUNT(*) AS c FROM manual_fts;
+-- NB: there is deliberately no `SELECT COUNT(*) FROM manual_fts` query here.
+-- On an external-content table that scan is serviced from `manual_entries`, so it
+-- reports content rows and stays correct even if the index is empty. To count
+-- *indexed* documents use `DatabaseService.manualFtsIndexedDocumentCount`, which
+-- reads the `manual_fts_docsize` shadow table.
