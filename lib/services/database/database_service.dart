@@ -125,12 +125,21 @@ class DatabaseService extends _$DatabaseService {
   Future<ManualEntryRow?> manualEntryByCode(String code) {
     final normalized = normalizeFaultCode(code);
     if (normalized.isEmpty) return Future.value();
-    final query = select(manualEntries)
-      ..where((t) => t.code.equals(normalized))
-      ..orderBy([(t) => OrderingTerm.asc(t.id)])
-      ..limit(1);
-    return query.getSingleOrNull();
+    return manualEntryByCodeQuery(normalized).getSingleOrNull();
   }
+
+  /// The statement [manualEntryByCode] runs, for an already-canonicalised
+  /// [normalizedCode].
+  ///
+  /// Exposed so a test can inspect the SQL drift actually emits — asserting the
+  /// query plan of a hand-written equivalent would keep passing if this method
+  /// regressed to wrapping the column in `upper(...)`, which is exactly the
+  /// regression worth guarding.
+  SimpleSelectStatement<$ManualEntriesTable, ManualEntryRow>
+  manualEntryByCodeQuery(String normalizedCode) => select(manualEntries)
+    ..where((t) => t.code.equals(normalizedCode))
+    ..orderBy([(t) => OrderingTerm.asc(t.id)])
+    ..limit(1);
 
   /// Ranked full-text search over the manual's prose columns.
   ///
@@ -173,10 +182,15 @@ class DatabaseService extends _$DatabaseService {
   /// with every sync trigger dropped. `manual_fts_docsize` is the shadow table
   /// holding one row per indexed document, so reading it is what actually proves
   /// the triggers ran.
+  ///
+  /// `manual_fts_docsize` exists because fts5 defaults to `columnsize=1`; adding
+  /// `columnsize=0` to the virtual-table options would drop the shadow table and
+  /// break this query. `readsFrom` names `manual_entries` as well as the index,
+  /// because writes to the content table are what change the answer.
   Future<int> manualFtsIndexedDocumentCount() async {
     final row = await customSelect(
       'SELECT COUNT(*) AS c FROM manual_fts_docsize',
-      readsFrom: {manualFts},
+      readsFrom: {manualFts, manualEntries},
     ).getSingle();
     return row.read<int>('c');
   }

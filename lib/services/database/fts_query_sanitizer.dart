@@ -67,14 +67,24 @@ class FtsQuerySanitizer {
     return out;
   }
 
-  /// Builds an `OR`-joined FTS5 expression from already-extracted [terms].
+  /// Builds an `OR`-joined FTS5 expression from a list of terms.
   ///
-  /// Each term becomes a quoted phrase. Inside an FTS5 string literal the only
-  /// special character is `"`, escaped by doubling it; [terms] never produces
-  /// one, but the escape is applied anyway so a hand-built term list cannot
-  /// inject syntax.
-  static String sanitizeTerms(Iterable<String> terms) => terms
-      .where((t) => t.isNotEmpty)
+  /// Each entry of [rawTerms] is put through [terms] first, so a caller-supplied
+  /// list gets exactly the same treatment as raw text: syntax characters are
+  /// stripped, a chunk with nothing searchable in it disappears entirely, and the
+  /// [maxTerms] cap applies. That keeps this method safe for the retrieval router
+  /// (Task 1.4) to call with terms it assembled itself, and it is idempotent on
+  /// output from [terms] — re-normalising an already-normalised term is a no-op.
+  ///
+  /// Each surviving term becomes a quoted phrase. Inside an FTS5 string literal
+  /// the only special character is `"`, escaped by doubling it; normalisation
+  /// already removes quotes, so the escape below is belt-and-braces.
+  ///
+  /// Returns an empty string when nothing searchable survives — see [sanitize]
+  /// for why the caller must not pass that to `MATCH`.
+  static String sanitizeTerms(Iterable<String> rawTerms) => rawTerms
+      .expand(terms)
+      .take(maxTerms)
       .map((t) => '"${t.replaceAll('"', '""')}"')
       .join(' OR ');
 }

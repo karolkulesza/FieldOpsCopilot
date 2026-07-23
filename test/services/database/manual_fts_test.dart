@@ -265,19 +265,66 @@ void main() {
     });
 
     test('the lookup uses the code index rather than scanning', () async {
-      // Guards the reason `code` is COLLATE NOCASE instead of upper(code): a
-      // function around the column would silently drop back to a full scan.
+      // Explains the SQL `manualEntryByCode` *actually emits*, not a hand-written
+      // equivalent: explaining a literal string would stay green if the method
+      // regressed to `upper(code)`, since the string would still say `code = ?`.
+      final context = db.manualEntryByCodeQuery('E-204').constructQuery();
+
+      // The regression this guards: any function around the column makes the
+      // index unusable.
+      expect(context.sql, isNot(contains('upper(')));
+      expect(context.sql, contains('code'));
+
       final plan = await db
           .customSelect(
-            'EXPLAIN QUERY PLAN SELECT * FROM manual_entries '
-            'WHERE code = ?1 ORDER BY id LIMIT 1',
-            variables: [Variable<String>('E-204')],
+            'EXPLAIN QUERY PLAN ${context.sql}',
+            variables: context.boundVariables
+                .map((v) => Variable<Object>(v as Object))
+                .toList(),
           )
           .get();
 
       expect(
         plan.map((r) => r.read<String>('detail')).join('\n'),
         contains('idx_manual_entries_code'),
+      );
+    });
+
+    test('a code stored in lower case is still found', () async {
+      // The one scenario that justifies COLLATE NOCASE over a plain `.equals()`:
+      // a write path that skips `upsertManualEntries` (Task 1.3's seeder is the
+      // obvious candidate) and therefore never canonicalises the code. Inserting
+      // through `into(...)` deliberately bypasses normalizeFaultCode, so the
+      // collation is the only thing that can make this match.
+      await db
+          .into(db.manualEntries)
+          .insert(
+            _seedEntries.first.copyWith(id: 'apex_9_err_666', code: 'e-666'),
+          );
+
+      final stored = await db.select(db.manualEntries).get();
+      expect(
+        stored.firstWhere((r) => r.id == 'apex_9_err_666').code,
+        'e-666',
+        reason:
+            'the row must really be stored lower-case for this to mean '
+            'anything',
+      );
+
+      expect((await db.manualEntryByCode('E-666'))?.id, 'apex_9_err_666');
+    });
+
+    test('the code column is NOT NULL', () async {
+      // `customConstraint` replaces drift's entire generated constraint string,
+      // so NOT NULL is restated by hand there — a typo would drop it silently
+      // along with the collation.
+      await expectLater(
+        db.customStatement(
+          "INSERT INTO manual_entries "
+          '(id, section, code, title, symptoms, procedure) '
+          "VALUES ('x', 's', NULL, 't', 'sy', 'p')",
+        ),
+        throwsA(isA<SqliteException>()),
       );
     });
 
@@ -335,6 +382,10 @@ void main() {
       final terms = FtsQuerySanitizer.terms('E-102');
       expect(terms, ['E-102']);
 
+      // Both reach the empty-expression guard: `sanitizeTerms` normalises each
+      // incoming term the same way raw text is normalised, so a whitespace-only
+      // term disappears rather than becoming the phrase `"   "`.
+      expect(FtsQuerySanitizer.sanitizeTerms(const ['   ']), isEmpty);
       expect(await db.searchManualEntriesByTerms(const []), isEmpty);
       expect(await db.searchManualEntriesByTerms(const ['   ']), isEmpty);
 
@@ -398,10 +449,48 @@ void main() {
       );
     });
 
-    test('a hand-built term containing a quote is escaped, not injected', () {
+    test('a hand-built term with syntax in it cannot inject', () async {
       // terms() can never emit a double quote, but sanitizeTerms is public for
-      // the retrieval router (Task 1.4); it must still be injection-proof.
-      expect(FtsQuerySanitizer.sanitizeTerms(['a" OR b']), '"a"" OR b"');
+      // the retrieval router (Task 1.4), so it normalises what it is given: the
+      // quote is stripped rather than merely escaped, and the operator word ends
+      // up quoted like any other term.
+      expect(
+        FtsQuerySanitizer.sanitizeTerms(['a" OR b']),
+        '"a" OR "OR" OR "b"',
+      );
+
+      // A caller-supplied phrase is split into terms rather than trusted.
+      expect(
+        FtsQuerySanitizer.sanitizeTerms(['door belt', 'brake*']),
+        '"door" OR "belt" OR "brake"',
+      );
+
+      // And the cap applies to caller-supplied lists too.
+      expect(
+        FtsQuerySanitizer.sanitizeTerms(
+          List.generate(FtsQuerySanitizer.maxTerms + 5, (i) => 'term$i'),
+        ).split(' OR '),
+        hasLength(FtsQuerySanitizer.maxTerms),
+      );
+
+      await expectLater(
+        db.searchManualEntriesByTerms(['a" OR b', 'NEAR(x y, 2)']),
+        completes,
+      );
+    });
+
+    test('combining marks stay attached to their term', () {
+      // Decomposed "café" — `e` plus U+0301 COMBINING ACUTE ACCENT. Without
+      // \p{M} in the allowlist the mark is stripped and the term silently
+      // becomes "cafe", tokenizing differently from the composed form.
+      // Escapes, not literal marks, so the decomposition survives editing.
+      expect(FtsQuerySanitizer.terms('cafe\u0301 brake'), [
+        'cafe\u0301',
+        'brake',
+      ]);
+
+      // A chunk of marks with no letter or digit is still dropped.
+      expect(FtsQuerySanitizer.terms('\u0301\u0308'), isEmpty);
     });
 
     test('every sanitized query is accepted by FTS5', () async {
