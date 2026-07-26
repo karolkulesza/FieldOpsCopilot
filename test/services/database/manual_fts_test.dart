@@ -271,9 +271,12 @@ void main() {
       final context = db.manualEntryByCodeQuery('E-204').constructQuery();
 
       // The regression this guards: any function around the column makes the
-      // index unusable.
-      expect(context.sql, isNot(contains('upper(')));
-      expect(context.sql, contains('code'));
+      // index unusable. Matched case-insensitively — drift emits `UPPER(`, so a
+      // lower-case-only matcher would accept the very mutation it exists to
+      // catch — and the bare column comparison is asserted positively, since
+      // `UPPER("code") = ?` contains `"code"` but not `"code" =`.
+      expect(context.sql.toLowerCase(), isNot(contains('upper(')));
+      expect(context.sql, contains('"code" ='));
 
       final plan = await db
           .customSelect(
