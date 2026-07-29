@@ -1,8 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- fullBackupContent / dataExtractionRules keep provisioned model weights
+         out of backups; see the two rule files for why. fullBackupContent covers
+         Android 11 and below, dataExtractionRules Android 12+, so both are
+         needed to cover the supported range. -->
     <application
         android:label="field_ops_copilot"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules">
         <activity
             android:name=".MainActivity"
             android:exported="true"

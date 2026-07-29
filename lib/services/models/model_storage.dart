@@ -208,42 +208,81 @@ class NoopBackupExclusion implements BackupExclusion {
   Future<bool> exclude(Directory directory) async => false;
 }
 
+/// How the running platform keeps a directory out of backups.
+enum BackupExclusionMechanism {
+  /// Declared in the app manifest, before the app ever runs (Android). There is
+  /// nothing to call at runtime.
+  manifest,
+
+  /// A per-URL resource attribute that only native code can set
+  /// (`NSURLIsExcludedFromBackupKey` on iOS/macOS), reached over a method
+  /// channel.
+  resourceAttribute,
+
+  /// No mechanism — a host test runner, or a platform this app does not ship on.
+  none,
+}
+
 /// Real per-platform no-backup marking.
 ///
-/// The two platforms do this in completely different places:
+/// The platforms do this in completely different places, which is why the
+/// mechanism is named rather than hidden:
 ///
-/// * **iOS/macOS** — a per-URL resource attribute (`NSURLIsExcludedFromBackupKey`)
-///   that only native code can set, so it goes over a method channel handled in
-///   `AppDelegate.swift`.
-/// * **Android** — declarative, in the manifest: `android:fullBackupContent` and
-///   `android:dataExtractionRules` point at XML rules that exclude `files/models`
-///   from both auto-backup and device-to-device transfer. There is nothing to
-///   call at runtime, which is why this reports `true` without a channel hop.
+/// * **Android** — `android:fullBackupContent` and `android:dataExtractionRules`
+///   in `AndroidManifest.xml` point at XML rules excluding `files/models` from
+///   both cloud auto-backup and device-to-device transfer. Static, so it reports
+///   [BackupExclusionMechanism.manifest] without a channel hop.
+/// * **iOS/macOS** — `NSURLIsExcludedFromBackupKey` on the directory URL, set in
+///   `ios/Runner/AppDelegate.swift` and invoked over [channel].
 class PlatformBackupExclusion implements BackupExclusion {
-  const PlatformBackupExclusion();
+  /// [mechanism] exists so tests can exercise a platform's path on any host: the
+  /// unit suite runs on macOS locally and Linux in CI, and a check that silently
+  /// takes a different branch per runner is not a check.
+  const PlatformBackupExclusion({this._mechanism});
 
-  /// Channel implemented in `ios/Runner/AppDelegate.swift`.
+  final BackupExclusionMechanism? _mechanism;
+
+  /// Channel implemented in `ios/Runner/AppDelegate.swift`. The method name and
+  /// argument key here are a contract with that file.
   static const MethodChannel channel = MethodChannel(
     'field_ops_copilot/model_storage',
   );
 
+  /// The mechanism in force, defaulting to the one the host platform provides.
+  BackupExclusionMechanism get mechanism => _mechanism ?? mechanismFor();
+
+  /// The mechanism the current platform provides.
+  static BackupExclusionMechanism mechanismFor() {
+    if (Platform.isAndroid) return BackupExclusionMechanism.manifest;
+    if (Platform.isIOS || Platform.isMacOS) {
+      return BackupExclusionMechanism.resourceAttribute;
+    }
+    return BackupExclusionMechanism.none;
+  }
+
   @override
   Future<bool> exclude(Directory directory) async {
-    // Handled declaratively by the manifest backup rules; see class docs.
-    if (Platform.isAndroid) return true;
-    if (!Platform.isIOS && !Platform.isMacOS) return false;
-    try {
-      final excluded = await channel.invokeMethod<bool>('excludeFromBackup', {
-        'path': directory.path,
-      });
-      return excluded ?? false;
-    } on MissingPluginException {
-      // No native handler (e.g. a host test): report the truth, do not fail
-      // provisioning over a backup flag.
-      return false;
-    } on PlatformException catch (error) {
-      debugPrint('model backup exclusion failed: ${error.message}');
-      return false;
+    switch (mechanism) {
+      case BackupExclusionMechanism.manifest:
+        return true;
+      case BackupExclusionMechanism.none:
+        return false;
+      case BackupExclusionMechanism.resourceAttribute:
+        try {
+          final excluded = await channel.invokeMethod<bool>(
+            'excludeFromBackup',
+            {'path': directory.path},
+          );
+          return excluded ?? false;
+        } on MissingPluginException {
+          // No native handler (a host test, or a platform target that was never
+          // built): report the truth. Never fail provisioning over a backup flag
+          // — a model that downloaded fine is still usable.
+          return false;
+        } on PlatformException catch (error) {
+          debugPrint('model backup exclusion failed: ${error.message}');
+          return false;
+        }
     }
   }
 }
