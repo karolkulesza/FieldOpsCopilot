@@ -58,6 +58,85 @@ void main() {
     });
   });
 
+  group('transport encoding', () {
+    // Regression for R0-F2. With HttpClient's default `autoUncompress`, the
+    // declared Content-Length describes the *encoded* body while the stream yields
+    // *decoded* bytes — so a host (or a TLS-terminating proxy) that gzips the
+    // artifact made every download fail as "truncated transfer: received 13000 of
+    // 95 bytes", and progress pinned at 100% from the first chunk.
+    test('asks the server not to content-encode the artifact', () async {
+      final downloader = HttpModelDownloader();
+      addTearDown(downloader.close);
+
+      await _collect((await downloader.open(origin.uri('/model'))).bytes);
+
+      expect(origin.requests.single.acceptEncoding, 'identity');
+    });
+
+    test(
+      'a content-encoded body is rejected by name, not silently hashed',
+      () async {
+        origin.gzipBody = true;
+        final downloader = HttpModelDownloader();
+        addTearDown(downloader.close);
+
+        // The pin describes the artifact as published, so encoded bytes cannot be
+        // verified against it — and inflating them would hash something the
+        // publisher never hashed.
+        await expectLater(
+          downloader.open(origin.uri('/model')),
+          throwsA(
+            isA<ModelDownloadException>().having(
+              (e) => e.message,
+              'message',
+              contains('Content-Encoding'),
+            ),
+          ),
+        );
+      },
+    );
+
+    test('an explicit identity encoding is accepted', () async {
+      origin.identityEncodingHeader = true;
+      final downloader = HttpModelDownloader();
+      addTearDown(downloader.close);
+
+      final stream = await downloader.open(origin.uri('/model'));
+
+      expect(await _collect(stream.bytes), body);
+      expect(stream.contentLength, body.length);
+    });
+
+    test('the transport never transparently inflates a body', () {
+      // Asserted on the client rather than through a request on purpose. Probed on
+      // Dart 3.12.2: `HttpClient` leaves `Content-Encoding: gzip` on the response
+      // headers even when it inflates the body, so the rejection above fires
+      // either way and *cannot* observe this setting. That makes the header check
+      // the functional fix and this the belt-and-braces one: if a later change
+      // ever accepted an encoded body, it would be hashed as published rather
+      // than silently inflated into bytes the publisher never hashed.
+      final client = HttpClient();
+      addTearDown(() => client.close(force: true));
+
+      HttpModelDownloader(client: client);
+
+      expect(client.autoUncompress, isFalse);
+    });
+
+    test('the declared length describes the bytes actually delivered', () async {
+      // The property R0-F2 broke: whatever the server says Content-Length is, the
+      // stream must deliver exactly that many bytes, or the provisioner's
+      // truncation check is comparing two different quantities.
+      final downloader = HttpModelDownloader();
+      addTearDown(downloader.close);
+
+      final stream = await downloader.open(origin.uri('/model'));
+      final received = await _collect(stream.bytes);
+
+      expect(received.length, stream.contentLength);
+    });
+  });
+
   group('credentials across redirects', () {
     test('sends the token as a bearer credential', () async {
       final downloader = HttpModelDownloader();
@@ -247,10 +326,15 @@ Future<List<int>> _collect(Stream<List<int>> stream) async {
 
 /// One observed request: enough to assert what the client actually sent.
 class _SeenRequest {
-  _SeenRequest({required this.path, required this.authorization});
+  _SeenRequest({
+    required this.path,
+    required this.authorization,
+    required this.acceptEncoding,
+  });
 
   final String path;
   final String? authorization;
+  final String? acceptEncoding;
 }
 
 /// A loopback stand-in for a license-gated model host.
@@ -279,6 +363,13 @@ class _FakeModelHost {
   /// Whether `/model` answers without a `Content-Length` (chunked).
   bool chunked = false;
 
+  /// Whether `/model` gzips the body and declares `Content-Encoding: gzip`, the
+  /// way a compressing origin or an intercepting proxy would.
+  bool gzipBody = false;
+
+  /// Whether `/model` declares the (no-op) `Content-Encoding: identity`.
+  bool identityEncodingHeader = false;
+
   final List<_SeenRequest> requests = [];
 
   Uri uri(String path) =>
@@ -291,6 +382,9 @@ class _FakeModelHost {
         _SeenRequest(
           path: path,
           authorization: request.headers.value(HttpHeaders.authorizationHeader),
+          acceptEncoding: request.headers.value(
+            HttpHeaders.acceptEncodingHeader,
+          ),
         ),
       );
       final response = request.response;
@@ -322,6 +416,20 @@ class _FakeModelHost {
         return;
       }
 
+      if (gzipBody) {
+        // A compressing origin: the declared length is the *encoded* length,
+        // which is the whole trap in R0-F2.
+        final encoded = gzip.encode(_body);
+        response.headers.set(HttpHeaders.contentEncodingHeader, 'gzip');
+        response.contentLength = encoded.length;
+        response.add(encoded);
+        await response.close();
+        return;
+      }
+
+      if (identityEncodingHeader) {
+        response.headers.set(HttpHeaders.contentEncodingHeader, 'identity');
+      }
       if (!chunked) response.contentLength = _body.length;
       // Two writes, so a chunked response really is chunked.
       response.add(_body.sublist(0, _body.length ~/ 2));

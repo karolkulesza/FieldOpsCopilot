@@ -32,6 +32,14 @@ enum ModelInstallStatus {
 /// startup instead. It is a *cache of a verification*, not a substitute for one:
 /// `ModelProvisioner.verifyInstalled` still re-hashes on demand, and the receipt
 /// is invalidated automatically whenever the pinned hash or the file size moves.
+///
+/// **Not a security control.** The receipt sits in the same app-writable directory
+/// as the weights, and its only link to the build is that its digest and size
+/// agree with the descriptor — so anything able to replace the artifact could make
+/// a receipt agree with it. Inside the iOS/Android sandbox that is fine, and it is
+/// why [ModelInstallStatus.ready] means "verified earlier, cheaply re-confirmed"
+/// rather than "these bytes are proven right now". The latter is what
+/// `ModelProvisioner.verifyInstalled` is for.
 @immutable
 class ModelInstallReceipt {
   const ModelInstallReceipt({
@@ -110,16 +118,64 @@ class ModelStorage {
   /// way that looks like a model bug. Staging plus rename-after-verify makes the
   /// install atomic: the final path only ever appears complete and verified.
   ///
-  /// Note what this does *not* claim. Bytes that fail verification are deleted
-  /// immediately, including an already-installed artifact whose pinned hash has
-  /// moved; unverified weights must not stay loadable, so there is deliberately
-  /// no "keep the old copy until the new one arrives" behaviour to fall back on.
-  File stagingFile(ModelDescriptor descriptor) =>
-      File(p.join(root.path, '${descriptor.fileName}.part'));
+  /// [nonce] scopes the staging path to a single transfer. Two transfers sharing
+  /// one staging path is not merely wasteful, it is corrupting: POSIX `rename`
+  /// preserves the inode, so once the first transfer renames the staging file
+  /// into place, the second transfer's still-open sink keeps writing **into the
+  /// installed artifact** — bytes nothing hashed. A per-transfer name makes that
+  /// impossible regardless of how callers overlap.
+  File stagingFile(ModelDescriptor descriptor, {String? nonce}) => File(
+    p.join(
+      root.path,
+      nonce == null
+          ? '${descriptor.fileName}$stagingSuffix'
+          : '${descriptor.fileName}$stagingSuffix.$nonce',
+    ),
+  );
+
+  /// Suffix marking a file as an in-progress or abandoned transfer.
+  static const String stagingSuffix = '.part';
+
+  /// Deletes every staging file for [descriptor], whatever its nonce.
+  ///
+  /// A process killed mid-transfer leaves its `.part.<nonce>` behind with nothing
+  /// to resume it, so those bytes are swept rather than accumulated — a
+  /// half-downloaded 2.4GB artifact is real disk pressure on a rugged device.
+  /// [keep] spares the caller's own in-flight file.
+  Future<void> deleteStagingFiles(
+    ModelDescriptor descriptor, {
+    File? keep,
+  }) async {
+    if (!await root.exists()) return;
+    final prefix = '${descriptor.fileName}$stagingSuffix';
+    await for (final entry in root.list(followLinks: false)) {
+      if (entry is! File) continue;
+      if (!p.basename(entry.path).startsWith(prefix)) continue;
+      if (keep != null && p.equals(entry.path, keep.path)) continue;
+      try {
+        await entry.delete();
+      } on FileSystemException {
+        // Another process may own it and be mid-transfer; leaving it is safe —
+        // nothing installs from a staging path.
+        continue;
+      }
+    }
+  }
 
   /// Sidecar holding the [ModelInstallReceipt] for an installed artifact.
   File receiptFile(ModelDescriptor descriptor) =>
       File(p.join(root.path, '${descriptor.fileName}.receipt.json'));
+
+  /// Deletes the receipt for [descriptor], if there is one.
+  ///
+  /// Called whenever a verification fails, because a receipt can outlive its
+  /// artifact: if the multi-gigabyte file is later removed by hand to free space,
+  /// a stale receipt would bless the next same-sized file to appear at that path —
+  /// including a side-load nobody hashed.
+  Future<void> deleteReceipt(ModelDescriptor descriptor) async {
+    final file = receiptFile(descriptor);
+    if (await file.exists()) await file.delete();
+  }
 
   /// Creates the directory and applies the platform's no-backup marking.
   ///
@@ -195,7 +251,16 @@ class ModelStorage {
 abstract interface class BackupExclusion {
   /// Applies the platform's no-backup marking to [directory].
   ///
-  /// Returns `true` only when exclusion is genuinely in force.
+  /// Returns `true` when exclusion is in force *as far as this platform can
+  /// report*. Read that precisely, because the two platforms differ in kind:
+  ///
+  /// * iOS/macOS — **observed.** A native call either set the attribute or
+  ///   failed, and the result says which.
+  /// * Android — **declared.** The exclusion lives in the manifest and is applied
+  ///   by the OS at backup time; there is nothing to call and nothing to observe
+  ///   at runtime, so `true` here means "the app declares it", not "the OS was
+  ///   seen honouring it". Evidence for that leg is the merged manifest at build
+  ///   time, not this return value.
   Future<bool> exclude(Directory directory);
 }
 
@@ -263,6 +328,9 @@ class PlatformBackupExclusion implements BackupExclusion {
   @override
   Future<bool> exclude(Directory directory) async {
     switch (mechanism) {
+      // Declared, not observed — see [BackupExclusion.exclude]. Nothing to call:
+      // the manifest rules are what exclude the directory, and the OS applies
+      // them at backup time.
       case BackupExclusionMechanism.manifest:
         return true;
       case BackupExclusionMechanism.none:
