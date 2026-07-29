@@ -21,7 +21,7 @@ void main() {
   late ModelStorage storage;
 
   /// A stand-in artifact. Small, but exercised through the same streaming
-  /// hash-while-writing path a 2.4GB file uses.
+  /// hash-while-writing path a 2.6GB file uses.
   final fixtureBytes = Uint8List.fromList(
     utf8.encode('gemma-4-e2b weights stand-in ' * 40),
   );
@@ -166,7 +166,7 @@ void main() {
           (result as ModelVerified).source,
           ModelVerificationSource.existingFile,
         );
-        // The point of the flow: no 2.4GB transfer over venue Wi-Fi.
+        // The point of the flow: no 2.6GB transfer over venue Wi-Fi.
         expect(downloader.openCount, 0);
         // And it is now cheap to answer on the next launch.
         expect(await storage.statusOf(descriptor), ModelInstallStatus.ready);
@@ -351,7 +351,7 @@ void main() {
       );
       expect(await storage.statusOf(descriptor), ModelInstallStatus.ready);
       // Serialised, so the second caller found the first one's work done rather
-      // than starting a redundant 2.4GB transfer.
+      // than starting a redundant 2.6GB transfer.
       expect(downloader.openCount, 1);
       expect(
         (results[1] as ModelVerified).source,
@@ -922,7 +922,7 @@ void main() {
           await storage.installedFile(descriptor).readAsBytes(),
           fixtureBytes,
         );
-        // …and they are gone, rather than a half-downloaded 2.4GB file sitting on
+        // …and they are gone, rather than a half-downloaded 2.6GB file sitting on
         // a rugged device forever.
         expect(
           await _stagingLeftovers(storage, descriptor),

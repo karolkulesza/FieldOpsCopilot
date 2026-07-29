@@ -26,7 +26,7 @@ enum ModelInstallStatus {
 
 /// Proof that a specific artifact was verified against a specific pinned hash.
 ///
-/// Re-hashing 2.4GB on every launch to answer "is the model ready?" would cost
+/// Re-hashing 2.6GB on every launch to answer "is the model ready?" would cost
 /// seconds of I/O and battery on the exact devices this app targets. The receipt
 /// is written once, immediately after a successful verification, and read on
 /// startup instead. It is a *cache of a verification*, not a substitute for one:
@@ -81,7 +81,7 @@ class ModelInstallReceipt {
 ///
 /// Weights live in the **application-support directory** (not the cache
 /// directory): iOS may evict `Library/Caches` under storage pressure, and a
-/// technician in a basement with no connectivity cannot re-download 2.4GB. The
+/// technician in a basement with no connectivity cannot re-download 2.6GB. The
 /// directory is marked *excluded from backup* instead, so multi-gigabyte weights
 /// never pollute an iCloud or Android auto-backup — they are reproducible from
 /// the source URL, which is exactly what a backup should not carry.
@@ -141,7 +141,7 @@ class ModelStorage {
   ///
   /// A process killed mid-transfer leaves its `.part.<nonce>` behind with nothing
   /// to resume it, so those bytes are swept rather than accumulated — a
-  /// half-downloaded 2.4GB artifact is real disk pressure on a rugged device.
+  /// half-downloaded 2.6GB artifact is real disk pressure on a rugged device.
   ///
   /// Be clear about what this does to a *concurrent* writer, because it is not
   /// gentle: on POSIX the unlink **succeeds** even while another writer holds the

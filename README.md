@@ -158,37 +158,64 @@ ranking. Strict `AND` would let one unmatched word return nothing.
 
 ## Model provisioning
 
-The language model is **not in this repository and cannot be**. Gemma weights are
-license-gated — you accept Google's Gemma terms on HuggingFace or Kaggle and
-download with a personal access token — and the artifact is 0.5–2.4GB, well past
-what belongs in git or in an app-store binary. So the app ships a *description* of
-the artifact it expects and fetches the bytes at runtime.
+The language model is **not in this repository and cannot be**. The artifact is
+0.6–2.6GB, well past what belongs in git or in an app-store binary, and its use is
+governed by [Google's Gemma terms](https://ai.google.dev/gemma/terms). So the app
+ships a *description* of the artifact it expects and fetches the bytes at runtime.
+
+Whether a **download** needs an access token is a per-repository fact, not a
+property of Gemma, and this is worth stating precisely because the task this was
+built from assumed otherwise. Measured against the live hosts on 2026-07-30: the
+LiteRT-LM rebuild `litert-community/gemma-4-E2B-it-litert-lm` reports
+`gated: false` and serves an anonymous request, while
+`litert-community/Gemma3-1B-IT` reports `gated: auto` and does need a token.
+Accepting the licence still governs *using* the model either way. Provisioning
+therefore treats the URL and the token as independent inputs and assumes neither.
 
 ### Getting the weights (what a reviewer has to do)
 
-1. **Accept the [Gemma terms](https://ai.google.dev/gemma/terms)** for the model
-   you want, with the account that will issue the token:
-   - Gemma 4 E2B (INT4, LiteRT-LM) — the primary target, ~2.4GB
-   - Gemma 3 1B (INT4, LiteRT-LM) — the low-RAM alternative, ~0.5GB
+1. **Accept the [Gemma terms](https://ai.google.dev/gemma/terms)** — this governs
+   use of the model regardless of how you obtain it.
+2. **Pick the artifact.** LiteRT-LM builds live in repositories separate from the
+   base models; `litert-community` publishes the current ones (on HuggingFace,
+   [search `gemma litert`](https://huggingface.co/models?search=gemma+litert)). The
+   two this catalog names:
 
-   The LiteRT-LM builds are published as separate repositories from the base
-   models; find the current one for your target (on HuggingFace,
-   [search `gemma litert`](https://huggingface.co/models?search=gemma+litert)).
-   No specific repository URL is hard-coded in this repo on purpose — see the note
-   below.
-2. **Create an access token** on that account.
-3. **Copy the direct download URL** for the exact file you licensed, and
-4. **compute its SHA-256** — `shasum -a 256 <file>` — either by downloading it once
-   yourself, or from the checksum the host publishes for that revision.
-5. Run with all three supplied:
+   | Target | Repository → file | Size | Token |
+   |---|---|---|---|
+   | Gemma 4 E2B — primary | `litert-community/gemma-4-E2B-it-litert-lm` → `gemma-4-E2B-it.litertlm` | 2.59 GB | not needed |
+   | Gemma 3 1B — low-RAM fallback | `litert-community/Gemma3-1B-IT` → `gemma3-1b-it-int4.litertlm` | 0.58 GB | needed (`gated: auto`) |
+
+   The same repositories also carry NPU-specific builds (`_Google_Tensor_G5`,
+   `_qualcomm_*`, `_intel_*`) and `-web` variants; the plain file is the portable
+   one.
+3. **Get the SHA-256 without downloading the artifact.** HuggingFace's
+   `paths-info` API returns the LFS object id, which is the content digest:
+
+   ```bash
+   curl -s -X POST \
+     https://huggingface.co/api/models/litert-community/gemma-4-E2B-it-litert-lm/paths-info/main \
+     -H 'Content-Type: application/json' \
+     -d '{"paths":["gemma-4-E2B-it.litertlm"]}' | jq -r '.[0].lfs.oid'
+   ```
+
+   Or hash a copy you already have: `shasum -a 256 <file>`. If the two ever
+   disagree, trust the file — provisioning reports both digests on a mismatch, so a
+   wrong pin is diagnosable rather than mysterious.
+4. **Run with the URL and hash supplied** (add `FIELDOPS_MODEL_TOKEN=<token>` only
+   for a gated source):
 
 ```bash
 flutter run \
   --dart-define=FIELDOPS_MODEL_ID=gemma-4-e2b-it-int4 \
-  --dart-define=FIELDOPS_MODEL_URI=https://…/gemma-4-e2b-it-int4.litertlm \
-  --dart-define=FIELDOPS_MODEL_SHA256=<64 hex chars> \
-  --dart-define=FIELDOPS_MODEL_TOKEN=<access token>
+  --dart-define=FIELDOPS_MODEL_URI=https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm \
+  --dart-define=FIELDOPS_MODEL_SHA256=181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c
 ```
+
+Point at the `huggingface.co/…/resolve/…` URL rather than the CDN URL it redirects
+to — the latter is signed and short-lived. That redirect is cross-origin, which is
+the case the transport's credential scoping exists for: a token, if you supply one,
+is not forwarded to the download host.
 
 **Why the URL and hash are build inputs rather than constants in the source.** A
 URL is revision-specific and a hash is bytes-specific. Hard-coding either would
@@ -214,7 +241,7 @@ model.
 
 1. **Nothing, if a receipt already vouches for the file.** A successful
    verification writes a small sidecar recording the digest and size, so the
-   startup readiness check costs no re-hash of 2.4GB. The receipt is invalidated
+   startup readiness check costs no re-hash of 2.6GB. The receipt is invalidated
    automatically if the pinned hash moves or the file's size changes. It is a cache
    of a verification, not a security control — it sits in the same app-writable
    directory as the weights, which is why `ready` means "verified earlier, cheaply
@@ -246,7 +273,7 @@ model.
 
 Storage is the **application-support directory**, not the cache directory: iOS may
 evict `Library/Caches` under storage pressure, and a technician in a basement
-cannot re-download 2.4GB. It is marked excluded from backup instead — multi-
+cannot re-download 2.6GB. It is marked excluded from backup instead — multi-
 gigabyte weights are reproducible from their source URL, so backing them up burns
 the user's iCloud or Android backup quota for no recovery value. The two platforms
 do this in completely different places, and both are wired up:
@@ -336,8 +363,8 @@ Tests are split into two tiers:
   backends. `flutter test` does not pick this directory up, so CI stays host-only.
   `model_provisioning_test.dart` (TC-PROV-E2E-01) does a real download-verify-
   install on a device; it **skips** with an actionable message unless the model
-  defines above are supplied, because the weights are license-gated and CI must
-  never try to fetch them.
+  defines above are supplied, because CI has no artifact to fetch and must not pull
+  gigabytes over the network to try.
 
 ## Tech stack
 
