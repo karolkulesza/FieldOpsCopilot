@@ -8,7 +8,7 @@ import '../../services/models/providers.dart';
 /// Shows whether verified model weights are present on this device.
 ///
 /// This exists because of a demo-day failure mode, not for decoration: a
-/// first-run download of 2.4GB over venue Wi-Fi is a coin flip, so the model is
+/// first-run download of 2.6GB over venue Wi-Fi is a coin flip, so the model is
 /// pre-installed and the app has to make "are the weights actually here, and did
 /// they verify?" visible *before* someone taps Diagnose. The four states below
 /// are exactly the four answers the provisioner can give.
