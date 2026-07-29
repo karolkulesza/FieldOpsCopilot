@@ -189,8 +189,15 @@ therefore treats the URL and the token as independent inputs and assumes neither
    The same repositories also carry NPU-specific builds (`_Google_Tensor_G5`,
    `_qualcomm_*`, `_intel_*`) and `-web` variants; the plain file is the portable
    one.
-3. **Get the SHA-256 without downloading the artifact.** HuggingFace's
-   `paths-info` API returns the LFS object id, which is the content digest:
+3. **Get the SHA-256.** Hashing the artifact always works and is the answer if
+   anything below is ambiguous:
+
+   ```bash
+   shasum -a 256 <file>
+   ```
+
+   For a **public** repository you can skip the download entirely, because
+   HuggingFace publishes the LFS object id, which is the content digest:
 
    ```bash
    curl -s -X POST \
@@ -199,9 +206,25 @@ therefore treats the URL and the token as independent inputs and assumes neither
      -d '{"paths":["gemma-4-E2B-it.litertlm"]}' | jq -r '.[0].lfs.oid'
    ```
 
-   Or hash a copy you already have: `shasum -a 256 <file>`. If the two ever
-   disagree, trust the file — provisioning reports both digests on a mismatch, so a
-   wrong pin is diagnosable rather than mysterious.
+   For a **gated** repository this shortcut does not work unauthenticated, in two
+   different ways worth knowing before you trust the output: `paths-info` answers
+   `401 Access to model … is restricted`, and `…/tree/main` answers with the real
+   file size but the digest **redacted to 64 asterisks** — the right length for a
+   SHA-256, which is exactly what makes it easy to paste by mistake. Add
+   `-H "Authorization: Bearer $HF_TOKEN"`, or just hash the file.
+
+   If a published digest and your local hash disagree, **resolve it before
+   pinning** — do not pick one. It means either the host rotated the file at that
+   ref (pin a revision instead: `…/resolve/<commit-sha>/…`, where the `sha` comes
+   from `GET /api/models/<repo>`, which is better practice than `main` for a
+   reproducible build anyway) or your local copy is damaged or partial (re-fetch and
+   re-hash). Pinning a digest the source does not serve makes **every** download
+   fail as `ModelCorrupt`, and the report will blame bytes the host sent correctly.
+
+   The one thing that cannot happen quietly is a *malformed* pin: only 64 lower-case
+   hex characters count as pinned, so a redacted or truncated value is reported as
+   "hash not pinned" and nothing is ever fetched, rather than surfacing later as a
+   phantom corruption.
 4. **Run with the URL and hash supplied** (add `FIELDOPS_MODEL_TOKEN=<token>` only
    for a gated source):
 
