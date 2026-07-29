@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -498,6 +499,40 @@ void main() {
       );
       // No staging file abandoned behind the failure.
       expect(await _stagingLeftovers(storage, descriptor), isEmpty);
+    });
+  });
+
+  group('staging names', () {
+    // Regression for R1-F1. The first version of the nonce was `pid` plus a
+    // static counter, and static state is per-isolate while `pid` is process-wide
+    // — so two isolates both produced `<pid>-0`, shared a staging path, and
+    // brought R0-F1's corruption back in full. Task 1.8 runs inference on an
+    // isolate and is also what will call provision().
+    test('nonces do not collide across isolates', () async {
+      const perIsolate = 32;
+
+      final here = _nonceBatch(perIsolate);
+      // A genuinely separate isolate: its copy of every `static` starts fresh.
+      final there = await Isolate.run(() => _nonceBatch(perIsolate));
+
+      expect(here, hasLength(perIsolate));
+      expect(there, hasLength(perIsolate));
+      expect(
+        here.toSet().intersection(there.toSet()),
+        isEmpty,
+        reason: 'two isolates must never stage under the same name',
+      );
+      // Nor within one isolate.
+      expect(here.toSet(), hasLength(perIsolate));
+      expect(there.toSet(), hasLength(perIsolate));
+    });
+
+    test('a nonce is a filesystem-safe path component', () {
+      final nonce = ModelProvisioner.stagingNonce();
+      expect(nonce, matches(RegExp(r'^[0-9]+-[0-9]+-[0-9]+$')));
+      // It becomes part of a file name, so a separator would silently write
+      // outside the models directory.
+      expect(nonce, isNot(contains('/')));
     });
   });
 
@@ -1045,6 +1080,13 @@ void main() {
 }
 
 const _sourceUrl = 'https://example.invalid/gemma.litertlm';
+
+/// Generates [count] staging nonces.
+///
+/// A top-level function so it can be sent to another isolate, which is the whole
+/// point: the isolate gets its own copy of every `static` in the library.
+List<String> _nonceBatch(int count) =>
+    List.generate(count, (_) => ModelProvisioner.stagingNonce());
 
 /// Every staging file left in the model directory for [descriptor], whatever its
 /// nonce.

@@ -269,6 +269,13 @@ The home screen distinguishes the states that need different actions — *ready*
 *present but unverified*, *not installed*, *source not configured*, *hash not
 pinned* — so a glance before the demo is enough.
 
+> **A note for whoever wires the provisioning trigger.** Because a local copy that
+> fails the pin is now replaced rather than merely deleted, a *wrong* pinned hash
+> (an operator typo) costs a full re-download before it fails, every call. That is
+> the right trade-off for the upgrade path, but it means `provision()` should not be
+> called unconditionally in a retry loop: treat a `ModelCorrupt` whose origin is the
+> download as sticky until the configuration changes.
+
 Weights can also be side-loaded onto a device with the platform tooling (Xcode's
 device container browser; on a debuggable Android build, `adb push` followed by
 `adb shell run-as com.karolkulesza.field_ops_copilot cp …` into
