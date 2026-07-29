@@ -1,0 +1,79 @@
+-- FTS5 index over the Apex-9 service manual, plus the triggers that keep it in
+-- sync with the structured `manual_entries` table.
+--
+-- Declared in SQL rather than Dart because a virtual table has no drift table
+-- builder: `CREATE VIRTUAL TABLE` is the only way to reach fts5's tokenizer and
+-- external-content options.
+
+import 'tables/manual_fts_table.dart';
+
+-- `content = manual_entries` makes this an *external content* index: fts5 stores
+-- only the inverted index and reads column values back from `manual_entries`, so
+-- the manual text is stored exactly once. `content_rowid` defaults to `rowid`,
+-- which is what the triggers below feed it.
+--
+-- `tokenize = 'porter unicode61'` layers the Porter stemmer over the default
+-- unicode61 tokenizer, so `squealing`/`squeal` and `vibrating`/`vibration` share
+-- a stem. `title` is indexed (not just `symptoms`) because a technician's phrase
+-- is as likely to echo the heading as the symptom prose.
+--
+-- The fault `code` column is deliberately absent: codes tokenize badly (`E-102`
+-- becomes the junk token `e` plus `102`) and are matched exactly on
+-- `manual_entries.code` instead.
+--
+-- Do not add `columnsize=0` here: it removes the `manual_fts_docsize` shadow
+-- table that `DatabaseService.manualFtsIndexedDocumentCount` reads.
+CREATE VIRTUAL TABLE manual_fts USING fts5 (
+    title,
+    symptoms,
+    procedure,
+    section,
+    content=manual_entries,
+    content_rowid=rowid,
+    tokenize='porter unicode61'
+);
+
+-- With an external-content table fts5 cannot observe writes to `manual_entries`
+-- on its own, so every mutation is mirrored here. Deletes/updates use the
+-- special `'delete'` command with the *old* values, which is how fts5 unwinds
+-- the previously indexed terms.
+--
+-- The index is keyed by `manual_entries.rowid`, so any operation that renumbers
+-- rowids (a `VACUUM INTO` backup, a table rewrite in a future migration) desyncs
+-- it silently. Recovery is `DatabaseService.rebuildManualFtsIndex`.
+CREATE TRIGGER manual_entries_after_insert AFTER INSERT ON manual_entries BEGIN
+    INSERT INTO manual_fts (rowid, title, symptoms, procedure, section)
+    VALUES (new.rowid, new.title, new.symptoms, new.procedure, new.section);
+END;
+
+CREATE TRIGGER manual_entries_after_delete AFTER DELETE ON manual_entries BEGIN
+    INSERT INTO manual_fts (manual_fts, rowid, title, symptoms, procedure, section)
+    VALUES ('delete', old.rowid, old.title, old.symptoms, old.procedure, old.section);
+END;
+
+CREATE TRIGGER manual_entries_after_update AFTER UPDATE ON manual_entries BEGIN
+    INSERT INTO manual_fts (manual_fts, rowid, title, symptoms, procedure, section)
+    VALUES ('delete', old.rowid, old.title, old.symptoms, old.procedure, old.section);
+    INSERT INTO manual_fts (rowid, title, symptoms, procedure, section)
+    VALUES (new.rowid, new.title, new.symptoms, new.procedure, new.section);
+END;
+
+-- Ranked full-text search. `:match` must already be sanitized
+-- (`FtsQuerySanitizer.sanitize`) — raw user text can be a syntax error here.
+--
+-- `bm25()` returns a negative score where a smaller value is a better match, so
+-- plain ascending order ranks best-first. The weights bias a title hit over
+-- symptom prose over the procedure body; `section` is the weakest signal.
+-- `manual_entries.id` breaks ties so the ordering is deterministic in tests.
+searchManualEntriesRanked(:match AS TEXT, :limit AS INT):
+    SELECT manual_entries.* FROM manual_fts
+    INNER JOIN manual_entries ON manual_entries.rowid = manual_fts.rowid
+    WHERE manual_fts MATCH :match
+    ORDER BY bm25(manual_fts, 8.0, 4.0, 1.0, 1.0) ASC, manual_entries.id ASC
+    LIMIT :limit;
+
+-- NB: there is deliberately no `SELECT COUNT(*) FROM manual_fts` query here.
+-- On an external-content table that scan is serviced from `manual_entries`, so it
+-- reports content rows and stays correct even if the index is empty. To count
+-- *indexed* documents use `DatabaseService.manualFtsIndexedDocumentCount`, which
+-- reads the `manual_fts_docsize` shadow table.

@@ -3,6 +3,872 @@
 part of 'database_service.dart';
 
 // ignore_for_file: type=lint
+class $ManualEntriesTable extends ManualEntries
+    with TableInfo<$ManualEntriesTable, ManualEntryRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ManualEntriesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sectionMeta = const VerificationMeta(
+    'section',
+  );
+  @override
+  late final GeneratedColumn<String> section = GeneratedColumn<String>(
+    'section',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _codeMeta = const VerificationMeta('code');
+  @override
+  late final GeneratedColumn<String> code = GeneratedColumn<String>(
+    'code',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    $customConstraints: 'NOT NULL COLLATE NOCASE',
+  );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _symptomsMeta = const VerificationMeta(
+    'symptoms',
+  );
+  @override
+  late final GeneratedColumn<String> symptoms = GeneratedColumn<String>(
+    'symptoms',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _procedureMeta = const VerificationMeta(
+    'procedure',
+  );
+  @override
+  late final GeneratedColumn<String> procedure = GeneratedColumn<String>(
+    'procedure',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _requiredToolsMeta = const VerificationMeta(
+    'requiredTools',
+  );
+  @override
+  late final GeneratedColumn<String> requiredTools = GeneratedColumn<String>(
+    'required_tools',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('[]'),
+  );
+  static const VerificationMeta _requiredPartsMeta = const VerificationMeta(
+    'requiredParts',
+  );
+  @override
+  late final GeneratedColumn<String> requiredParts = GeneratedColumn<String>(
+    'required_parts',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('[]'),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    section,
+    code,
+    title,
+    symptoms,
+    procedure,
+    requiredTools,
+    requiredParts,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'manual_entries';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ManualEntryRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('section')) {
+      context.handle(
+        _sectionMeta,
+        section.isAcceptableOrUnknown(data['section']!, _sectionMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sectionMeta);
+    }
+    if (data.containsKey('code')) {
+      context.handle(
+        _codeMeta,
+        code.isAcceptableOrUnknown(data['code']!, _codeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_codeMeta);
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_titleMeta);
+    }
+    if (data.containsKey('symptoms')) {
+      context.handle(
+        _symptomsMeta,
+        symptoms.isAcceptableOrUnknown(data['symptoms']!, _symptomsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_symptomsMeta);
+    }
+    if (data.containsKey('procedure')) {
+      context.handle(
+        _procedureMeta,
+        procedure.isAcceptableOrUnknown(data['procedure']!, _procedureMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_procedureMeta);
+    }
+    if (data.containsKey('required_tools')) {
+      context.handle(
+        _requiredToolsMeta,
+        requiredTools.isAcceptableOrUnknown(
+          data['required_tools']!,
+          _requiredToolsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('required_parts')) {
+      context.handle(
+        _requiredPartsMeta,
+        requiredParts.isAcceptableOrUnknown(
+          data['required_parts']!,
+          _requiredPartsMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ManualEntryRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ManualEntryRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      section: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}section'],
+      )!,
+      code: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}code'],
+      )!,
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      )!,
+      symptoms: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}symptoms'],
+      )!,
+      procedure: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}procedure'],
+      )!,
+      requiredTools: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}required_tools'],
+      )!,
+      requiredParts: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}required_parts'],
+      )!,
+    );
+  }
+
+  @override
+  $ManualEntriesTable createAlias(String alias) {
+    return $ManualEntriesTable(attachedDatabase, alias);
+  }
+}
+
+class ManualEntryRow extends DataClass implements Insertable<ManualEntryRow> {
+  /// Stable document identifier, e.g. `apex_9_err_102`.
+  final String id;
+
+  /// Manual chapter the entry belongs to, e.g. `Brake Systems`.
+  final String section;
+
+  /// Controller fault code, e.g. `E-102`. Stored canonically (trimmed,
+  /// upper-cased) and queried by exact match — never through FTS.
+  ///
+  /// `COLLATE NOCASE` rather than an `upper(code)` comparison at query time:
+  /// wrapping the column in a function makes `idx_manual_entries_code`
+  /// unusable and forces a table scan, whereas the collation gives
+  /// case-insensitive equality *through* the index — and still matches rows
+  /// written by a path that skipped [normalizeFaultCode].
+  ///
+  /// Note that `customConstraint` **replaces** drift's whole generated constraint
+  /// string rather than adding to it, which is why `NOT NULL` is restated by
+  /// hand. Anything added here later (a default, a check) has to go in this one
+  /// string or it silently vanishes from the DDL.
+  final String code;
+
+  /// Entry heading, e.g. `Traction Brake Pad Wear & Vibration`.
+  final String title;
+
+  /// Free-text symptom description a technician would recognise.
+  final String symptoms;
+
+  /// Ordered repair steps.
+  final String procedure;
+
+  /// JSON array of tool names, e.g. `["Torx T20","Digital Caliper"]`.
+  ///
+  /// Kept as raw JSON text rather than a drift type converter so that the
+  /// generated row class keeps value equality (a converted `List<String>` field
+  /// compares by identity, which silently breaks row-equality assertions).
+  /// Decode through the `ManualEntryLists` extension in `database_service.dart`.
+  final String requiredTools;
+
+  /// JSON array of part SKUs, e.g. `["BRK-990-XP"]`.
+  final String requiredParts;
+  const ManualEntryRow({
+    required this.id,
+    required this.section,
+    required this.code,
+    required this.title,
+    required this.symptoms,
+    required this.procedure,
+    required this.requiredTools,
+    required this.requiredParts,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['section'] = Variable<String>(section);
+    map['code'] = Variable<String>(code);
+    map['title'] = Variable<String>(title);
+    map['symptoms'] = Variable<String>(symptoms);
+    map['procedure'] = Variable<String>(procedure);
+    map['required_tools'] = Variable<String>(requiredTools);
+    map['required_parts'] = Variable<String>(requiredParts);
+    return map;
+  }
+
+  ManualEntriesCompanion toCompanion(bool nullToAbsent) {
+    return ManualEntriesCompanion(
+      id: Value(id),
+      section: Value(section),
+      code: Value(code),
+      title: Value(title),
+      symptoms: Value(symptoms),
+      procedure: Value(procedure),
+      requiredTools: Value(requiredTools),
+      requiredParts: Value(requiredParts),
+    );
+  }
+
+  factory ManualEntryRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ManualEntryRow(
+      id: serializer.fromJson<String>(json['id']),
+      section: serializer.fromJson<String>(json['section']),
+      code: serializer.fromJson<String>(json['code']),
+      title: serializer.fromJson<String>(json['title']),
+      symptoms: serializer.fromJson<String>(json['symptoms']),
+      procedure: serializer.fromJson<String>(json['procedure']),
+      requiredTools: serializer.fromJson<String>(json['requiredTools']),
+      requiredParts: serializer.fromJson<String>(json['requiredParts']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'section': serializer.toJson<String>(section),
+      'code': serializer.toJson<String>(code),
+      'title': serializer.toJson<String>(title),
+      'symptoms': serializer.toJson<String>(symptoms),
+      'procedure': serializer.toJson<String>(procedure),
+      'requiredTools': serializer.toJson<String>(requiredTools),
+      'requiredParts': serializer.toJson<String>(requiredParts),
+    };
+  }
+
+  ManualEntryRow copyWith({
+    String? id,
+    String? section,
+    String? code,
+    String? title,
+    String? symptoms,
+    String? procedure,
+    String? requiredTools,
+    String? requiredParts,
+  }) => ManualEntryRow(
+    id: id ?? this.id,
+    section: section ?? this.section,
+    code: code ?? this.code,
+    title: title ?? this.title,
+    symptoms: symptoms ?? this.symptoms,
+    procedure: procedure ?? this.procedure,
+    requiredTools: requiredTools ?? this.requiredTools,
+    requiredParts: requiredParts ?? this.requiredParts,
+  );
+  ManualEntryRow copyWithCompanion(ManualEntriesCompanion data) {
+    return ManualEntryRow(
+      id: data.id.present ? data.id.value : this.id,
+      section: data.section.present ? data.section.value : this.section,
+      code: data.code.present ? data.code.value : this.code,
+      title: data.title.present ? data.title.value : this.title,
+      symptoms: data.symptoms.present ? data.symptoms.value : this.symptoms,
+      procedure: data.procedure.present ? data.procedure.value : this.procedure,
+      requiredTools: data.requiredTools.present
+          ? data.requiredTools.value
+          : this.requiredTools,
+      requiredParts: data.requiredParts.present
+          ? data.requiredParts.value
+          : this.requiredParts,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ManualEntryRow(')
+          ..write('id: $id, ')
+          ..write('section: $section, ')
+          ..write('code: $code, ')
+          ..write('title: $title, ')
+          ..write('symptoms: $symptoms, ')
+          ..write('procedure: $procedure, ')
+          ..write('requiredTools: $requiredTools, ')
+          ..write('requiredParts: $requiredParts')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    section,
+    code,
+    title,
+    symptoms,
+    procedure,
+    requiredTools,
+    requiredParts,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ManualEntryRow &&
+          other.id == this.id &&
+          other.section == this.section &&
+          other.code == this.code &&
+          other.title == this.title &&
+          other.symptoms == this.symptoms &&
+          other.procedure == this.procedure &&
+          other.requiredTools == this.requiredTools &&
+          other.requiredParts == this.requiredParts);
+}
+
+class ManualEntriesCompanion extends UpdateCompanion<ManualEntryRow> {
+  final Value<String> id;
+  final Value<String> section;
+  final Value<String> code;
+  final Value<String> title;
+  final Value<String> symptoms;
+  final Value<String> procedure;
+  final Value<String> requiredTools;
+  final Value<String> requiredParts;
+  final Value<int> rowid;
+  const ManualEntriesCompanion({
+    this.id = const Value.absent(),
+    this.section = const Value.absent(),
+    this.code = const Value.absent(),
+    this.title = const Value.absent(),
+    this.symptoms = const Value.absent(),
+    this.procedure = const Value.absent(),
+    this.requiredTools = const Value.absent(),
+    this.requiredParts = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ManualEntriesCompanion.insert({
+    required String id,
+    required String section,
+    required String code,
+    required String title,
+    required String symptoms,
+    required String procedure,
+    this.requiredTools = const Value.absent(),
+    this.requiredParts = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       section = Value(section),
+       code = Value(code),
+       title = Value(title),
+       symptoms = Value(symptoms),
+       procedure = Value(procedure);
+  static Insertable<ManualEntryRow> custom({
+    Expression<String>? id,
+    Expression<String>? section,
+    Expression<String>? code,
+    Expression<String>? title,
+    Expression<String>? symptoms,
+    Expression<String>? procedure,
+    Expression<String>? requiredTools,
+    Expression<String>? requiredParts,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (section != null) 'section': section,
+      if (code != null) 'code': code,
+      if (title != null) 'title': title,
+      if (symptoms != null) 'symptoms': symptoms,
+      if (procedure != null) 'procedure': procedure,
+      if (requiredTools != null) 'required_tools': requiredTools,
+      if (requiredParts != null) 'required_parts': requiredParts,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ManualEntriesCompanion copyWith({
+    Value<String>? id,
+    Value<String>? section,
+    Value<String>? code,
+    Value<String>? title,
+    Value<String>? symptoms,
+    Value<String>? procedure,
+    Value<String>? requiredTools,
+    Value<String>? requiredParts,
+    Value<int>? rowid,
+  }) {
+    return ManualEntriesCompanion(
+      id: id ?? this.id,
+      section: section ?? this.section,
+      code: code ?? this.code,
+      title: title ?? this.title,
+      symptoms: symptoms ?? this.symptoms,
+      procedure: procedure ?? this.procedure,
+      requiredTools: requiredTools ?? this.requiredTools,
+      requiredParts: requiredParts ?? this.requiredParts,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (section.present) {
+      map['section'] = Variable<String>(section.value);
+    }
+    if (code.present) {
+      map['code'] = Variable<String>(code.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (symptoms.present) {
+      map['symptoms'] = Variable<String>(symptoms.value);
+    }
+    if (procedure.present) {
+      map['procedure'] = Variable<String>(procedure.value);
+    }
+    if (requiredTools.present) {
+      map['required_tools'] = Variable<String>(requiredTools.value);
+    }
+    if (requiredParts.present) {
+      map['required_parts'] = Variable<String>(requiredParts.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ManualEntriesCompanion(')
+          ..write('id: $id, ')
+          ..write('section: $section, ')
+          ..write('code: $code, ')
+          ..write('title: $title, ')
+          ..write('symptoms: $symptoms, ')
+          ..write('procedure: $procedure, ')
+          ..write('requiredTools: $requiredTools, ')
+          ..write('requiredParts: $requiredParts, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class ManualFts extends Table
+    with TableInfo<ManualFts, ManualFt>, VirtualTableInfo<ManualFts, ManualFt> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  ManualFts(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    $customConstraints: '',
+  );
+  static const VerificationMeta _symptomsMeta = const VerificationMeta(
+    'symptoms',
+  );
+  late final GeneratedColumn<String> symptoms = GeneratedColumn<String>(
+    'symptoms',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    $customConstraints: '',
+  );
+  static const VerificationMeta _procedureMeta = const VerificationMeta(
+    'procedure',
+  );
+  late final GeneratedColumn<String> procedure = GeneratedColumn<String>(
+    'procedure',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    $customConstraints: '',
+  );
+  static const VerificationMeta _sectionMeta = const VerificationMeta(
+    'section',
+  );
+  late final GeneratedColumn<String> section = GeneratedColumn<String>(
+    'section',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    $customConstraints: '',
+  );
+  @override
+  List<GeneratedColumn> get $columns => [title, symptoms, procedure, section];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'manual_fts';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ManualFt> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_titleMeta);
+    }
+    if (data.containsKey('symptoms')) {
+      context.handle(
+        _symptomsMeta,
+        symptoms.isAcceptableOrUnknown(data['symptoms']!, _symptomsMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_symptomsMeta);
+    }
+    if (data.containsKey('procedure')) {
+      context.handle(
+        _procedureMeta,
+        procedure.isAcceptableOrUnknown(data['procedure']!, _procedureMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_procedureMeta);
+    }
+    if (data.containsKey('section')) {
+      context.handle(
+        _sectionMeta,
+        section.isAcceptableOrUnknown(data['section']!, _sectionMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sectionMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => const {};
+  @override
+  ManualFt map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ManualFt(
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      )!,
+      symptoms: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}symptoms'],
+      )!,
+      procedure: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}procedure'],
+      )!,
+      section: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}section'],
+      )!,
+    );
+  }
+
+  @override
+  ManualFts createAlias(String alias) {
+    return ManualFts(attachedDatabase, alias);
+  }
+
+  @override
+  bool get dontWriteConstraints => true;
+  @override
+  String get moduleAndArgs =>
+      'fts5(title, symptoms, procedure, section, content=manual_entries, content_rowid=rowid, tokenize=\'porter unicode61\')';
+}
+
+class ManualFt extends DataClass implements Insertable<ManualFt> {
+  final String title;
+  final String symptoms;
+  final String procedure;
+  final String section;
+  const ManualFt({
+    required this.title,
+    required this.symptoms,
+    required this.procedure,
+    required this.section,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['title'] = Variable<String>(title);
+    map['symptoms'] = Variable<String>(symptoms);
+    map['procedure'] = Variable<String>(procedure);
+    map['section'] = Variable<String>(section);
+    return map;
+  }
+
+  ManualFtsCompanion toCompanion(bool nullToAbsent) {
+    return ManualFtsCompanion(
+      title: Value(title),
+      symptoms: Value(symptoms),
+      procedure: Value(procedure),
+      section: Value(section),
+    );
+  }
+
+  factory ManualFt.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ManualFt(
+      title: serializer.fromJson<String>(json['title']),
+      symptoms: serializer.fromJson<String>(json['symptoms']),
+      procedure: serializer.fromJson<String>(json['procedure']),
+      section: serializer.fromJson<String>(json['section']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'title': serializer.toJson<String>(title),
+      'symptoms': serializer.toJson<String>(symptoms),
+      'procedure': serializer.toJson<String>(procedure),
+      'section': serializer.toJson<String>(section),
+    };
+  }
+
+  ManualFt copyWith({
+    String? title,
+    String? symptoms,
+    String? procedure,
+    String? section,
+  }) => ManualFt(
+    title: title ?? this.title,
+    symptoms: symptoms ?? this.symptoms,
+    procedure: procedure ?? this.procedure,
+    section: section ?? this.section,
+  );
+  ManualFt copyWithCompanion(ManualFtsCompanion data) {
+    return ManualFt(
+      title: data.title.present ? data.title.value : this.title,
+      symptoms: data.symptoms.present ? data.symptoms.value : this.symptoms,
+      procedure: data.procedure.present ? data.procedure.value : this.procedure,
+      section: data.section.present ? data.section.value : this.section,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ManualFt(')
+          ..write('title: $title, ')
+          ..write('symptoms: $symptoms, ')
+          ..write('procedure: $procedure, ')
+          ..write('section: $section')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(title, symptoms, procedure, section);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ManualFt &&
+          other.title == this.title &&
+          other.symptoms == this.symptoms &&
+          other.procedure == this.procedure &&
+          other.section == this.section);
+}
+
+class ManualFtsCompanion extends UpdateCompanion<ManualFt> {
+  final Value<String> title;
+  final Value<String> symptoms;
+  final Value<String> procedure;
+  final Value<String> section;
+  final Value<int> rowid;
+  const ManualFtsCompanion({
+    this.title = const Value.absent(),
+    this.symptoms = const Value.absent(),
+    this.procedure = const Value.absent(),
+    this.section = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ManualFtsCompanion.insert({
+    required String title,
+    required String symptoms,
+    required String procedure,
+    required String section,
+    this.rowid = const Value.absent(),
+  }) : title = Value(title),
+       symptoms = Value(symptoms),
+       procedure = Value(procedure),
+       section = Value(section);
+  static Insertable<ManualFt> custom({
+    Expression<String>? title,
+    Expression<String>? symptoms,
+    Expression<String>? procedure,
+    Expression<String>? section,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (title != null) 'title': title,
+      if (symptoms != null) 'symptoms': symptoms,
+      if (procedure != null) 'procedure': procedure,
+      if (section != null) 'section': section,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ManualFtsCompanion copyWith({
+    Value<String>? title,
+    Value<String>? symptoms,
+    Value<String>? procedure,
+    Value<String>? section,
+    Value<int>? rowid,
+  }) {
+    return ManualFtsCompanion(
+      title: title ?? this.title,
+      symptoms: symptoms ?? this.symptoms,
+      procedure: procedure ?? this.procedure,
+      section: section ?? this.section,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (symptoms.present) {
+      map['symptoms'] = Variable<String>(symptoms.value);
+    }
+    if (procedure.present) {
+      map['procedure'] = Variable<String>(procedure.value);
+    }
+    if (section.present) {
+      map['section'] = Variable<String>(section.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ManualFtsCompanion(')
+          ..write('title: $title, ')
+          ..write('symptoms: $symptoms, ')
+          ..write('procedure: $procedure, ')
+          ..write('section: $section, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $TechniciansTable extends Technicians
     with TableInfo<$TechniciansTable, TechnicianRow> {
   @override
@@ -1133,20 +1999,76 @@ class WorkOrdersCompanion extends UpdateCompanion<WorkOrderRow> {
 abstract class _$DatabaseService extends GeneratedDatabase {
   _$DatabaseService(QueryExecutor e) : super(e);
   $DatabaseServiceManager get managers => $DatabaseServiceManager(this);
+  late final $ManualEntriesTable manualEntries = $ManualEntriesTable(this);
+  late final ManualFts manualFts = ManualFts(this);
+  late final Trigger manualEntriesAfterInsert = Trigger(
+    'CREATE TRIGGER manual_entries_after_insert AFTER INSERT ON manual_entries BEGIN INSERT INTO manual_fts ("rowid", title, symptoms, procedure, section) VALUES (new."rowid", new.title, new.symptoms, new.procedure, new.section);END',
+    'manual_entries_after_insert',
+  );
+  late final Trigger manualEntriesAfterDelete = Trigger(
+    'CREATE TRIGGER manual_entries_after_delete AFTER DELETE ON manual_entries BEGIN INSERT INTO manual_fts (manual_fts, "rowid", title, symptoms, procedure, section) VALUES (\'delete\', old."rowid", old.title, old.symptoms, old.procedure, old.section);END',
+    'manual_entries_after_delete',
+  );
+  late final Trigger manualEntriesAfterUpdate = Trigger(
+    'CREATE TRIGGER manual_entries_after_update AFTER UPDATE ON manual_entries BEGIN INSERT INTO manual_fts (manual_fts, "rowid", title, symptoms, procedure, section) VALUES (\'delete\', old."rowid", old.title, old.symptoms, old.procedure, old.section);INSERT INTO manual_fts ("rowid", title, symptoms, procedure, section) VALUES (new."rowid", new.title, new.symptoms, new.procedure, new.section);END',
+    'manual_entries_after_update',
+  );
+  late final Index idxManualEntriesCode = Index(
+    'idx_manual_entries_code',
+    'CREATE INDEX idx_manual_entries_code ON manual_entries (code)',
+  );
   late final $TechniciansTable technicians = $TechniciansTable(this);
   late final $InventoryPartsTable inventoryParts = $InventoryPartsTable(this);
   late final $WorkOrdersTable workOrders = $WorkOrdersTable(this);
+  Selectable<ManualEntryRow> searchManualEntriesRanked(
+    String match,
+    int limit,
+  ) {
+    return customSelect(
+      'SELECT manual_entries.* FROM manual_fts INNER JOIN manual_entries ON manual_entries."rowid" = manual_fts."rowid" WHERE manual_fts MATCH ?1 ORDER BY bm25(manual_fts, 8.0, 4.0, 1.0, 1.0) ASC, manual_entries.id ASC LIMIT ?2',
+      variables: [Variable<String>(match), Variable<int>(limit)],
+      readsFrom: {manualFts, manualEntries},
+    ).asyncMap(manualEntries.mapFromRow);
+  }
+
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
   List<DatabaseSchemaEntity> get allSchemaEntities => [
+    manualEntries,
+    manualFts,
+    manualEntriesAfterInsert,
+    manualEntriesAfterDelete,
+    manualEntriesAfterUpdate,
+    idxManualEntriesCode,
     technicians,
     inventoryParts,
     workOrders,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'manual_entries',
+        limitUpdateKind: UpdateKind.insert,
+      ),
+      result: [TableUpdate('manual_fts', kind: UpdateKind.insert)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'manual_entries',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [TableUpdate('manual_fts', kind: UpdateKind.insert)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'manual_entries',
+        limitUpdateKind: UpdateKind.update,
+      ),
+      result: [TableUpdate('manual_fts', kind: UpdateKind.insert)],
+    ),
     WritePropagation(
       on: TableUpdateQuery.onTableName(
         'technicians',
@@ -1157,6 +2079,447 @@ abstract class _$DatabaseService extends GeneratedDatabase {
   ]);
 }
 
+typedef $$ManualEntriesTableCreateCompanionBuilder =
+    ManualEntriesCompanion Function({
+      required String id,
+      required String section,
+      required String code,
+      required String title,
+      required String symptoms,
+      required String procedure,
+      Value<String> requiredTools,
+      Value<String> requiredParts,
+      Value<int> rowid,
+    });
+typedef $$ManualEntriesTableUpdateCompanionBuilder =
+    ManualEntriesCompanion Function({
+      Value<String> id,
+      Value<String> section,
+      Value<String> code,
+      Value<String> title,
+      Value<String> symptoms,
+      Value<String> procedure,
+      Value<String> requiredTools,
+      Value<String> requiredParts,
+      Value<int> rowid,
+    });
+
+class $$ManualEntriesTableFilterComposer
+    extends Composer<_$DatabaseService, $ManualEntriesTable> {
+  $$ManualEntriesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get section => $composableBuilder(
+    column: $table.section,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get code => $composableBuilder(
+    column: $table.code,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get symptoms => $composableBuilder(
+    column: $table.symptoms,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get procedure => $composableBuilder(
+    column: $table.procedure,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get requiredTools => $composableBuilder(
+    column: $table.requiredTools,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get requiredParts => $composableBuilder(
+    column: $table.requiredParts,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ManualEntriesTableOrderingComposer
+    extends Composer<_$DatabaseService, $ManualEntriesTable> {
+  $$ManualEntriesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get section => $composableBuilder(
+    column: $table.section,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get code => $composableBuilder(
+    column: $table.code,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get symptoms => $composableBuilder(
+    column: $table.symptoms,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get procedure => $composableBuilder(
+    column: $table.procedure,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get requiredTools => $composableBuilder(
+    column: $table.requiredTools,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get requiredParts => $composableBuilder(
+    column: $table.requiredParts,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ManualEntriesTableAnnotationComposer
+    extends Composer<_$DatabaseService, $ManualEntriesTable> {
+  $$ManualEntriesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get section =>
+      $composableBuilder(column: $table.section, builder: (column) => column);
+
+  GeneratedColumn<String> get code =>
+      $composableBuilder(column: $table.code, builder: (column) => column);
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get symptoms =>
+      $composableBuilder(column: $table.symptoms, builder: (column) => column);
+
+  GeneratedColumn<String> get procedure =>
+      $composableBuilder(column: $table.procedure, builder: (column) => column);
+
+  GeneratedColumn<String> get requiredTools => $composableBuilder(
+    column: $table.requiredTools,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get requiredParts => $composableBuilder(
+    column: $table.requiredParts,
+    builder: (column) => column,
+  );
+}
+
+class $$ManualEntriesTableTableManager
+    extends
+        RootTableManager<
+          _$DatabaseService,
+          $ManualEntriesTable,
+          ManualEntryRow,
+          $$ManualEntriesTableFilterComposer,
+          $$ManualEntriesTableOrderingComposer,
+          $$ManualEntriesTableAnnotationComposer,
+          $$ManualEntriesTableCreateCompanionBuilder,
+          $$ManualEntriesTableUpdateCompanionBuilder,
+          (
+            ManualEntryRow,
+            BaseReferences<
+              _$DatabaseService,
+              $ManualEntriesTable,
+              ManualEntryRow
+            >,
+          ),
+          ManualEntryRow,
+          PrefetchHooks Function()
+        > {
+  $$ManualEntriesTableTableManager(
+    _$DatabaseService db,
+    $ManualEntriesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ManualEntriesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ManualEntriesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ManualEntriesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> section = const Value.absent(),
+                Value<String> code = const Value.absent(),
+                Value<String> title = const Value.absent(),
+                Value<String> symptoms = const Value.absent(),
+                Value<String> procedure = const Value.absent(),
+                Value<String> requiredTools = const Value.absent(),
+                Value<String> requiredParts = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ManualEntriesCompanion(
+                id: id,
+                section: section,
+                code: code,
+                title: title,
+                symptoms: symptoms,
+                procedure: procedure,
+                requiredTools: requiredTools,
+                requiredParts: requiredParts,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String section,
+                required String code,
+                required String title,
+                required String symptoms,
+                required String procedure,
+                Value<String> requiredTools = const Value.absent(),
+                Value<String> requiredParts = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ManualEntriesCompanion.insert(
+                id: id,
+                section: section,
+                code: code,
+                title: title,
+                symptoms: symptoms,
+                procedure: procedure,
+                requiredTools: requiredTools,
+                requiredParts: requiredParts,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ManualEntriesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$DatabaseService,
+      $ManualEntriesTable,
+      ManualEntryRow,
+      $$ManualEntriesTableFilterComposer,
+      $$ManualEntriesTableOrderingComposer,
+      $$ManualEntriesTableAnnotationComposer,
+      $$ManualEntriesTableCreateCompanionBuilder,
+      $$ManualEntriesTableUpdateCompanionBuilder,
+      (
+        ManualEntryRow,
+        BaseReferences<_$DatabaseService, $ManualEntriesTable, ManualEntryRow>,
+      ),
+      ManualEntryRow,
+      PrefetchHooks Function()
+    >;
+typedef $ManualFtsCreateCompanionBuilder =
+    ManualFtsCompanion Function({
+      required String title,
+      required String symptoms,
+      required String procedure,
+      required String section,
+      Value<int> rowid,
+    });
+typedef $ManualFtsUpdateCompanionBuilder =
+    ManualFtsCompanion Function({
+      Value<String> title,
+      Value<String> symptoms,
+      Value<String> procedure,
+      Value<String> section,
+      Value<int> rowid,
+    });
+
+class $ManualFtsFilterComposer extends Composer<_$DatabaseService, ManualFts> {
+  $ManualFtsFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get symptoms => $composableBuilder(
+    column: $table.symptoms,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get procedure => $composableBuilder(
+    column: $table.procedure,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get section => $composableBuilder(
+    column: $table.section,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $ManualFtsOrderingComposer
+    extends Composer<_$DatabaseService, ManualFts> {
+  $ManualFtsOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get symptoms => $composableBuilder(
+    column: $table.symptoms,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get procedure => $composableBuilder(
+    column: $table.procedure,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get section => $composableBuilder(
+    column: $table.section,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $ManualFtsAnnotationComposer
+    extends Composer<_$DatabaseService, ManualFts> {
+  $ManualFtsAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get symptoms =>
+      $composableBuilder(column: $table.symptoms, builder: (column) => column);
+
+  GeneratedColumn<String> get procedure =>
+      $composableBuilder(column: $table.procedure, builder: (column) => column);
+
+  GeneratedColumn<String> get section =>
+      $composableBuilder(column: $table.section, builder: (column) => column);
+}
+
+class $ManualFtsTableManager
+    extends
+        RootTableManager<
+          _$DatabaseService,
+          ManualFts,
+          ManualFt,
+          $ManualFtsFilterComposer,
+          $ManualFtsOrderingComposer,
+          $ManualFtsAnnotationComposer,
+          $ManualFtsCreateCompanionBuilder,
+          $ManualFtsUpdateCompanionBuilder,
+          (ManualFt, BaseReferences<_$DatabaseService, ManualFts, ManualFt>),
+          ManualFt,
+          PrefetchHooks Function()
+        > {
+  $ManualFtsTableManager(_$DatabaseService db, ManualFts table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $ManualFtsFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $ManualFtsOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $ManualFtsAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> title = const Value.absent(),
+                Value<String> symptoms = const Value.absent(),
+                Value<String> procedure = const Value.absent(),
+                Value<String> section = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => ManualFtsCompanion(
+                title: title,
+                symptoms: symptoms,
+                procedure: procedure,
+                section: section,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String title,
+                required String symptoms,
+                required String procedure,
+                required String section,
+                Value<int> rowid = const Value.absent(),
+              }) => ManualFtsCompanion.insert(
+                title: title,
+                symptoms: symptoms,
+                procedure: procedure,
+                section: section,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $ManualFtsProcessedTableManager =
+    ProcessedTableManager<
+      _$DatabaseService,
+      ManualFts,
+      ManualFt,
+      $ManualFtsFilterComposer,
+      $ManualFtsOrderingComposer,
+      $ManualFtsAnnotationComposer,
+      $ManualFtsCreateCompanionBuilder,
+      $ManualFtsUpdateCompanionBuilder,
+      (ManualFt, BaseReferences<_$DatabaseService, ManualFts, ManualFt>),
+      ManualFt,
+      PrefetchHooks Function()
+    >;
 typedef $$TechniciansTableCreateCompanionBuilder =
     TechniciansCompanion Function({
       required String id,
@@ -1996,6 +3359,10 @@ typedef $$WorkOrdersTableProcessedTableManager =
 class $DatabaseServiceManager {
   final _$DatabaseService _db;
   $DatabaseServiceManager(this._db);
+  $$ManualEntriesTableTableManager get manualEntries =>
+      $$ManualEntriesTableTableManager(_db, _db.manualEntries);
+  $ManualFtsTableManager get manualFts =>
+      $ManualFtsTableManager(_db, _db.manualFts);
   $$TechniciansTableTableManager get technicians =>
       $$TechniciansTableTableManager(_db, _db.technicians);
   $$InventoryPartsTableTableManager get inventoryParts =>
