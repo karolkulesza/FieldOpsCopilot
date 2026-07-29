@@ -527,6 +527,30 @@ void main() {
       expect(there.toSet(), hasLength(perIsolate));
     });
 
+    // The isolate test above binds the *original* defect — a plain counter — but
+    // not the claim `stagingNonce()`'s doc makes about *why* it is safe. Removing
+    // only the random component while keeping pid and microseconds leaves that test
+    // green (verified: 5 runs out of 5), because 32 sequential calls each take at
+    // least a microsecond and so land on 32 distinct timestamps. Yet a
+    // pid+microseconds scheme genuinely collides when two isolates start
+    // provisioning within the same microsecond, which is exactly the overlap this
+    // nonce exists for — and the timestamp is the component a future simplification
+    // would keep. So the sentence in the doc gets its own assertion.
+    test('the random component is what carries uniqueness', () {
+      final trailing = List.generate(
+        32,
+        (_) => ModelProvisioner.stagingNonce().split('-').last,
+      ).toSet();
+
+      expect(
+        trailing.length,
+        greaterThan(1),
+        reason:
+            'pid and the timestamp are log readability only; a constant '
+            'trailing field lets two isolates sharing a microsecond collide',
+      );
+    });
+
     test('a nonce is a filesystem-safe path component', () {
       final nonce = ModelProvisioner.stagingNonce();
       expect(nonce, matches(RegExp(r'^[0-9]+-[0-9]+-[0-9]+$')));
