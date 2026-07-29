@@ -528,14 +528,27 @@ void main() {
     });
 
     // The isolate test above binds the *original* defect — a plain counter — but
-    // not the claim `stagingNonce()`'s doc makes about *why* it is safe. Removing
-    // only the random component while keeping pid and microseconds leaves that test
-    // green (verified: 5 runs out of 5), because 32 sequential calls each take at
-    // least a microsecond and so land on 32 distinct timestamps. Yet a
-    // pid+microseconds scheme genuinely collides when two isolates start
-    // provisioning within the same microsecond, which is exactly the overlap this
-    // nonce exists for — and the timestamp is the component a future simplification
-    // would keep. So the sentence in the doc gets its own assertion.
+    // not the claim `stagingNonce()`'s doc makes about *why* the replacement is
+    // safe. Measured, by replacing only the random component with a constant and
+    // keeping pid and microseconds:
+    //
+    //   run alone (--plain-name):   isolate test passes 5/5   this test fails 3/3
+    //   run with the whole file:    isolate test fails 5/5    this test fails 5/5
+    //
+    // So the isolate test is not simply insensitive to a timestamp-only scheme, it
+    // is *unreliably* sensitive — and the deciding factor is how warm
+    // `stagingNonce()` is. Cold, each call takes at least a microsecond, so 32
+    // sequential calls get 32 distinct timestamps and the two isolates' batches stay
+    // disjoint; warm, several calls land in the same microsecond and duplicates
+    // appear within one batch. An order-dependent binding is worse than an absent
+    // one, because it fails in CI on some unrelated future change and sends someone
+    // hunting a phantom.
+    //
+    // A pid+microseconds scheme really does collide when two isolates start
+    // provisioning in the same microsecond, which is exactly the overlap this nonce
+    // exists for, and the timestamp is the component a later simplification would
+    // keep. Hence a separate assertion that fails deterministically in both run
+    // conditions.
     test('the random component is what carries uniqueness', () {
       final trailing = List.generate(
         32,
