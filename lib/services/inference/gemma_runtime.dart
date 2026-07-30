@@ -17,7 +17,6 @@ import 'package:flutter_gemma_litertlm/flutter_gemma_litertlm.dart';
 
 import '../../engines/llm_engine.dart';
 import 'inference_config.dart';
-import 'tool_schema.dart';
 
 /// What the inference worker drives. Exists so the worker's protocol handling can
 /// be tested against a scripted runtime instead of a 2.6GB model.
@@ -47,12 +46,18 @@ abstract interface class InferenceRuntime {
 /// 1. **Engines are opt-in.** `flutter_gemma` 1.x registers no inference engine of
 ///    its own, so `.litertlm` support only exists once [LiteRtLmEngine] is passed to
 ///    `FlutterGemma.initialize`. Without it the first model creation throws.
-/// 2. **`supportsFunctionCalls` gates the tool calls, not the tools.** Passing
-///    `tools:` alone gets the declaration in front of the model, but
-///    `InferenceChat` only *reads back* the structured calls when
-///    `supportsFunctionCalls` is true. Miss it and the model dutifully emits a tool
-///    call that is discarded, which looks exactly like a model that will not call
-///    tools.
+/// 2. **`supportsFunctionCalls` must be set whenever tools are passed**, and what it
+///    gates differs by family — so the same omission fails in two different ways:
+///    * **Gemma 4:** the declaration reaches the model regardless (it is gated only
+///      on model type and a non-empty tool list), but `InferenceChat` only *reads
+///      back* the structured calls when the flag is true. Miss it and the model
+///      dutifully emits a tool call that is parsed and then discarded — which looks
+///      exactly like a model that will not call tools.
+///    * **Gemma 3 (`gemmaIt`):** the flag gates the *declaration* as well. Miss it
+///      and the tools are never mentioned to the model at all; the plugin logs
+///      "Tools will be ignored" and carries on.
+///    This app passes `supportsFunctionCalls: tools.isNotEmpty`, so both are avoided
+///    — but the distinction is what a reader needs when flipping to the fallback.
 /// 3. **A chat's tools are fixed when its session is created.** For Gemma 4 they
 ///    become the SDK's `tools_json` at conversation-creation time, so a chat cannot
 ///    be reused for a turn with a different tool set. Hence one chat per turn — see
@@ -117,8 +122,14 @@ class GemmaRuntime implements InferenceRuntime {
       // them.
       backend: model.activeBackend?.name ?? LoadedRuntime.unknownBackend,
       loadMillis: stopwatch.elapsedMilliseconds,
-      // The engine clamps a context window below the bundle's baked KV-cache
-      // length, so this is what it settled on rather than what we asked for.
+      // A **Dart-side** value, not a native report. `LiteRtLmEngine` computes
+      // `max(requested, 1024)` before native initialisation and hands that same
+      // number to the model object; nothing in either package reads what the native
+      // KV-cache actually allocated, and the package says so explicitly ("No native
+      // API reports the model's minimum, so we clamp up to the largest known
+      // minimum"). So this witnesses the window this app *asked for*, after the
+      // engine's floor — useful for spotting a request that was silently raised, and
+      // not evidence about native allocation.
       contextTokens: model.maxTokens,
     );
     debugPrint('[GemmaRuntime] loaded: $runtime');
@@ -135,9 +146,11 @@ class GemmaRuntime implements InferenceRuntime {
     if (model == null || config == null) {
       throw StateError('GemmaRuntime.generate called before load()');
     }
-    // Fail here rather than let a malformed declaration reach the model, where it
-    // degrades into "a tool with no arguments" and reads as a model failure.
-    assertToolDefinitionsUsable(tools);
+    // Note there is no schema validation here. It happens in `GemmaLlmEngine.generate`,
+    // at the app-facing entry, so a malformed tool throws at the call site that
+    // registered it rather than as an async failure surfacing out of an isolate — and
+    // so the rule can be bound by a host test, which a check in this class could not
+    // be (it needs a loaded model to reach).
 
     // One chat per turn. Two reasons, both load-bearing:
     //   * a chat's tools are baked into its session at creation (see the class
@@ -157,9 +170,14 @@ class GemmaRuntime implements InferenceRuntime {
       // class doc, point 2.
       supportsFunctionCalls: tools.isNotEmpty,
       maxOutputTokens: config.maxOutputTokens,
-      // `modelType` is deliberately not passed: it defaults to the type the loaded
-      // spec carries, and naming it here would let a config drift from the weights
-      // that are actually resident.
+      // `modelType` is deliberately not passed: on this app's path it defaults to
+      // the type the loaded spec carries, and naming it here would let a config
+      // drift from the weights that are actually resident. Note that is
+      // `FfiInferenceModel`'s override doing it (`modelType ?? this.modelType`),
+      // not the plugin's API contract — the base `createChat` defaults to
+      // `ModelType.gemmaIt` and does not forward `tools` to the session at all. The
+      // FFI engine is the only override in either package, and it is the one this
+      // app uses; a different engine would need this argument passed explicitly.
     );
     _chat = chat;
 
@@ -182,9 +200,11 @@ class GemmaRuntime implements InferenceRuntime {
 
   @override
   Future<void> stop() async {
-    // A stop for a turn that already finished is normal (the request and the last
-    // token race), and the plugin's cancel is idempotent, so a null chat is a no-op
-    // rather than an error.
+    // A stop for a turn that already finished is normal — the stop request and the
+    // last token race each other — and two separate things make it harmless. A null
+    // `_chat` is a no-op because of `?.`, nothing more. A *non-null* chat whose
+    // generation already ended is safe because the plugin's cancel is idempotent,
+    // including against a conversation that has already been freed.
     await _chat?.stopGeneration();
   }
 

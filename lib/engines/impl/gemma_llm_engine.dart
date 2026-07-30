@@ -13,6 +13,7 @@ import 'dart:async';
 
 import '../../services/inference/inference_config.dart';
 import '../../services/inference/inference_isolate.dart';
+import '../../services/inference/tool_schema.dart';
 import '../llm_engine.dart';
 
 /// [LlmEngine] backed by real weights on the device.
@@ -81,6 +82,13 @@ class GemmaLlmEngine implements LlmEngine {
       // contract and tested against the fake.
       throw StateError('GemmaLlmEngine.generate called before initialize()');
     }
+    // Validated here, at the app-facing entry, rather than deeper down: this throws
+    // *synchronously at the caller's call site*, where the malformed tool was
+    // registered, instead of arriving later as an async failure from a worker
+    // isolate. It also means the rule is bound by host tests — the runtime that
+    // ultimately renders the schema needs a model, so a check living only there
+    // could not be tested without a device.
+    assertToolDefinitionsUsable(tools);
     return _host.generate(prompt: prompt, tools: tools);
   }
 

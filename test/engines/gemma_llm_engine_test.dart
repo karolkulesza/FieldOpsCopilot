@@ -4,6 +4,7 @@ import 'package:field_ops_copilot/engines/impl/gemma_llm_engine.dart';
 import 'package:field_ops_copilot/engines/llm_engine.dart';
 import 'package:field_ops_copilot/services/inference/inference_config.dart';
 import 'package:field_ops_copilot/services/inference/inference_isolate.dart';
+import 'package:field_ops_copilot/services/inference/tool_schema.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The engine's *contract* — when it is ready, what happens to a turn requested too
@@ -182,6 +183,33 @@ void main() {
 
       expect(host.lastPrompt, '[MANUAL DOCUMENT]\nE-102');
       expect(host.lastTools.single.name, 'get_local_parts_inventory');
+    });
+
+    test('a malformed tool schema is refused before the host is reached', () async {
+      // The validation lives at this entry point precisely so it can be bound here,
+      // on the host: the runtime that ultimately renders the schema needs a loaded
+      // model, so a check living only there could not be tested without a device.
+      // `{'sku': 'String'}` is the shape that reaches a Gemma 3 prompt verbatim and a
+      // Gemma 4 native template as `tools_json` — neither rejects it.
+      final host = _ScriptedHost(turn: const [LlmDone()]);
+      final engine = GemmaLlmEngine(config: config, host: host);
+      await engine.initialize();
+
+      expect(
+        () => engine.generate(
+          prompt: 'E-102',
+          tools: const [
+            ToolDefinition(
+              name: 'get_local_parts_inventory',
+              description: 'stock',
+              parameters: {'sku': 'String'},
+            ),
+          ],
+        ),
+        throwsA(isA<ToolSchemaException>()),
+      );
+      // Synchronously, at the caller's call site — nothing was sent.
+      expect(host.lastPrompt, isNull);
     });
 
     test('a host failure surfaces as a stream error', () async {
