@@ -74,14 +74,15 @@ lib/
 │   ├── stt_engine.dart       # SttEngine interface
 │   ├── vision_engine.dart    # VisionEngine interface
 │   ├── platform_telemetry.dart
+│   ├── tool_schema.dart      # The JSON-Schema shape a tool must declare
 │   ├── providers.dart        # Riverpod providers (bind fakes today)
 │   ├── impl/
 │   │   └── gemma_llm_engine.dart  # Real LlmEngine: Gemma 4 on an isolate
 │   └── fakes/                # In-memory implementations for tests + skeleton
+│                             #   (enforce the same rules as the device engine)
 └── services/
     ├── inference/
     │   ├── inference_config.dart    # Model path, family, backend, context window
-    │   ├── tool_schema.dart         # The JSON-Schema shape a tool must declare
     │   ├── inference_protocol.dart  # Encoded messages across the isolate boundary
     │   ├── inference_isolate.dart   # The worker: load / generate / stop / shutdown
     │   ├── gemma_runtime.dart       # The only file that imports flutter_gemma

@@ -376,9 +376,11 @@ void main() {
     });
 
     final first = controller.provision();
-    // Let the first call reach the (gated) transfer, so the state really is
-    // ProvisioningRunning when the second tap arrives.
-    await pumpEventQueue();
+    // Waited on deterministically rather than pumped. `pumpEventQueue()` was enough when
+    // this file runs alone and *not* when the whole suite runs concurrently — it returned
+    // before the provisioner had reached `open()`, and the state was still idle. A test
+    // whose pass depends on machine load is worse than no test.
+    await downloader.opened.timeout(const Duration(seconds: 10));
     expect(
       container.read(modelProvisioningControllerProvider),
       isA<ProvisioningRunning>(),
@@ -465,11 +467,17 @@ class _FakeDownloader implements ModelDownloader {
   /// hold a transfer genuinely in flight while it does something else.
   final Completer<void>? gate;
 
+  /// Completes the first time [open] is called, so a test can wait for the transfer to
+  /// have genuinely started instead of guessing with a pump.
+  Future<void> get opened => _opened.future;
+  final Completer<void> _opened = Completer<void>();
+
   int openCount = 0;
 
   @override
   Future<ModelByteStream> open(Uri uri, {String? authToken}) async {
     openCount++;
+    if (!_opened.isCompleted) _opened.complete();
     final error = failure;
     if (error != null) throw error;
     final held = gate;
