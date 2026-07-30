@@ -1,0 +1,388 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:field_ops_copilot/engines/impl/gemma_llm_engine.dart';
+import 'package:field_ops_copilot/engines/llm_engine.dart';
+import 'package:field_ops_copilot/services/inference/inference_config.dart';
+import 'package:field_ops_copilot/services/inference/providers.dart';
+import 'package:field_ops_copilot/services/models/model_descriptor.dart';
+import 'package:field_ops_copilot/services/models/model_provisioner.dart';
+import 'package:field_ops_copilot/services/models/model_storage.dart';
+import 'package:field_ops_copilot/services/inference/tool_schema.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:integration_test/integration_test.dart';
+
+/// Task 1.8's acceptance criteria — TC-LLM-LOAD-01, TC-LLM-GEN-01 and
+/// TC-LLM-TOOLCALL-01 — on a real device, against real weights.
+///
+/// ```sh
+/// flutter test integration_test/llm_inference_test.dart -d <device id> \
+///   --dart-define=FIELDOPS_MODEL_URI=<resolve URL for the file you licensed> \
+///   --dart-define=FIELDOPS_MODEL_SHA256=<its sha256>
+/// ```
+///
+/// The defines are needed even though nothing is downloaded here: they are what make
+/// the installed artifact *verifiable*, and this suite refuses to load weights whose
+/// digest nothing has checked. If the model is not installed and verified, every test
+/// **skips with the reason** rather than failing — a checkout has no 2.6GB artifact
+/// and CI must not fetch one, which is also why this lives in `integration_test/`.
+///
+/// Assertions are fuzzy on purpose (the plan's word). A model's exact wording is not
+/// a contract, so what is asserted is behaviour: it loads, it streams, it terminates,
+/// and under grounding with a registered tool it emits a *structured* call naming the
+/// right tool and SKU. Decoding is greedy (`topK: 1`), so the run is reproducible
+/// without the assertions having to pin tokens.
+///
+/// The run also prints the measurements Task 1.8 is expected to produce — load time,
+/// time to first token, tokens per second, resident footprint, and how long the UI
+/// isolate was ever blocked. Those are recorded in the sprint plan; they are printed
+/// rather than asserted because a threshold that fails on a cold cache or a warm
+/// device would be a flaky test pretending to be an NFR.
+void main() {
+  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  final descriptor = ModelCatalog.active;
+
+  /// The engine, loaded once and shared: a load is minutes of wall clock and
+  /// gigabytes of RAM, and re-doing it per test would prove nothing extra.
+  GemmaLlmEngine? engine;
+  late String skipReason;
+  var loadProbe = _IsolateBlockingProbe.empty();
+
+  setUpAll(() async {
+    final storage = await ModelStorage.openDefault();
+    final provisioner = ModelProvisioner(storage: storage);
+    addTearDown(provisioner.dispose);
+
+    final issue = descriptor.configurationIssue;
+    final status = await provisioner.statusOf(descriptor);
+    skipReason = switch ((issue, status)) {
+      (final issue?, _) =>
+        'model source not configured (${issue.name}) — pass '
+            'FIELDOPS_MODEL_URI and FIELDOPS_MODEL_SHA256. '
+            'License: ${descriptor.licensePage}',
+      // Deliberately not provisioned here. This suite is about the engine, and a
+      // 2.6GB download inside it would turn an inference failure into a network
+      // one. `integration_test/model_provisioning_test.dart` is the task that
+      // fetches, and pre-installing on the demo device is the documented flow.
+      (_, ModelInstallStatus.absent) =>
+        'weights are not installed — run '
+            'integration_test/model_provisioning_test.dart first, or side-load '
+            '${descriptor.fileName} into <app support>/models',
+      // Present but unhashed against the current pin. Loading anyway is the one
+      // thing Task 1.7 exists to prevent.
+      (_, ModelInstallStatus.unverified) =>
+        'weights are present but unverified against the pinned SHA-256 — run '
+            'provisioning to verify them before loading',
+      (_, ModelInstallStatus.ready) => '',
+    };
+    if (skipReason.isNotEmpty) return;
+
+    final path = storage.installedFile(descriptor).path;
+    debugPrint('[TC-LLM] model: $path');
+    debugPrint(
+      '[TC-LLM] size: ${await storage.installedFile(descriptor).length()} bytes',
+    );
+    debugPrint(
+      '[TC-LLM] rss before load: ${_formatRss(ProcessInfo.currentRss)}',
+    );
+
+    final candidate = GemmaLlmEngine(
+      config: InferenceConfig(
+        modelPath: path,
+        family: inferenceFamilyFor(descriptor.id),
+      ),
+    );
+    // Measured across the load, because a 2.6GB memory-map is the single most
+    // likely thing in this app to stall the UI isolate — and the claim that it does
+    // not is the reason the engine sits behind an isolate at all.
+    loadProbe = await _IsolateBlockingProbe.measure(candidate.initialize);
+    engine = candidate;
+  });
+
+  tearDownAll(() async {
+    await engine?.dispose();
+  });
+
+  /// Returns the shared engine, or skips the calling test with the reason.
+  GemmaLlmEngine? requireEngine() {
+    if (skipReason.isNotEmpty) {
+      markTestSkipped(skipReason);
+      return null;
+    }
+    return engine;
+  }
+
+  testWidgets(
+    'TC-LLM-LOAD-01: the engine loads the provisioned weights and reports ready',
+    (tester) async {
+      final engine = requireEngine();
+      if (engine == null) return;
+
+      expect(engine.isReady, isTrue);
+
+      final runtime = engine.runtime!;
+      debugPrint(
+        '[TC-LLM-LOAD-01] backend=${runtime.backend} '
+        'load=${runtime.loadMillis}ms context=${runtime.contextTokens} tokens',
+      );
+      debugPrint(
+        '[TC-LLM-LOAD-01] rss after load: '
+        '${_formatRss(ProcessInfo.currentRss)}',
+      );
+      debugPrint('[TC-LLM-LOAD-01] $loadProbe');
+
+      // The load really happened rather than being short-circuited: nothing maps a
+      // multi-gigabyte model in under a millisecond.
+      expect(runtime.loadMillis, greaterThan(0));
+      // The engine clamps a context window up to the bundle's baked KV-cache length,
+      // so it must never come back *below* what was asked for — a smaller window
+      // than requested would silently truncate the grounded prompt.
+      expect(
+        runtime.contextTokens,
+        greaterThanOrEqualTo(InferenceConfig.defaultContextTokens),
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
+
+  testWidgets(
+    'TC-LLM-GEN-01: a prompt streams tokens and terminates cleanly',
+    (tester) async {
+      final engine = requireEngine();
+      if (engine == null) return;
+
+      final tokens = <String>[];
+      var done = false;
+      final stopwatch = Stopwatch()..start();
+      int? firstTokenMillis;
+
+      final probe = await _IsolateBlockingProbe.measure(() async {
+        await for (final event in engine.generate(prompt: 'Say OK')) {
+          switch (event) {
+            case LlmToken(:final text):
+              firstTokenMillis ??= stopwatch.elapsedMilliseconds;
+              tokens.add(text);
+            case LlmToolCall():
+              fail('a prompt with no registered tools must not yield a call');
+            case LlmDone():
+              done = true;
+          }
+        }
+      });
+      stopwatch.stop();
+
+      final tokensPerSecond =
+          tokens.length /
+          (stopwatch.elapsedMilliseconds / 1000).clamp(0.001, double.infinity);
+      debugPrint(
+        '[TC-LLM-GEN-01] ${tokens.length} tokens in '
+        '${stopwatch.elapsedMilliseconds}ms — ttft=${firstTokenMillis}ms, '
+        '${tokensPerSecond.toStringAsFixed(1)} tok/s',
+      );
+      debugPrint('[TC-LLM-GEN-01] answer: ${tokens.join()}');
+      debugPrint('[TC-LLM-GEN-01] $probe');
+
+      expect(tokens, isNotEmpty, reason: 'the model produced no tokens at all');
+      // "Terminates cleanly" is the half of this criterion that a consumer depends
+      // on: a stream that yields tokens and then never completes hangs the agent
+      // loop, and no assertion on the text would notice.
+      expect(done, isTrue, reason: 'the stream never delivered LlmDone');
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
+
+  testWidgets(
+    'TC-LLM-TOOLCALL-01: a grounded prompt yields a native tool call for the SKU',
+    (tester) async {
+      final engine = requireEngine();
+      if (engine == null) return;
+
+      final calls = <LlmToolCall>[];
+      final prose = StringBuffer();
+      final stopwatch = Stopwatch()..start();
+
+      await for (final event in engine.generate(
+        prompt: _groundedE102Prompt,
+        tools: [_inventoryTool],
+      )) {
+        switch (event) {
+          case LlmToken(:final text):
+            prose.write(text);
+          case LlmToolCall call:
+            calls.add(call);
+          case LlmDone():
+            break;
+        }
+      }
+      stopwatch.stop();
+
+      debugPrint(
+        '[TC-LLM-TOOLCALL-01] ${stopwatch.elapsedMilliseconds}ms, '
+        '${calls.length} tool call(s)',
+      );
+      for (final call in calls) {
+        debugPrint('[TC-LLM-TOOLCALL-01] call: ${call.name} ${call.arguments}');
+      }
+      debugPrint('[TC-LLM-TOOLCALL-01] prose: $prose');
+
+      // Fuzzy as the plan requires: the tool *name* and the *SKU* are the contract
+      // — the agent loop routes on the first and queries the database with the
+      // second. Everything else the model says is prose.
+      expect(
+        calls,
+        isNotEmpty,
+        reason:
+            'no structured tool call arrived. If the model answered in prose '
+            'instead, the degraded path is Task 1.6\'s guard — but a Gemma 4 '
+            'bundle with tools_json should emit a native call here.',
+      );
+      final call = calls.firstWhere(
+        (call) => call.name == 'get_local_parts_inventory',
+        orElse: () => fail(
+          'expected a get_local_parts_inventory call, got '
+          '${calls.map((call) => call.name).toList()}',
+        ),
+      );
+      expect(
+        '${call.arguments['sku']}'.toUpperCase(),
+        contains('BRK-990-XP'),
+        reason: 'the call must carry the SKU the manual entry names',
+      );
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
+
+  testWidgets(
+    'a second turn does not inherit the first turn\'s history',
+    (tester) async {
+      // Not an AC, but the property Task 1.9 will build on and the one most likely
+      // to break silently: `LlmEngine.generate` is contracted as a *stateless* turn,
+      // and the fake behaves that way. If the runtime reused one chat, this second
+      // turn would answer in the context of the E-102 diagnosis above.
+      final engine = requireEngine();
+      if (engine == null) return;
+
+      final tokens = <String>[];
+      await for (final event in engine.generate(
+        prompt:
+            'Reply with exactly one word: the colour of a clear sky at noon.',
+      )) {
+        if (event is LlmToken) tokens.add(event.text);
+      }
+
+      final answer = tokens.join().trim();
+      debugPrint('[TC-LLM-STATELESS] answer: $answer');
+      expect(answer, isNotEmpty);
+      // A turn carrying the previous conversation would still be discussing brakes.
+      expect(answer.toLowerCase(), isNot(contains('brk-990')));
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
+}
+
+/// The tool Task 1.5's registry will own, declared here in the shape the runtime
+/// requires so this task can prove native function calling before 1.5 exists.
+final _inventoryTool = ToolDefinition(
+  name: 'get_local_parts_inventory',
+  description:
+      'Check the offline warehouse database for stock count and shelf '
+      'location of a spare part, by SKU.',
+  parameters: objectSchema(
+    properties: {
+      'sku': {
+        'type': 'string',
+        'description': 'The part number, for example BRK-990-XP.',
+      },
+    },
+    required: ['sku'],
+  ),
+);
+
+/// Stands in for Task 1.4's prompt compiler.
+///
+/// Copied in the shape §5.2 of the spec describes — a `[MANUAL DOCUMENT]` block from
+/// the E-102 seed entry, then the technician's inquiry — so that when 1.4 lands, this
+/// test's input is a compiler output rather than a rewrite.
+const _groundedE102Prompt = '''
+You are an offline Field Service Assistant for Apex-9 smart elevators.
+Answer using ONLY the verified technical manual document below.
+If a replacement part is required, you MUST call the
+get_local_parts_inventory tool to check warehouse stock before advising the
+technician.
+
+[MANUAL DOCUMENT]
+Title: Traction Brake Pad Wear & Vibration (Code: E-102)
+Section: Brake Systems
+Symptoms: High-pitched squealing during deceleration, cabin vibration at
+terminal landings, fault code E-102 displayed on machine room controller.
+Procedure: 1. Isolate the main elevator power bus. 2. Lockout/tagout machine
+room breaker 4A. 3. Remove the magnetic brake cowl using a Torx T20 driver.
+4. Inspect brake pad wear indicators. If thickness is less than 2.0mm, replace
+the assemblies. 5. Adjust caliper clearance to exactly 0.5mm.
+Required tools: Torx T20, Digital Caliper, Lockout Tagout Kit
+Required parts: BRK-990-XP
+
+[USER INQUIRY]
+The elevator cabin is vibrating badly and I'm seeing error E-102 in the
+machine room. What do I do, and do we have the part?
+''';
+
+/// Measures how long the **UI isolate** was ever prevented from running while some
+/// other work was in flight.
+///
+/// This is the evidence for the isolate boundary rather than an argument for it. A
+/// periodic timer on this isolate should tick every [_tick]; if inference were
+/// running here, the model load would show up as a gap of seconds and every frame in
+/// it would be dropped. Reported as the worst gap observed, which is the number that
+/// matters — an average would hide exactly the stall a user notices.
+class _IsolateBlockingProbe {
+  _IsolateBlockingProbe(this.worstGap, this.ticks, this.elapsed);
+
+  factory _IsolateBlockingProbe.empty() =>
+      _IsolateBlockingProbe(Duration.zero, 0, Duration.zero);
+
+  static const Duration _tick = Duration(milliseconds: 16);
+
+  final Duration worstGap;
+  final int ticks;
+  final Duration elapsed;
+
+  /// Runs [body], ticking a timer on this isolate throughout.
+  static Future<_IsolateBlockingProbe> measure(
+    Future<void> Function() body,
+  ) async {
+    final total = Stopwatch()..start();
+    final sinceLastTick = Stopwatch()..start();
+    var worstGap = Duration.zero;
+    var ticks = 0;
+
+    final timer = Timer.periodic(_tick, (_) {
+      ticks++;
+      final gap = sinceLastTick.elapsed;
+      if (gap > worstGap) worstGap = gap;
+      sinceLastTick
+        ..reset()
+        ..start();
+    });
+    try {
+      await body();
+    } finally {
+      timer.cancel();
+      total.stop();
+    }
+    return _IsolateBlockingProbe(worstGap, ticks, total.elapsed);
+  }
+
+  @override
+  String toString() =>
+      'ui isolate: $ticks ticks over ${elapsed.inMilliseconds}ms, '
+      'worst gap ${worstGap.inMilliseconds}ms';
+}
+
+String _formatRss(int bytes) => bytes <= 0
+    // `currentRss` is not implemented on every platform, and reporting 0 MB as a
+    // measurement would be worse than admitting it is unavailable.
+    ? 'unavailable'
+    : '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
