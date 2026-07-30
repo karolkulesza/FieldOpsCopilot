@@ -6,10 +6,11 @@ on-device — no cellular connectivity required — combining an on-device langu
 model, speech-to-text, camera-based OCR, and a local full-text-searchable manual
 database to help technicians diagnose faults and produce structured repair plans.
 
-> **Status: walking skeleton.** The project currently contains the runnable app
-> shell, the engine-abstraction layer, and deterministic in-memory fakes for
-> every on-device capability. The real on-device backends (LLM, STT, vision) are
-> not yet wired in — they slot in behind the interfaces described below.
+> **Status: vertical slice under construction.** The runnable app shell, the
+> engine-abstraction layer, the encrypted database, offline retrieval, model
+> provisioning and the **on-device LLM engine** are in place. STT and vision are
+> still fakes, and the agent loop that ties retrieval to inference is the next
+> task — they slot in behind the interfaces described below.
 
 ## What's implemented so far
 
@@ -42,7 +43,13 @@ database to help technicians diagnose faults and produce structured repair plans
   syntax error. See _Offline retrieval_ below.
 - **Model provisioning** — download-with-progress, streaming SHA-256 verification
   against a pinned digest, atomic install into no-backup storage, and a visible
-  "model ready" state on the home screen. See _Model provisioning_ below.
+  "model ready" state on the home screen, with the trigger to fetch and verify.
+  See _Model provisioning_ below.
+- **On-device inference** — **Gemma 4 E2B** in a `.litertlm` container, run
+  through `flutter_gemma` + `flutter_gemma_litertlm` (LiteRT-LM over `dart:ffi`)
+  on a dedicated background isolate, behind the same `LlmEngine` interface the
+  fake implements. Tool calls arrive as the model's **native function-call
+  tokens**, not as prompt-engineered JSON. See _On-device inference_ below.
 - **Test suite** — a widget smoke test plus unit tests for all four fakes.
 - **CI** — GitHub Actions running `dart format`, `flutter analyze`, and
   `flutter test` on every push and pull request.
@@ -66,8 +73,17 @@ lib/
 │   ├── vision_engine.dart    # VisionEngine interface
 │   ├── platform_telemetry.dart
 │   ├── providers.dart        # Riverpod providers (bind fakes today)
+│   ├── impl/
+│   │   └── gemma_llm_engine.dart  # Real LlmEngine: Gemma 4 on an isolate
 │   └── fakes/                # In-memory implementations for tests + skeleton
 └── services/
+    ├── inference/
+    │   ├── inference_config.dart    # Model path, family, backend, context window
+    │   ├── tool_schema.dart         # The JSON-Schema shape a tool must declare
+    │   ├── inference_protocol.dart  # Encoded messages across the isolate boundary
+    │   ├── inference_isolate.dart   # The worker: load / generate / stop / shutdown
+    │   ├── gemma_runtime.dart       # The only file that imports flutter_gemma
+    │   └── providers.dart           # Riverpod providers for the above
     ├── database/
     │   ├── tables.dart               # Drift table definitions
     │   ├── tables/
@@ -356,9 +372,98 @@ cancelling one in flight. A cross-process lock is a third — provisioning seria
 callers within one `ModelProvisioner` (the app has exactly one), which covers every
 in-app path but not two OS processes writing the same directory.
 
+## On-device inference
+
+The language model is **Gemma 4 E2B** in a `.litertlm` container, executed by
+[`flutter_gemma`](https://pub.dev/packages/flutter_gemma) with the
+[`flutter_gemma_litertlm`](https://pub.dev/packages/flutter_gemma_litertlm)
+engine — Google's LiteRT-LM runtime reached over `dart:ffi`. It sits behind the
+same `LlmEngine` interface the fake implements, so nothing upstream of the
+interface knows which is bound.
+
+### Model selection
+
+| Model | Size | Tool calling | Role here |
+|---|---|---|---|
+| **Gemma 4 E2B** (`.litertlm`) | 2.59 GB | **Native** function-call tokens | Shipped |
+| Gemma 3 1B (`.litertlm`) | 0.58 GB | Prompt-injected declaration, JSON parsed back out | Low-RAM fallback, same interface |
+| FunctionGemma 270M | 284 MB | Native, tool-calling specialist | Not shipped — see below |
+
+The fallback is a one-line configuration change (`GemmaModelFamily.gemma3`)
+because the two differ in *mechanism*, not in interface: Gemma 4 has the SDK
+render tool declarations into `<|tool>` tokens and answers with native
+tool-call tokens, while Gemma 3 gets a textual declaration in its prompt and has
+JSON parsed back out of its output. Both surface as the same structured
+`LlmToolCall`.
+
+FunctionGemma 270M is worth naming even though it is not shipped: a 284 MB
+tool-calling specialist is very attractive for this workload, and the reason to
+pass on it is that the demo needs one model that can *both* choose a tool and
+write a grounded repair plan in prose. Two models would mean two sets of weights
+resident, which is the memory budget this architecture is trying to protect.
+
+### Why the engine runs on its own isolate
+
+`IsolateInferenceHost` spawns a dedicated isolate and speaks a four-message
+protocol to it — load, generate, stop, shutdown — with every message encoded as
+a plain map so the wire format is unit-testable on the host.
+
+Being precise about what this buys, because the plugin is not naïve about
+threading either: LiteRT-LM already runs engine and conversation creation inside
+`Isolate.run`, and streams generated chunks from a native decode thread through
+a `NativeCallable.listener`. Part of what the boundary guarantees, the plugin
+already happens to do.
+
+"Happens to do" is the point. The frame-budget promise has to survive a plugin
+upgrade, a swap to the MediaPipe `.task` engine (whose threading is not the
+same), and a fallback model. An isolate at *this app's* seam is a guarantee about
+our own architecture rather than a bet on a dependency's internals — and it
+additionally contains a crash: an uncaught error in the worker arrives as a
+message on a port instead of taking the UI isolate down. The device suite
+measures the claim rather than asserting it, by ticking a 16 ms timer on the UI
+isolate throughout the model load and reporting the worst gap.
+
+Two consequences worth knowing. The worker needs the root isolate's
+`RootIsolateToken` (passed at spawn) because the plugin reaches
+`path_provider` and `shared_preferences` over platform channels, and those do
+not work on a background isolate without it. And generation is deliberately
+**serialised**: an overlapping turn is refused rather than queued, because the
+engine runs one conversation at a time and a queued turn would silently inherit
+the delay of the one ahead of it.
+
+### Tool calling
+
+Tools are declared as `ToolDefinition`s whose `parameters` map is a JSON-Schema
+object, validated at registration by `tool_schema.dart`. That validation earns
+its place: a plausible-looking `{'sku': 'String'}` map does not fail — it renders
+as a tool with **no arguments**, and the model then omits the SKU or invents one.
+The symptom shows up two layers away as "the model is bad at tool calling", so
+the shape is checked where the mistake is.
+
+One plugin detail is equally quiet and equally load-bearing: passing `tools:`
+gets the declaration in front of the model, but `InferenceChat` only *reads back*
+the structured calls when `supportsFunctionCalls` is true. Without it the model
+emits a perfectly good tool call that is parsed and then dropped.
+
+### What the engine does not do yet
+
+Each `generate()` call is one **stateless** turn: a fresh chat, no history from
+the previous call. That is what the fake does and what the golden suite will
+depend on. Feeding a tool *result* back for a second model turn is the agent
+loop's job (Task 1.9) and will extend the interface rather than quietly inherit
+an accumulated conversation.
+
+### Platform requirement
+
+`flutter_gemma` requires **iOS 16.0** (`background_downloader` requires 14.0), so
+the app's deployment target moved from Flutter's default 13.0 to 16.0. Adopting
+on-device Gemma therefore drops iOS 13–15 hardware — a real fleet constraint, not
+just a build setting.
+
 ## Getting started
 
-Requires the Flutter SDK (stable channel, Dart 3.12+).
+Requires the Flutter SDK (stable channel, Dart 3.12+). iOS 16.0+ / a 64-bit
+Android device is required to run the on-device model.
 
 ```bash
 flutter pub get
@@ -384,10 +489,30 @@ Tests are split into two tiers:
   vs. chunked, and which requests carry the access token.
 - **Integration tier** (`integration_test/`) — on-device runs against real
   backends. `flutter test` does not pick this directory up, so CI stays host-only.
-  `model_provisioning_test.dart` (TC-PROV-E2E-01) does a real download-verify-
-  install on a device; it **skips** with an actionable message unless the model
-  defines above are supplied, because CI has no artifact to fetch and must not pull
-  gigabytes over the network to try.
+  Both suites **skip** with an actionable message unless the model defines above are
+  supplied, because CI has no artifact to fetch and must not pull gigabytes over the
+  network to try.
+  - `model_provisioning_test.dart` (TC-PROV-E2E-01) — a real download, verify and
+    install.
+  - `llm_inference_test.dart` (TC-LLM-LOAD-01, TC-LLM-GEN-01, TC-LLM-TOOLCALL-01) —
+    loads the provisioned weights, streams a response, and checks that a grounded
+    prompt with a registered tool produces a structured tool call. It refuses to load
+    weights that are present but unverified. Assertions are behavioural (a call
+    naming the tool and the SKU), never exact token equality; decoding is greedy so
+    a run is reproducible.
+
+    On a **wirelessly connected** iOS device `flutter test` cannot launch the app
+    (`Cannot start app on wirelessly tethered iOS device`) and has no
+    `--publish-port` flag to fix it. Run the file through `flutter run` instead,
+    which does:
+
+    ```bash
+    flutter run integration_test/llm_inference_test.dart -d <device id> \
+      --publish-port --dart-define=FIELDOPS_MODEL_URI=... \
+      --dart-define=FIELDOPS_MODEL_SHA256=...
+    ```
+
+    A USB connection avoids this entirely and is much faster to iterate on.
 
 ## Tech stack
 
@@ -397,6 +522,8 @@ Tests are split into two tiers:
 | State management   | Riverpod (`flutter_riverpod`)                      |
 | Architecture       | MVVMC with engine-abstraction interfaces           |
 | Local database     | drift + SQLite3MultipleCiphers (`source: sqlite3mc`) |
+| On-device LLM      | Gemma 4 E2B (`.litertlm`) via `flutter_gemma` + `flutter_gemma_litertlm` (LiteRT-LM, `dart:ffi`) |
+| Inference threading | Dedicated background isolate with an encoded message protocol |
 | Model delivery     | `dart:io` streaming download + `crypto` SHA-256 verify, no-backup storage |
 | Testing            | `flutter_test` (unit + widget), `integration_test` |
 | CI                 | GitHub Actions                                     |
