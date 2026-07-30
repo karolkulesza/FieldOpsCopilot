@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Backup and transfer rules for Android 12+ (android:dataExtractionRules).
+
+  Both destinations exclude the provisioned model weights, for different reasons:
+  cloud backup because 0.5-2.4GB of re-downloadable weights would consume the
+  user's backup quota for no recovery value, and device-to-device transfer
+  because the new device can fetch the artifact itself — and must re-verify its
+  SHA-256 rather than inherit a receipt written on another machine.
+
+  `domain="file"` is the app's files directory, which is what path_provider's
+  getApplicationSupportDirectory() resolves to on Android; ModelStorage puts
+  artifacts in its `models` subdirectory.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="models" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="models" />
+    </device-transfer>
+</data-extraction-rules>

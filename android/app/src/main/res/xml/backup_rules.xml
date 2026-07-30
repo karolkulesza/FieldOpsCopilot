@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto-backup rules for Android 11 and below (android:fullBackupContent).
+
+  Provisioned model weights (0.5-2.4GB) are excluded: they are re-downloadable
+  from their pinned source URL, so backing them up buys no recovery value while
+  consuming the user's backup quota — multiplied by device count on a managed
+  fleet. `domain="file"` is the app's files directory, which is what
+  path_provider's getApplicationSupportDirectory() resolves to on Android;
+  ModelStorage puts artifacts in its `models` subdirectory.
+-->
+<full-backup-content>
+    <exclude domain="file" path="models" />
+</full-backup-content>

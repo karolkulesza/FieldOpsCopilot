@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../engines/llm_engine.dart';
 import '../engines/providers.dart';
+import 'components/model_readiness_banner.dart';
 
 /// Skeleton home screen.
 ///
@@ -76,6 +77,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
               ],
             ),
+            const SizedBox(height: 12),
+            // Whether verified weights are on the device, which is a separate
+            // question from whether the engine seam is wired: today the engine
+            // above is the fake, and it is ready regardless.
+            const ModelReadinessBanner(),
             const SizedBox(height: 24),
             Expanded(
               child: Container(
