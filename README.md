@@ -513,12 +513,41 @@ unreachable; the spec now carries the evidence and the caveat rather than a repl
 number, because the number worth writing down is a device number measured *without* a
 download in the same process.
 
-### Platform requirement
+### Platform requirement, and the build failure it can still produce
 
-`flutter_gemma` requires **iOS 16.0** (`background_downloader` requires 14.0), so
-the app's deployment target moved from Flutter's default 13.0 to 16.0. Adopting
-on-device Gemma therefore drops iOS 13–15 hardware — a real fleet constraint, not
-just a build setting.
+`flutter_gemma` requires **iOS 16.0** (`background_downloader` requires 14.0), so the
+app's deployment target moved from Flutter's default 13.0 to 16.0 — all three
+`IPHONEOS_DEPLOYMENT_TARGET` entries in `ios/Runner.xcodeproj/project.pbxproj`. Adopting
+on-device Gemma therefore drops iOS 13–15 hardware: a real fleet constraint, not just a
+build setting.
+
+**Bumping the target is necessary but not self-enforcing.** If a device build fails with
+
+```
+Target Integrity (Xcode): The package product 'flutter-gemma' requires minimum platform
+version 16.0 for the iOS platform, but this target supports 13.0
+```
+
+the project is not wrong — check
+`ios/Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage/Package.swift` and it
+will say `.iOS("13.0")`. Flutter's Swift Package Manager integration always generates that
+manifest with a hardcoded 13.0 (`flutter_tools/.../darwin/darwin.dart`), then raises it in a
+**separate, conditional** step that only runs when `xcodebuild -showBuildSettings` yields
+`IPHONEOS_DEPLOYMENT_TARGET` (`flutter_tools/.../ios/mac.dart`). That read is slow and can
+fail on a cold or loaded machine, and when it does the manifest keeps 13.0 and SPM rejects
+the plugin.
+
+Fix by running the step on its own first:
+
+```bash
+flutter build ios --config-only --debug    # patches the generated manifest to 16.0
+```
+
+Then re-run the build or the integration suite. Verify with
+`grep 'iOS(' ios/Flutter/ephemeral/.../Package.swift` — it should read `.iOS("16.0")`. The
+manifest is regenerated on every build, so this can recur; if it becomes a nuisance,
+moving plugin management back to CocoaPods (where the floor is a literal
+`platform :ios, '16.0'` in the Podfile) removes the conditional step entirely.
 
 ## Getting started
 
