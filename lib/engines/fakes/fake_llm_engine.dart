@@ -34,10 +34,15 @@ class FakeLlmEngine implements LlmEngine {
   /// Perfect parity is not available here, because the fake's turn is instantaneous while
   /// the device's takes seconds. Releasing the slot as eagerly as the device does would
   /// mean it was never held by the time [generate] returned — and the guard would then be
-  /// unable to catch the one thing it exists for, two overlapping calls. Dart also cannot
-  /// detect a stream that will never be subscribed. So the fake errs strict: a consumer
-  /// that asks for a turn and abandons it without cancelling is a bug worth surfacing on
-  /// the host, where it is cheap to find.
+  /// unable to catch the one thing it exists for. To be exact about which case that is,
+  /// since it is the decisive argument: a microtask-deferred release would still catch two
+  /// *synchronously* consecutive calls, but not two separated by an `await` — which is
+  /// precisely how an agent loop is written. That is the direction that matters, because a
+  /// permissive fake lets such a loop pass on the host and throw on device, which is the
+  /// trap this whole contract exists to close. Erring strict costs a cheap false failure;
+  /// erring eager ships a defect to Task 1.11. Dart also cannot detect a stream that will
+  /// never be subscribed, so a consumer that asks for a turn and abandons it without
+  /// cancelling is surfaced here, where it is cheap to find.
   bool _turnInFlight = false;
 
   @override
