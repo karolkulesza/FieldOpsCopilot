@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:field_ops_copilot/services/models/model_descriptor.dart';
@@ -328,9 +329,93 @@ void main() {
     },
   );
 
-  test('overlapping taps do not start a second transfer', () async {
-    // The provisioner serialises internally, so a second call is not *unsafe* — it is
-    // just a second progress stream fighting the first for the same state field.
+  test('a tap during an in-flight transfer does not re-enter', () async {
+    // Rewritten after review, because the first version passed for a reason that had
+    // nothing to do with this task's code. It called `provision()` twice in a row and
+    // asserted the downloader opened once — but the *provisioner* already guarantees
+    // that: calls are serialised, and by the time the second one runs the first has
+    // installed a receipt, so `statusOf == ready` short-circuits before the network.
+    // Deleting the controller's guard entirely left all nine tests green.
+    //
+    // What the guard actually protects is re-entry *while a transfer is running*: a
+    // second `provision()` would attach a second progress callback to the same state
+    // field, and the two would interleave their writes. So the transfer here is held
+    // open until the second tap has been made and rejected.
+    final gate = Completer<void>();
+    final downloader = _FakeDownloader(body: [1, 2, 3, 4], gate: gate);
+    final storage = ModelStorage(root: root);
+    final descriptor = ModelDescriptor(
+      id: 'test-model',
+      displayName: 'Test model',
+      fileName: 'test-model.litertlm',
+      licensePage: 'https://example.invalid/terms',
+      downloadUri: Uri.parse('https://example.invalid/test-model.litertlm'),
+      sha256Hex: goodHash,
+    );
+    final provisioner = ModelProvisioner(
+      storage: storage,
+      downloader: downloader,
+    );
+    final container = ProviderContainer(
+      overrides: [
+        activeModelDescriptorProvider.overrideWithValue(descriptor),
+        modelStorageProvider.overrideWith((ref) async => storage),
+        modelProvisionerProvider.overrideWith((ref) async => provisioner),
+      ],
+    );
+    addTearDown(container.dispose);
+    addTearDown(provisioner.dispose);
+
+    final controller = container.read(
+      modelProvisioningControllerProvider.notifier,
+    );
+
+    var runningTransitions = 0;
+    container.listen(modelProvisioningControllerProvider, (_, next) {
+      if (next is ProvisioningRunning) runningTransitions++;
+    });
+
+    final first = controller.provision();
+    // Let the first call reach the (gated) transfer, so the state really is
+    // ProvisioningRunning when the second tap arrives.
+    await pumpEventQueue();
+    expect(
+      container.read(modelProvisioningControllerProvider),
+      isA<ProvisioningRunning>(),
+    );
+    final transitionsBeforeSecondTap = runningTransitions;
+
+    // The second tap, mid-transfer. It must be dropped on the floor.
+    await controller.provision();
+
+    expect(
+      runningTransitions,
+      transitionsBeforeSecondTap,
+      reason:
+          'the refused tap must not write the state field the running transfer '
+          'is reporting into',
+    );
+    expect(
+      downloader.openCount,
+      1,
+      reason: 'the refused tap must not open a second transfer',
+    );
+
+    gate.complete();
+    await first;
+
+    expect(
+      container.read(modelProvisioningControllerProvider),
+      isA<ProvisioningSucceeded>(),
+      reason: 'the refused tap must not have disturbed the running transfer',
+    );
+    expect(downloader.openCount, 1);
+  });
+
+  test('two sequential taps do not re-download an installed model', () async {
+    // The property the old overlap test was accidentally asserting. Worth keeping
+    // *as itself*: it is the provisioner's serialisation plus its ready
+    // short-circuit, and it is what makes the button safe to tap twice slowly.
     final downloader = _FakeDownloader(body: [1, 2, 3, 4]);
     final storage = ModelStorage(root: root);
     final descriptor = ModelDescriptor(
@@ -358,20 +443,27 @@ void main() {
     final controller = container.read(
       modelProvisioningControllerProvider.notifier,
     );
-    final first = controller.provision();
-    final second = controller.provision();
-    await Future.wait([first, second]);
+    await controller.provision();
+    await controller.provision();
 
     expect(downloader.openCount, 1);
+    expect(
+      container.read(modelProvisioningControllerProvider),
+      isA<ProvisioningSucceeded>(),
+    );
   });
 }
 
 /// A [ModelDownloader] that serves a fixed body, or fails.
 class _FakeDownloader implements ModelDownloader {
-  _FakeDownloader({required this.body, this.failure});
+  _FakeDownloader({required this.body, this.failure, this.gate});
 
   final List<int> body;
   ModelDownloadException? failure;
+
+  /// When set, the body is withheld until it completes — which is what lets a test
+  /// hold a transfer genuinely in flight while it does something else.
+  final Completer<void>? gate;
 
   int openCount = 0;
 
@@ -380,8 +472,13 @@ class _FakeDownloader implements ModelDownloader {
     openCount++;
     final error = failure;
     if (error != null) throw error;
+    final held = gate;
     return ModelByteStream(
-      bytes: Stream.value(body),
+      bytes: held == null
+          ? Stream.value(body)
+          // The stream stays open (and the provisioner stays inside its transfer
+          // loop) until the gate opens.
+          : Stream.fromFuture(held.future.then((_) => body)),
       contentLength: body.length,
     );
   }
