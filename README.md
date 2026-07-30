@@ -471,36 +471,44 @@ an accumulated conversation.
 ### Measured (iOS 16.4 simulator, CPU backend, 2026-06-14)
 
 Run on an iPad Pro 11" simulator on an Apple-silicon Mac, against the real 2.59GB
-artifact. **These are not demo-device numbers** — the simulator has no Metal GPU, so
-the runtime fell back to CPU, and simulator RSS accounting is not a device's. They are
-recorded because they establish what the architecture *does*, and the device run
-replaces them rather than repeating them.
+artifact. **These are not demo-device numbers** — the simulator has no Metal GPU, so the
+runtime fell back to CPU, and simulator memory accounting is not a device's. They are
+recorded because they establish what the architecture *does*; the device run replaces
+them rather than repeating them.
 
-| Measurement | Value | Note |
+Ranges are across **three runs**, because the first single-run write-up of this table was
+more precise than the evidence: load time varied by 20% and RSS by 70%.
+
+| Measurement | Value (3 runs) | Note |
 |---|---|---|
 | Backend actually initialised | `cpu` | Requested "engine's choice"; no Metal on a simulator |
-| Model load | 11.4 s | Cold, 2.59GB `.litertlm` |
-| Context window | 2048 tokens requested, 2048 in force | A Dart-side value: the engine applies `max(requested, 1024)` before native init, and nothing reports the KV-cache the runtime actually allocated |
-| Process RSS | 179 MB → 734 MB across the load | `ProcessInfo.currentRss`, whole process |
-| "Say OK" | 1 token, TTFT 1.77 s | Streamed, terminated cleanly |
-| Grounded E-102 turn + 1 tool | 5.4 s to a structured `get_local_parts_inventory{sku: BRK-990-XP}` | Native `tool_calls`, not parsed prose |
-| UI isolate during the load | 712 ticks in 11.47 s, **worst gap 90 ms** | A 16 ms timer on the UI isolate; see below |
+| Model load | 10.8 – 13.1 s | Cold, 2.59GB `.litertlm` |
+| Context window | 2048 requested, 2048 in force | A Dart-side value: the engine applies `max(requested, 1024)` before native init, and nothing reports the KV-cache the runtime actually allocated |
+| Process RSS after load | 734 – 1266 MB (from 117 – 223 MB before) | Noisy, and an upper bound — see below |
+| "Say OK" | 1 token, TTFT 1.55 – 1.77 s | Streamed, terminated cleanly every run |
+| Grounded E-102 turn + 1 tool | 4.6 – 5.4 s to a structured `get_local_parts_inventory{sku: BRK-990-XP}` | Native `tool_calls`, not parsed prose |
+| UI isolate during the load | 674 – 822 ticks, **worst gap 32 – 90 ms** | A 16 ms timer on the UI isolate; see below |
 
-The last row is the isolate claim, measured. Had inference run on the UI isolate, the
-load would appear as a gap of ~11 s and every frame in it would be lost; the observed
-worst gap is 90 ms. Two honest caveats: 90 ms is still ~5 dropped frames, so the
-boundary is not free, and a CPU-backend simulator is not where this number ultimately
+The last row is the isolate claim, measured rather than argued. Had inference run on the
+UI isolate, the load would appear as a gap of ~11 s and every frame in it would be lost;
+the worst observed gap is 90 ms. Two honest caveats: 90 ms is still ~5 dropped frames, so
+the boundary is not free, and a CPU-backend simulator is not where this number ultimately
 matters.
 
-**Throughput is not yet meaningfully measured.** A one-token answer makes "tokens per
-second" a restatement of TTFT, and the grounded turn's 5.4 s is dominated by prefill of
-a ~400-token prompt. The spec's 15 tok/s target needs a device run with a long
-generation before anyone quotes a number against it.
+**Throughput is not meaningfully measured.** A one-token answer makes "tokens per second"
+a restatement of TTFT, and the grounded turn is dominated by prefill of a ~400-token
+prompt. The spec's 15 tok/s target needs a device run with a long generation before
+anyone quotes a number against it.
 
-**The spec's 500MB iOS footprint target is already in doubt.** 734MB of process RSS on
-CPU, before any Metal working set, is above it. That is a measurement to *act* on
-rather than a failure — but it must be a device measurement first, so the spec now
-carries the caveat rather than a corrected figure.
+**The RSS figure is contaminated, deliberately reported anyway.** These runs stream the
+2.59GB artifact through the same process moments before loading it (the suite provisions
+itself), so the post-load RSS includes transfer buffers and freed pages the allocator has
+not returned — which is why it swings 734–1266 MB for identical work. Treat it as an
+upper bound on the process, not as the model's footprint. Even so it clears the spec's
+**500MB iOS target** by a wide margin before any Metal working set, so that target looks
+unreachable; the spec now carries the evidence and the caveat rather than a replacement
+number, because the number worth writing down is a device number measured *without* a
+download in the same process.
 
 ### Platform requirement
 
