@@ -471,47 +471,63 @@ depend on. Feeding a tool *result* back for a second model turn is the agent
 loop's job (Task 1.9) and will extend the interface rather than quietly inherit
 an accumulated conversation.
 
-### Measured (iOS 16.4 simulator, CPU backend, 2026-06-14)
+### Measured on the demo device (iPad Air M4, iOS 26.5, 2026-06-14)
 
-Run on an iPad Pro 11" simulator on an Apple-silicon Mac, against the real 2.59GB
-artifact. **These are not demo-device numbers** — the simulator has no Metal GPU, so the
-runtime fell back to CPU, and simulator memory accounting is not a device's. They are
-recorded because they establish what the architecture *does*; the device run replaces
-them rather than repeating them.
+Two runs on the physical device against the real 2.59GB artifact. The simulator figures
+that preceded these are kept below only because the *comparison* is informative — where
+they disagree, these are the numbers.
 
-Ranges are across **three runs**, because the first single-run write-up of this table was
-more precise than the evidence: load time varied by 20% and RSS by 70%.
-
-| Measurement | Value (3 runs) | Note |
+| Measurement | iPad Air M4 (2 runs) | iOS 16.4 simulator (3 runs) |
 |---|---|---|
-| Backend actually initialised | `cpu` | Requested "engine's choice"; no Metal on a simulator |
-| Model load | 10.8 – 13.1 s | Cold, 2.59GB `.litertlm` |
-| Context window | 2048 requested, 2048 in force | A Dart-side value: the engine applies `max(requested, 1024)` before native init, and nothing reports the KV-cache the runtime actually allocated |
-| Process RSS after load | 734 – 1266 MB (from 117 – 223 MB before) | Noisy, and an upper bound — see below |
-| "Say OK" | 1 token, TTFT 1.55 – 1.77 s | Streamed, terminated cleanly every run |
-| Grounded E-102 turn + 1 tool | 4.6 – 5.4 s to a structured `get_local_parts_inventory{sku: BRK-990-XP}` | Native `tool_calls`, not parsed prose |
-| UI isolate during the load | 674 – 822 ticks, **worst gap 32 – 90 ms** | A 16 ms timer on the UI isolate; see below |
+| Backend actually initialised | **`gpu`** (Metal) | `cpu` (no Metal on a simulator) |
+| Model load | **7.0 – 7.2 s** | 10.8 – 13.1 s |
+| Time to first token, `"Say OK"` | **337 – 551 ms** | 1.55 – 1.77 s |
+| Grounded turn + one tool → structured call | **2.48 – 2.58 s** | 4.6 – 5.4 s |
+| Process RSS after load | **1669 – 1671 MB** (from 364 MB) | 734 – 1266 MB (from 117 – 223 MB) |
+| UI isolate, worst gap during load | **1445 – 1728 ms** ⚠️ | 32 – 90 ms |
 
-The last row is the isolate claim, measured rather than argued. Had inference run on the
-UI isolate, the load would appear as a gap of ~11 s and every frame in it would be lost;
-the worst observed gap is 90 ms. Two honest caveats: 90 ms is still ~5 dropped frames, so
-the boundary is not free, and a CPU-backend simulator is not where this number ultimately
-matters.
+The tool call is the result that mattered: on real hardware, under grounding, Gemma 4
+returns a native structured `get_local_parts_inventory{sku: BRK-990-XP}` through the SDK's
+`tool_calls` path — not prose that something had to parse. Both runs, plus every simulator
+run.
 
-**Throughput is not meaningfully measured.** A one-token answer makes "tokens per second"
-a restatement of TTFT, and the grounded turn is dominated by prefill of a ~400-token
-prompt. The spec's 15 tok/s target needs a device run with a long generation before
-anyone quotes a number against it.
+**The UI-isolate number is bad, and it is the one the simulator most misled us about.**
+The isolate boundary keeps a 7-second model load from being a 7-second freeze, but ~1.4–1.7 s
+of that load still stalls the UI isolate — around 90 dropped frames, reproducible across
+both runs, and 17× worse than the simulator suggested. Against the spec's §3.1 promise that
+the UI thread never drops frames, that is a **real violation during model load**, not a
+rounding error.
 
-**The RSS figure is contaminated, deliberately reported anyway.** These runs stream the
-2.59GB artifact through the same process moments before loading it (the suite provisions
-itself), so the post-load RSS includes transfer buffers and freed pages the allocator has
-not returned — which is why it swings 734–1266 MB for identical work. Treat it as an
-upper bound on the process, not as the model's footprint. Even so it **exceeds** the spec's
-500MB iOS target by a wide margin, before any Metal working set, so that target looks
-unreachable; the spec now carries the evidence and the caveat rather than a replacement
-number, because the number worth writing down is a device number measured *without* a
-download in the same process.
+The cause is **not yet established**, and the honest candidates are:
+
+- process-wide memory pressure — a 2.59GB `mmap` plus Metal buffer allocation taking RSS to
+  1.67GB can stall every thread in the process, including the UI isolate, without anything
+  Dart-level blocking;
+- the plugin's own `Isolate.run` for engine creation, or Metal shader/pipeline compilation on
+  first load;
+- platform-channel traffic from the worker (`path_provider`, `shared_preferences` are
+  marshalled via the root isolate's messenger).
+
+What would distinguish them: re-run with side-loaded weights so no 2.6GB transfer precedes
+the load, force `InferenceBackend.cpu` on device to see whether Metal setup is implicated,
+and profile the load with the DevTools timeline. Until then the mitigation is scheduling
+rather than architecture — **load the model before the UI needs to be interactive**, behind
+the readiness banner, which is what Task 1.11 should design for rather than discover.
+
+**Throughput is still not measured.** A one-token answer makes tokens-per-second a
+restatement of TTFT (the "1.7 / 2.7 tok/s" the harness prints is exactly that arithmetic and
+means nothing). The spec's 15 tok/s target needs a long generation on device — a real gap,
+not a satisfied criterion. Note also that the TTFT above is for a trivial prompt; the
+grounded prompt's ~400-token prefill is inside the 2.5 s figure, and no separate TTFT was
+captured for it.
+
+**The spec's 500MB iOS footprint target is unreachable, and now measurably so.** 1.67GB of
+process RSS on the device, twice, within 2MB of each other — far more consistent than the
+simulator's 70% swing, which suggests it is dominated by the model rather than by transfer
+noise. It is still an upper bound (the suite streams the artifact through the same process
+moments earlier, and `flutter test` reinstalls the app per run so a download-free
+measurement needs side-loading), but no reading of 1.67GB rescues a 500MB target. The spec
+carries the device figure.
 
 ### Platform requirement, and the build failure it can still produce
 
