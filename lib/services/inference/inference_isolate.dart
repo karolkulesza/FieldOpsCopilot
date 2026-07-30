@@ -88,7 +88,21 @@ class IsolateInferenceHost implements InferenceHost {
   ///
   /// Every request races this, because a port whose reader has died never answers:
   /// without it a load or a turn would hang forever on a worker that crashed.
-  Completer<Never> _workerLost = Completer<Never>();
+  Completer<Never> _workerLost = _lostWorkerCompleter();
+
+  /// Builds the completer above with its error pre-ignored.
+  ///
+  /// The `ignore()` is not tidiness. Completing a future with an error and no
+  /// listener is an *unhandled async error*, and the common case has no listener at
+  /// all: an app that never loads the model still disposes the engine on the way out,
+  /// which completes this. Without this, every such teardown reported a crash that
+  /// had not happened. Racers still receive the error normally — `ignore()` only
+  /// suppresses the unhandled-error report.
+  static Completer<Never> _lostWorkerCompleter() {
+    final completer = Completer<Never>();
+    completer.future.ignore();
+    return completer;
+  }
 
   /// The turn in flight, so it can be failed if the worker dies mid-generation.
   _HostTurn? _turn;
@@ -122,11 +136,28 @@ class IsolateInferenceHost implements InferenceHost {
       );
     }
 
-    _workerLost = Completer<Never>();
-    // Registers a no-op error handler so completing it with nobody racing is not
-    // reported as an unhandled error. Racers still see the error.
-    _workerLost.future.ignore();
+    _workerLost = _lostWorkerCompleter();
 
+    try {
+      return await _startAndLoad(config, token);
+    } on Object {
+      // Every failure path lands here — a spawn that failed, a worker that died
+      // before the handshake, a load that was refused, a reply that made no sense.
+      // The first version only tore down after a `FailureReply`, and a worker dying
+      // *at the handshake* therefore left `_isolate` set: the next attempt was
+      // refused with "start called twice" and the host was permanently unusable
+      // after one bad start. One teardown for all of them, and the caller still sees
+      // the original error.
+      await _teardown();
+      rethrow;
+    }
+  }
+
+  /// The body of [start]: spawn, handshake, load. Failures are handled by [start].
+  Future<LoadedRuntime> _startAndLoad(
+    InferenceConfig config,
+    RootIsolateToken token,
+  ) async {
     final handshake = ReceivePort('inference.handshake');
     // One port serves both channels: `onExit` sends a bare null and `onError` sends
     // a two-element list, so they are told apart by shape. Both must be watched — a
@@ -160,15 +191,19 @@ class IsolateInferenceHost implements InferenceHost {
     switch (reply) {
       case LoadedReply(:final runtime):
         return LoadedRuntime.fromWire(runtime);
+      // Thrown, not returned: [start] tears the worker down on the way out. A
+      // worker that could not load has nothing worth keeping — the weights are not
+      // resident, and leaving the isolate alive would hold an idle plugin and a stale
+      // handshake.
+      //
+      // That teardown uses `_teardown`, *not* `shutdown()`. `shutdown` is the public
+      // "this host is finished" call and marks the host unusable, which would make a
+      // load failure permanent: a device that failed one load could never try again
+      // without rebuilding the whole provider graph. The engine's contract is that a
+      // failed load stays retryable, and this is the half of it that lives here.
       case FailureReply(:final message):
-        // A worker that could not load has nothing worth keeping: the weights are
-        // not resident, and leaving the isolate alive would hold an idle plugin and
-        // a stale handshake. Tear it down so the caller's only option is a fresh
-        // start, which is also the only thing that can succeed.
-        await shutdown();
         throw InferenceFailure(message, enginePresumedLost: true);
       default:
-        await shutdown();
         throw InferenceFailure('unexpected reply to load: $reply');
     }
   }
@@ -180,11 +215,11 @@ class IsolateInferenceHost implements InferenceHost {
   }) {
     final commands = _commands;
     if (commands == null || _lostReason != null) {
-      throw StateError(
-        _lostReason == null
-            ? 'IsolateInferenceHost.generate called before start()'
-            : 'inference worker is gone: $_lostReason',
-      );
+      throw StateError(switch ((_disposed, _lostReason)) {
+        (_, final reason?) => 'inference worker is gone: $reason',
+        (true, _) => 'IsolateInferenceHost was shut down',
+        _ => 'IsolateInferenceHost.generate called before start()',
+      });
     }
     if (_turn != null) {
       // Generation is serialised all the way down — the engine runs one
@@ -225,7 +260,18 @@ class IsolateInferenceHost implements InferenceHost {
 
   @override
   Future<void> shutdown() async {
+    // The one difference from [_teardown]: this host is finished for good, and a
+    // later `start()` on it is a bug in the caller rather than a retry.
     _disposed = true;
+    await _teardown();
+  }
+
+  /// Releases the worker and every resource attached to it, leaving the host able to
+  /// [start] again.
+  ///
+  /// Used by both [shutdown] and a failed [start]. The difference is only
+  /// [_disposed], which [shutdown] sets and a failed start deliberately does not.
+  Future<void> _teardown() async {
     final commands = _commands;
     _commands = null;
 
@@ -270,6 +316,11 @@ class IsolateInferenceHost implements InferenceHost {
         const InferenceFailure('inference host shut down'),
       );
     }
+    // Cleared so a retry is not immediately refused by its own predecessor's
+    // failure: `_lostReason` is what makes `generate` and `isRunning` report a dead
+    // worker, and after a teardown there is no worker to be dead. `start()` installs
+    // a fresh `_workerLost` for the next attempt.
+    _lostReason = null;
   }
 
   /// Handles the `onExit` / `onError` messages of the worker isolate.
