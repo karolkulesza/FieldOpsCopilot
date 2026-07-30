@@ -5,7 +5,7 @@ import 'package:field_ops_copilot/engines/impl/gemma_llm_engine.dart';
 import 'package:field_ops_copilot/engines/llm_engine.dart';
 import 'package:field_ops_copilot/services/inference/inference_config.dart';
 import 'package:field_ops_copilot/services/inference/providers.dart';
-import 'package:field_ops_copilot/services/inference/tool_schema.dart';
+import 'package:field_ops_copilot/engines/tool_schema.dart';
 import 'package:field_ops_copilot/services/models/model_descriptor.dart';
 import 'package:field_ops_copilot/services/models/model_provisioner.dart';
 import 'package:field_ops_copilot/services/models/model_storage.dart';
@@ -201,7 +201,7 @@ void main() {
       );
       expect(
         engine.config.contextTokens,
-        greaterThanOrEqualTo(1024),
+        greaterThanOrEqualTo(InferenceConfig.litertlmContextFloor),
         reason: 'below the .litertlm floor the engine would raise it silently',
       );
     },

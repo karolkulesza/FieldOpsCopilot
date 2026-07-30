@@ -33,9 +33,16 @@
 ///
 /// This is the contract Task 1.5's registry must emit. [objectSchema] exists so it
 /// (and the tests here) can build a conforming map without hand-writing it.
+///
+/// It lives beside `llm_engine.dart` rather than under the Gemma runtime because it is a
+/// property of the **interface**, not of one backend. That placement is load-bearing: it
+/// is what lets `FakeLlmEngine` enforce the same rule, so a tool definition that passes
+/// the host suite cannot throw on device. An earlier version lived under
+/// `services/inference/` and only the real engine checked it — which meant the two
+/// backends behind one interface disagreed about what a legal argument was.
 library;
 
-import '../../engines/llm_engine.dart';
+import 'llm_engine.dart';
 
 /// Why a tool definition cannot be handed to the model.
 class ToolSchemaProblem {

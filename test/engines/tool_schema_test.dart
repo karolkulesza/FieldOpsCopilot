@@ -1,5 +1,5 @@
 import 'package:field_ops_copilot/engines/llm_engine.dart';
-import 'package:field_ops_copilot/services/inference/tool_schema.dart';
+import 'package:field_ops_copilot/engines/tool_schema.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The trap this guards is specific and quiet: a `parameters` map that is not a

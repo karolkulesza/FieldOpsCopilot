@@ -4,7 +4,7 @@ import 'package:field_ops_copilot/engines/impl/gemma_llm_engine.dart';
 import 'package:field_ops_copilot/engines/llm_engine.dart';
 import 'package:field_ops_copilot/services/inference/inference_config.dart';
 import 'package:field_ops_copilot/services/inference/inference_isolate.dart';
-import 'package:field_ops_copilot/services/inference/tool_schema.dart';
+import 'package:field_ops_copilot/engines/tool_schema.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The engine's *contract* — when it is ready, what happens to a turn requested too
