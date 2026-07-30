@@ -377,9 +377,15 @@ void main() {
 
     final first = controller.provision();
     // Waited on deterministically rather than pumped. `pumpEventQueue()` was enough when
-    // this file runs alone and *not* when the whole suite runs concurrently — it returned
-    // before the provisioner had reached `open()`, and the state was still idle. A test
-    // whose pass depends on machine load is worse than no test.
+    // this file runs alone and *not* when the whole suite runs concurrently.
+    //
+    // The precise cause, corrected after review because the first post-mortem named the
+    // wrong assertion: `provision()` sets `ProvisioningRunning` *before* its first
+    // `await`, so the state check could not have been what failed. What raced was
+    // `openCount == 1` — the pump returned before the provisioner had worked through
+    // `storage.prepare()` and `statusOf()` (real filesystem I/O) to reach `open()`.
+    // Awaiting the downloader's own signal removes the guesswork: a test whose pass
+    // depends on machine load is worse than no test.
     await downloader.opened.timeout(const Duration(seconds: 10));
     expect(
       container.read(modelProvisioningControllerProvider),
