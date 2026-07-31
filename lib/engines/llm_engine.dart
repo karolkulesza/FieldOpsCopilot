@@ -54,7 +54,18 @@ class ToolDefinition {
   final String name;
   final String description;
 
-  /// Parameter name -> JSON-schema-ish type descriptor.
+  /// JSON-Schema object describing the tool's arguments:
+  /// `{'type': 'object', 'properties': {…}, 'required': [...]}`. Empty for a tool that
+  /// takes none. Build one with `objectSchema()` in `tool_schema.dart`.
+  ///
+  /// **Not** a bare name-to-type map. This was originally documented as a
+  /// "JSON-schema-ish type descriptor", which read as licence to write
+  /// `{'sku': 'String'}` — and every engine rejects that, because on-device runtimes
+  /// consume this map in two ways and neither can use it: one hands it to a native
+  /// template as `tools_json`, the other writes it into the prompt verbatim. Both fail
+  /// quietly, which is why the shape is validated at registration (see
+  /// `assertToolDefinitionsUsable`) by *every* implementation of this interface — the
+  /// fake included, so that a definition passing the host suite cannot throw on device.
   final Map<String, Object?> parameters;
 }
 

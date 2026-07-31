@@ -1,5 +1,4 @@
 import 'dart:typed_data';
-
 import 'package:field_ops_copilot/engines/fakes/fake_llm_engine.dart';
 import 'package:field_ops_copilot/engines/fakes/fake_platform_telemetry.dart';
 import 'package:field_ops_copilot/engines/fakes/fake_stt_engine.dart';
@@ -7,10 +6,72 @@ import 'package:field_ops_copilot/engines/fakes/fake_vision_engine.dart';
 import 'package:field_ops_copilot/engines/llm_engine.dart';
 import 'package:field_ops_copilot/engines/platform_telemetry.dart';
 import 'package:field_ops_copilot/engines/stt_engine.dart';
+import 'package:field_ops_copilot/engines/tool_schema.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('FakeLlmEngine', () {
+    test(
+      'refuses a malformed tool schema, exactly as a device engine does',
+      () async {
+        // The fake's parity with the real engine is what makes the host suite meaningful:
+        // Task 1.9's agent loop and Task 1.10's goldens are tested against this class, so
+        // a fake that accepted `{'sku': 'String'}` would let a tool registry pass every
+        // host test and throw on the demo device.
+        final engine = FakeLlmEngine(
+          turns: [
+            const [LlmDone()],
+          ],
+        );
+        await engine.initialize();
+        addTearDown(engine.dispose);
+
+        expect(
+          () => engine.generate(
+            prompt: 'E-102',
+            tools: const [
+              ToolDefinition(
+                name: 'get_local_parts_inventory',
+                description: 'stock',
+                parameters: {'sku': 'String'},
+              ),
+            ],
+          ),
+          throwsA(isA<ToolSchemaException>()),
+        );
+      },
+    );
+
+    test('accepts a conforming tool schema', () async {
+      final engine = FakeLlmEngine(
+        turns: [
+          const [LlmDone()],
+        ],
+      );
+      await engine.initialize();
+      addTearDown(engine.dispose);
+
+      final events = await engine
+          .generate(
+            prompt: 'E-102',
+            tools: [
+              ToolDefinition(
+                name: 'get_local_parts_inventory',
+                description: 'Check warehouse stock for a SKU.',
+                parameters: objectSchema(
+                  properties: {
+                    'sku': {'type': 'string'},
+                  },
+                  required: ['sku'],
+                ),
+              ),
+            ],
+          )
+          .toList();
+
+      expect(events, [const LlmDone()]);
+    });
+
     // TC-FAKE-LLM-01: streams scripted tokens in order.
     test('streams scripted tokens in order', () async {
       final engine = FakeLlmEngine(
@@ -48,9 +109,71 @@ void main() {
       expect(call.arguments['sku'], 'BRK-990-XP');
     });
 
+    test('refuses an overlapping turn, as the device engine does', () async {
+      // Inference is serialised all the way down on device — one native conversation at
+      // a time — so an agent loop that overlapped turns would pass every host test and
+      // fail on the device. The fake has to be exactly as strict.
+      final engine = FakeLlmEngine(
+        turns: [
+          const [LlmToken('first'), LlmDone()],
+          const [LlmToken('second'), LlmDone()],
+        ],
+      );
+      await engine.initialize();
+      addTearDown(engine.dispose);
+
+      final first = engine.generate(prompt: 'a');
+
+      expect(() => engine.generate(prompt: 'b'), throwsStateError);
+
+      // Draining the first turn releases the slot, so the next one is fine.
+      expect(await first.toList(), [const LlmToken('first'), const LlmDone()]);
+      expect(await engine.generate(prompt: 'b').toList(), [
+        const LlmToken('second'),
+        const LlmDone(),
+      ]);
+    });
+
+    test('a cancelled turn releases the slot', () async {
+      // A consumer walking away mid-stream must not wedge the engine — the real host
+      // clears its turn on cancel too.
+      final engine = FakeLlmEngine(
+        turns: [
+          const [LlmToken('a'), LlmToken('b'), LlmDone()],
+          const [LlmDone()],
+        ],
+      );
+      await engine.initialize();
+      addTearDown(engine.dispose);
+
+      final subscription = engine.generate(prompt: 'a').listen(null);
+      await subscription.cancel();
+
+      expect(() => engine.generate(prompt: 'b'), returnsNormally);
+    });
+
+    test('does not revive after dispose', () async {
+      // `GemmaLlmEngine` refuses to re-initialise after disposal: its isolate is gone.
+      // A fake that quietly revived would let a lifecycle bug through the host suite.
+      final engine = FakeLlmEngine(
+        turns: [
+          const [LlmDone()],
+        ],
+      );
+      await engine.initialize();
+      await engine.dispose();
+
+      await expectLater(engine.initialize(), throwsStateError);
+      expect(() => engine.generate(prompt: 'x'), throwsStateError);
+      expect(engine.isReady, isFalse);
+    });
+
     test('throws if generate is called before initialize', () {
       final engine = FakeLlmEngine();
-      expect(() => engine.generate(prompt: 'x').toList(), throwsStateError);
+      // Asserted without `.toList()`: the throw is synchronous, at the call site, which
+      // is the failure mode `GemmaLlmEngine` has. Draining the stream would pass either
+      // way and so would not notice the fake deferring it.
+      expect(() => engine.generate(prompt: 'x'), throwsStateError);
     });
   });
 
