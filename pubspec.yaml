@@ -43,6 +43,8 @@ dependencies:
   # Streaming SHA-256 for model-weight verification (Task 1.7): a 2.4GB artifact
   # is hashed chunk-by-chunk as it is written, never buffered in memory.
   crypto: ^3.0.7
+  flutter_gemma: ^1.4.1
+  flutter_gemma_litertlm: ^1.3.1
 
 # Bundle SQLite3MultipleCiphers (encryption-enabled SQLite) via the sqlite3
 # package's build hooks instead of the legacy sqlcipher_flutter_libs. This gives
