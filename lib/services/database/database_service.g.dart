@@ -1268,6 +1268,7 @@ class $InventoryPartsTable extends InventoryParts
     ),
     type: DriftSqlType.string,
     requiredDuringInsert: true,
+    $customConstraints: 'NOT NULL COLLATE NOCASE',
   );
   static const VerificationMeta _nameMeta = const VerificationMeta('name');
   @override
@@ -1381,7 +1382,19 @@ class $InventoryPartsTable extends InventoryParts
 
 class InventoryPartRow extends DataClass
     implements Insertable<InventoryPartRow> {
-  /// Stock-keeping unit, e.g. `BRK-990-XP`.
+  /// Stock-keeping unit, e.g. `BRK-990-XP`. Stored canonically (trimmed,
+  /// upper-cased) via [normalizeSku] and matched by exact equality.
+  ///
+  /// `COLLATE NOCASE` for the same reason `manual_entries.code` carries it, and
+  /// it matters more here: from Task 1.5 onward the SKU in a lookup arrives from
+  /// the *model*, inside a native function call, so its casing is whatever the
+  /// weights felt like emitting. The collation applies to the implicit primary-key
+  /// index too, so case-insensitive equality goes *through* the index instead of
+  /// forcing `upper(sku)` and a table scan.
+  ///
+  /// As on `code`, `customConstraint` **replaces** drift's generated constraint
+  /// string, so `NOT NULL` is restated by hand; `withLength` survives because it
+  /// only ever produced a Dart-side check, never SQL.
   final String sku;
   final String name;
 
@@ -1996,6 +2009,272 @@ class WorkOrdersCompanion extends UpdateCompanion<WorkOrderRow> {
   }
 }
 
+class $SeedMarkersTable extends SeedMarkers
+    with TableInfo<$SeedMarkersTable, SeedMarkerRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SeedMarkersTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _revisionMeta = const VerificationMeta(
+    'revision',
+  );
+  @override
+  late final GeneratedColumn<int> revision = GeneratedColumn<int>(
+    'revision',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _appliedAtMeta = const VerificationMeta(
+    'appliedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> appliedAt = GeneratedColumn<DateTime>(
+    'applied_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, revision, appliedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'seed_markers';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SeedMarkerRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('revision')) {
+      context.handle(
+        _revisionMeta,
+        revision.isAcceptableOrUnknown(data['revision']!, _revisionMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_revisionMeta);
+    }
+    if (data.containsKey('applied_at')) {
+      context.handle(
+        _appliedAtMeta,
+        appliedAt.isAcceptableOrUnknown(data['applied_at']!, _appliedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_appliedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  SeedMarkerRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SeedMarkerRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      revision: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}revision'],
+      )!,
+      appliedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}applied_at'],
+      )!,
+    );
+  }
+
+  @override
+  $SeedMarkersTable createAlias(String alias) {
+    return $SeedMarkersTable(attachedDatabase, alias);
+  }
+}
+
+class SeedMarkerRow extends DataClass implements Insertable<SeedMarkerRow> {
+  /// Dataset name, e.g. `elevator_manual_seed`.
+  final String id;
+
+  /// The `revision` field of the asset that was applied.
+  final int revision;
+
+  /// When the seed ran, for support/debugging only — nothing branches on it.
+  final DateTime appliedAt;
+  const SeedMarkerRow({
+    required this.id,
+    required this.revision,
+    required this.appliedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['revision'] = Variable<int>(revision);
+    map['applied_at'] = Variable<DateTime>(appliedAt);
+    return map;
+  }
+
+  SeedMarkersCompanion toCompanion(bool nullToAbsent) {
+    return SeedMarkersCompanion(
+      id: Value(id),
+      revision: Value(revision),
+      appliedAt: Value(appliedAt),
+    );
+  }
+
+  factory SeedMarkerRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SeedMarkerRow(
+      id: serializer.fromJson<String>(json['id']),
+      revision: serializer.fromJson<int>(json['revision']),
+      appliedAt: serializer.fromJson<DateTime>(json['appliedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'revision': serializer.toJson<int>(revision),
+      'appliedAt': serializer.toJson<DateTime>(appliedAt),
+    };
+  }
+
+  SeedMarkerRow copyWith({String? id, int? revision, DateTime? appliedAt}) =>
+      SeedMarkerRow(
+        id: id ?? this.id,
+        revision: revision ?? this.revision,
+        appliedAt: appliedAt ?? this.appliedAt,
+      );
+  SeedMarkerRow copyWithCompanion(SeedMarkersCompanion data) {
+    return SeedMarkerRow(
+      id: data.id.present ? data.id.value : this.id,
+      revision: data.revision.present ? data.revision.value : this.revision,
+      appliedAt: data.appliedAt.present ? data.appliedAt.value : this.appliedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SeedMarkerRow(')
+          ..write('id: $id, ')
+          ..write('revision: $revision, ')
+          ..write('appliedAt: $appliedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, revision, appliedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SeedMarkerRow &&
+          other.id == this.id &&
+          other.revision == this.revision &&
+          other.appliedAt == this.appliedAt);
+}
+
+class SeedMarkersCompanion extends UpdateCompanion<SeedMarkerRow> {
+  final Value<String> id;
+  final Value<int> revision;
+  final Value<DateTime> appliedAt;
+  final Value<int> rowid;
+  const SeedMarkersCompanion({
+    this.id = const Value.absent(),
+    this.revision = const Value.absent(),
+    this.appliedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SeedMarkersCompanion.insert({
+    required String id,
+    required int revision,
+    required DateTime appliedAt,
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       revision = Value(revision),
+       appliedAt = Value(appliedAt);
+  static Insertable<SeedMarkerRow> custom({
+    Expression<String>? id,
+    Expression<int>? revision,
+    Expression<DateTime>? appliedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (revision != null) 'revision': revision,
+      if (appliedAt != null) 'applied_at': appliedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SeedMarkersCompanion copyWith({
+    Value<String>? id,
+    Value<int>? revision,
+    Value<DateTime>? appliedAt,
+    Value<int>? rowid,
+  }) {
+    return SeedMarkersCompanion(
+      id: id ?? this.id,
+      revision: revision ?? this.revision,
+      appliedAt: appliedAt ?? this.appliedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (revision.present) {
+      map['revision'] = Variable<int>(revision.value);
+    }
+    if (appliedAt.present) {
+      map['applied_at'] = Variable<DateTime>(appliedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SeedMarkersCompanion(')
+          ..write('id: $id, ')
+          ..write('revision: $revision, ')
+          ..write('appliedAt: $appliedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$DatabaseService extends GeneratedDatabase {
   _$DatabaseService(QueryExecutor e) : super(e);
   $DatabaseServiceManager get managers => $DatabaseServiceManager(this);
@@ -2020,6 +2299,7 @@ abstract class _$DatabaseService extends GeneratedDatabase {
   late final $TechniciansTable technicians = $TechniciansTable(this);
   late final $InventoryPartsTable inventoryParts = $InventoryPartsTable(this);
   late final $WorkOrdersTable workOrders = $WorkOrdersTable(this);
+  late final $SeedMarkersTable seedMarkers = $SeedMarkersTable(this);
   Selectable<ManualEntryRow> searchManualEntriesRanked(
     String match,
     int limit,
@@ -2045,6 +2325,7 @@ abstract class _$DatabaseService extends GeneratedDatabase {
     technicians,
     inventoryParts,
     workOrders,
+    seedMarkers,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -3355,6 +3636,168 @@ typedef $$WorkOrdersTableProcessedTableManager =
       WorkOrderRow,
       PrefetchHooks Function({bool technicianId})
     >;
+typedef $$SeedMarkersTableCreateCompanionBuilder =
+    SeedMarkersCompanion Function({
+      required String id,
+      required int revision,
+      required DateTime appliedAt,
+      Value<int> rowid,
+    });
+typedef $$SeedMarkersTableUpdateCompanionBuilder =
+    SeedMarkersCompanion Function({
+      Value<String> id,
+      Value<int> revision,
+      Value<DateTime> appliedAt,
+      Value<int> rowid,
+    });
+
+class $$SeedMarkersTableFilterComposer
+    extends Composer<_$DatabaseService, $SeedMarkersTable> {
+  $$SeedMarkersTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get revision => $composableBuilder(
+    column: $table.revision,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get appliedAt => $composableBuilder(
+    column: $table.appliedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$SeedMarkersTableOrderingComposer
+    extends Composer<_$DatabaseService, $SeedMarkersTable> {
+  $$SeedMarkersTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get revision => $composableBuilder(
+    column: $table.revision,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get appliedAt => $composableBuilder(
+    column: $table.appliedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SeedMarkersTableAnnotationComposer
+    extends Composer<_$DatabaseService, $SeedMarkersTable> {
+  $$SeedMarkersTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get revision =>
+      $composableBuilder(column: $table.revision, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get appliedAt =>
+      $composableBuilder(column: $table.appliedAt, builder: (column) => column);
+}
+
+class $$SeedMarkersTableTableManager
+    extends
+        RootTableManager<
+          _$DatabaseService,
+          $SeedMarkersTable,
+          SeedMarkerRow,
+          $$SeedMarkersTableFilterComposer,
+          $$SeedMarkersTableOrderingComposer,
+          $$SeedMarkersTableAnnotationComposer,
+          $$SeedMarkersTableCreateCompanionBuilder,
+          $$SeedMarkersTableUpdateCompanionBuilder,
+          (
+            SeedMarkerRow,
+            BaseReferences<_$DatabaseService, $SeedMarkersTable, SeedMarkerRow>,
+          ),
+          SeedMarkerRow,
+          PrefetchHooks Function()
+        > {
+  $$SeedMarkersTableTableManager(_$DatabaseService db, $SeedMarkersTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SeedMarkersTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SeedMarkersTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SeedMarkersTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<int> revision = const Value.absent(),
+                Value<DateTime> appliedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SeedMarkersCompanion(
+                id: id,
+                revision: revision,
+                appliedAt: appliedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required int revision,
+                required DateTime appliedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => SeedMarkersCompanion.insert(
+                id: id,
+                revision: revision,
+                appliedAt: appliedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$SeedMarkersTableProcessedTableManager =
+    ProcessedTableManager<
+      _$DatabaseService,
+      $SeedMarkersTable,
+      SeedMarkerRow,
+      $$SeedMarkersTableFilterComposer,
+      $$SeedMarkersTableOrderingComposer,
+      $$SeedMarkersTableAnnotationComposer,
+      $$SeedMarkersTableCreateCompanionBuilder,
+      $$SeedMarkersTableUpdateCompanionBuilder,
+      (
+        SeedMarkerRow,
+        BaseReferences<_$DatabaseService, $SeedMarkersTable, SeedMarkerRow>,
+      ),
+      SeedMarkerRow,
+      PrefetchHooks Function()
+    >;
 
 class $DatabaseServiceManager {
   final _$DatabaseService _db;
@@ -3369,4 +3812,6 @@ class $DatabaseServiceManager {
       $$InventoryPartsTableTableManager(_db, _db.inventoryParts);
   $$WorkOrdersTableTableManager get workOrders =>
       $$WorkOrdersTableTableManager(_db, _db.workOrders);
+  $$SeedMarkersTableTableManager get seedMarkers =>
+      $$SeedMarkersTableTableManager(_db, _db.seedMarkers);
 }

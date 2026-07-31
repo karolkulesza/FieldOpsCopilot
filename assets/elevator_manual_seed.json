@@ -1,32 +1,67 @@
-[
-  {
-    "id": "apex_9_err_102",
-    "section": "Brake Systems",
-    "code": "E-102",
-    "title": "Traction Brake Pad Wear & Vibration",
-    "symptoms": "High-pitched squealing during deceleration, cabin vibration at terminal landings, fault code E-102 displayed on machine room controller.",
-    "procedure": "1. Isolate the main elevator power bus. 2. Lockout/tagout machine room breaker 4A. 3. Remove the magnetic brake cowl using a Torx T20 driver. 4. Inspect brake pad wear indicators. If thickness is less than 2.0mm, replace the assemblies. 5. Adjust caliper clearance to exactly 0.5mm.",
-    "required_tools": ["Torx T20", "Digital Caliper", "Lockout Tagout Kit"],
-    "required_parts": ["BRK-990-XP"]
-  },
-  {
-    "id": "apex_9_err_204",
-    "section": "Hydraulics & Valving",
-    "code": "E-204",
-    "title": "Proportional Valve Flow Discrepancy",
-    "symptoms": "Levelling inaccuracies exceeding 5mm, rough ride transitions, temperature warning E-204 on hydraulic manifold ledger.",
-    "procedure": "1. Read hydraulic oil temperature from manifold gauge. 2. If temperature is above 60C, activate the cooling bypass valve. 3. Inspect proportional valve solenoid connections for resistance drift. 4. Clean pilot valve filter mesh with isopropyl spray. 5. Recalibrate flow curves using the console controller.",
-    "required_tools": ["Multimeter", "Hex Key 5mm", "Isopropyl Cleaner"],
-    "required_parts": ["FLT-440-HYD"]
-  },
-  {
-    "id": "apex_9_err_305",
-    "section": "Door Operators",
-    "code": "E-305",
-    "title": "Door Clutches & Belt Slippage",
-    "symptoms": "Elevator doors cycle three times and throw obstruction warning, belt squealing during door open sequences, fault code E-305.",
-    "procedure": "1. Switch door operator controller to Manual. 2. Check door clutch alignment relative to hoistway rollers; gap must be 6mm. 3. Inspect operator belt tension; tighten tension bolt by 2 full rotations if slack exceeds 10mm. 4. Clean optical door curtain lenses with a microfiber cloth.",
-    "required_tools": ["Microfiber Cloth", "Wrench 10mm", "Steel Ruler"],
-    "required_parts": ["BELT-330-DRV"]
-  }
-]
+{
+  "revision": 1,
+  "manual_entries": [
+    {
+      "id": "apex_9_err_102",
+      "section": "Brake Systems",
+      "code": "E-102",
+      "title": "Traction Brake Pad Wear & Vibration",
+      "symptoms": "High-pitched squealing during deceleration, cabin vibration at terminal landings, fault code E-102 displayed on machine room controller.",
+      "procedure": "1. Isolate the main elevator power bus. 2. Lockout/tagout machine room breaker 4A. 3. Remove the magnetic brake cowl using a Torx T20 driver. 4. Inspect brake pad wear indicators. If thickness is less than 2.0mm, replace the assemblies. 5. Adjust caliper clearance to exactly 0.5mm.",
+      "required_tools": ["Torx T20", "Digital Caliper", "Lockout Tagout Kit"],
+      "required_parts": ["BRK-990-XP"]
+    },
+    {
+      "id": "apex_9_err_204",
+      "section": "Hydraulics & Valving",
+      "code": "E-204",
+      "title": "Proportional Valve Flow Discrepancy",
+      "symptoms": "Levelling inaccuracies exceeding 5mm, rough ride transitions, temperature warning E-204 on hydraulic manifold ledger.",
+      "procedure": "1. Read hydraulic oil temperature from manifold gauge. 2. If temperature is above 60C, activate the cooling bypass valve. 3. Inspect proportional valve solenoid connections for resistance drift. 4. Clean pilot valve filter mesh with isopropyl spray. 5. Recalibrate flow curves using the console controller.",
+      "required_tools": ["Multimeter", "Hex Key 5mm", "Isopropyl Cleaner"],
+      "required_parts": ["FLT-440-HYD"]
+    },
+    {
+      "id": "apex_9_err_305",
+      "section": "Door Operators",
+      "code": "E-305",
+      "title": "Door Clutches & Belt Slippage",
+      "symptoms": "Elevator doors cycle three times and throw obstruction warning, belt squealing during door open sequences, fault code E-305.",
+      "procedure": "1. Switch door operator controller to Manual. 2. Check door clutch alignment relative to hoistway rollers; gap must be 6mm. 3. Inspect operator belt tension; tighten tension bolt by 2 full rotations if slack exceeds 10mm. 4. Clean optical door curtain lenses with a microfiber cloth.",
+      "required_tools": ["Microfiber Cloth", "Wrench 10mm", "Steel Ruler"],
+      "required_parts": ["BELT-330-DRV"]
+    }
+  ],
+  "inventory_parts": [
+    {
+      "sku": "BRK-990-XP",
+      "name": "Traction Brake Pad Assembly",
+      "stock": 2,
+      "location": "Aisle 4, Shelf B"
+    },
+    {
+      "sku": "FLT-440-HYD",
+      "name": "Hydraulic Pilot Valve Filter Mesh",
+      "stock": 5,
+      "location": "Aisle 2, Shelf A"
+    },
+    {
+      "sku": "BELT-330-DRV",
+      "name": "Door Operator Drive Belt",
+      "stock": 0,
+      "location": "Aisle 1, Shelf C"
+    },
+    {
+      "sku": "CAL-050-KIT",
+      "name": "Caliper Clearance Shim Kit",
+      "stock": 12,
+      "location": "Aisle 4, Shelf A"
+    },
+    {
+      "sku": "SNS-770-OPT",
+      "name": "Optical Door Curtain Sensor",
+      "stock": 1,
+      "location": "Aisle 3, Shelf D"
+    }
+  ]
+}
