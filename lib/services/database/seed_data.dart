@@ -2,9 +2,21 @@
 ///
 /// The asset is a **build input**, like Task 1.7's model URL and digest: it ships
 /// inside the bundle and nothing at runtime can repair it. So it is validated
-/// completely *before* a single row is written — a malformed asset must be a typed
+/// *before* a single row is written — a malformed asset must be a typed
 /// [SeedFormatException] at parse time, not a half-applied seed discovered later
 /// by a retrieval test returning two manuals instead of three.
+///
+/// **What "validated" covers, precisely.** Structure and types (root object,
+/// integer `revision`, both datasets present, every element an object), required
+/// fields present and non-blank, `stock` a non-negative integer, `id`/`sku`
+/// uniqueness, and the two column length bounds ([kSkuMaxLength],
+/// [kPartNameMaxLength]) — the latter because drift's own `withLength` check runs in
+/// `validateIntegrity` at *insert* time, which is inside the seeding transaction and
+/// therefore too late to be this layer's error. It does **not** validate meaning:
+/// a manual referencing an unstocked SKU, or prose that says nothing useful, parses
+/// fine. Drift's column checks remain as a second gate inside the transaction, and
+/// [DatabaseInitializer] keeps that gate safe by making the write atomic — belt and
+/// braces, not a substitute for this one.
 ///
 /// Schema:
 /// ```json
@@ -59,8 +71,9 @@ class SeedBundle {
   ///
   /// Throws [SeedFormatException] on anything the loader cannot honestly apply:
   /// a non-object root, a missing or non-integer `revision`, a missing dataset, a
-  /// row missing a required field, a blank id/code/sku, or a **duplicate** id or
-  /// sku within the asset.
+  /// row missing a required field, a blank id/code/sku, a whitespace-padded `id`,
+  /// a `sku`/`name` longer than its column stores, or a **duplicate** id or sku
+  /// within the asset.
   ///
   /// Duplicates are rejected rather than deduplicated because the upsert that
   /// applies this bundle is last-write-wins: a duplicated id would seed silently
@@ -130,6 +143,17 @@ List<Map<String, Object?>> _requireList(Map<String, Object?> root, String key) {
 
 ManualEntryRow _manualEntry(Map<String, Object?> json) {
   final id = _requireText(json, 'id', context: 'manual_entries');
+  // `id` is the primary key and, unlike `code`/`sku`, is *not* canonicalised — the
+  // document id is an opaque identifier the retrieval tests assert on literally, so
+  // silently rewriting it would be worse than refusing it. But padding must not be
+  // merely tolerated either: `_rejectDuplicates` compares the stored strings, so
+  // `"m1"` and `"m1 "` would pass as distinct and produce two manual entries that
+  // are indistinguishable to a reader and to every log line.
+  if (id != id.trim()) {
+    throw SeedFormatException(
+      'manual_entries "id" must not have leading or trailing whitespace: "$id"',
+    );
+  }
   return ManualEntryRow(
     id: id,
     section: _requireText(json, 'section', context: 'manual_entries[$id]'),
@@ -162,6 +186,18 @@ InventoryPartRow _inventoryPart(Map<String, Object?> json) {
   final sku = normalizeSku(
     _requireText(json, 'sku', context: 'inventory_parts'),
   );
+  // Length is checked here, not left to drift's column check, because that check
+  // runs in `validateIntegrity` at insert time — i.e. *inside* the seeding
+  // transaction. Rolling back is correct behaviour but it is not this library's
+  // contract, which is that a bad asset fails as a [SeedFormatException] before
+  // any write is attempted. Bounds come from [kSkuMaxLength]/[kPartNameMaxLength],
+  // the same constants the columns are declared with.
+  _requireMaxLength(
+    sku,
+    'sku',
+    kSkuMaxLength,
+    context: 'inventory_parts[$sku]',
+  );
   final stock = json['stock'];
   if (stock is! int) {
     throw SeedFormatException(
@@ -180,12 +216,34 @@ InventoryPartRow _inventoryPart(Map<String, Object?> json) {
       'inventory_parts[$sku] "location" must be a string when present',
     );
   }
+  final name = _requireText(json, 'name', context: 'inventory_parts[$sku]');
+  _requireMaxLength(
+    name,
+    'name',
+    kPartNameMaxLength,
+    context: 'inventory_parts[$sku]',
+  );
   return InventoryPartRow(
     sku: sku,
-    name: _requireText(json, 'name', context: 'inventory_parts[$sku]'),
+    name: name,
     stock: stock,
     location: location as String?,
   );
+}
+
+/// Rejects a value longer than the column that will store it.
+void _requireMaxLength(
+  String value,
+  String field,
+  int max, {
+  required String context,
+}) {
+  if (value.length > max) {
+    throw SeedFormatException(
+      '$context "$field" is ${value.length} characters; the column stores at '
+      'most $max',
+    );
+  }
 }
 
 /// Reads a required, non-blank string field.

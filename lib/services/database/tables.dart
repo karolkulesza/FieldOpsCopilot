@@ -29,6 +29,25 @@ class Technicians extends Table {
   Set<Column<Object>> get primaryKey => {id};
 }
 
+/// Maximum stored length of a part SKU, for callers that must check the bound
+/// *before* the column does — `SeedBundle.parse` in particular, whose contract is
+/// that a bad asset fails before any write is attempted.
+///
+/// **This must stay equal to the literal in [InventoryParts.sku]'s `withLength`,
+/// and it cannot be shared with it.** Passing `max: kSkuMaxLength` instead of a
+/// literal *compiles and analyzes cleanly* but silently drops the bound from the
+/// generated code: `drift_dev` resolves `withLength`'s arguments at build time from
+/// the source expression and does not fold a named constant, so the emitted
+/// `checkTextLength(minTextLength: 1, maxTextLength: 60)` becomes
+/// `checkTextLength(minTextLength: 1)` — the Dart-side length check disappears with
+/// no error anywhere. (Found exactly that way: the CI codegen gate flagged the
+/// regenerated file.) `kSkuMaxLengthAgreesWithColumn` in the test suite pins the two
+/// together behaviourally, since the compiler cannot.
+const int kSkuMaxLength = 60;
+
+/// Maximum stored length of a part name. Same duplication rule as [kSkuMaxLength].
+const int kPartNameMaxLength = 160;
+
 /// Spare parts held in the local warehouse, keyed by SKU.
 @DataClassName('InventoryPartRow')
 class InventoryParts extends Table {
@@ -45,6 +64,9 @@ class InventoryParts extends Table {
   /// As on `code`, `customConstraint` **replaces** drift's generated constraint
   /// string, so `NOT NULL` is restated by hand; `withLength` survives because it
   /// only ever produced a Dart-side check, never SQL.
+  // The `60`/`160` literals below must stay equal to [kSkuMaxLength] and
+  // [kPartNameMaxLength]; see those constants for why they cannot be referenced
+  // here, and which test holds the pair together.
   TextColumn get sku => text()
       .withLength(min: 1, max: 60)
       .customConstraint('NOT NULL COLLATE NOCASE')();

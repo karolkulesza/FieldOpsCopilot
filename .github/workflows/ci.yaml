@@ -27,10 +27,27 @@ jobs:
       # Runs before `analyze`/`test` deliberately: if generation *changes* the
       # sources, everything after this step should be judged against the
       # regenerated code, not the committed snapshot.
+      #
+      # `git diff --exit-code` compares the worktree to the index, which on a fresh
+      # `checkout` equals HEAD — so a *modified* generated file is caught. It cannot
+      # see an **untracked** one, so a newly generated output that was never
+      # committed would otherwise slip through; the `ls-files --others` check closes
+      # that. (`flutter analyze` would usually also fail on a missing `part` file,
+      # but only usually.)
+      #
+      # Note for anyone debugging this locally: with a warm `.dart_tool/build` cache
+      # build_runner writes 0 outputs and will not restore a stale in-source file, so
+      # a local pass proves nothing. Delete `.dart_tool/build` (or use a fresh clone)
+      # to reproduce what CI does.
       - name: Verify generated code is up to date
         run: |
           dart run build_runner build --delete-conflicting-outputs
           git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard)" || {
+            echo "Uncommitted generated files:"
+            git ls-files --others --exclude-standard
+            exit 1
+          }
 
       - name: Verify formatting
         run: dart format --output=none --set-exit-if-changed .

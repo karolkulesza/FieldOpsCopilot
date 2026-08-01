@@ -2,9 +2,12 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/drift.dart' show Variable;
+import 'package:drift/native.dart' show NativeDatabase;
 import 'package:field_ops_copilot/services/database/database_initializer.dart';
 import 'package:field_ops_copilot/services/database/database_service.dart';
 import 'package:field_ops_copilot/services/database/seed_data.dart';
+import 'package:field_ops_copilot/services/database/tables.dart'
+    show kPartNameMaxLength, kSkuMaxLength;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -123,24 +126,33 @@ void main() {
       expect(await db.seedMarker('test_seed'), isNull);
     });
 
-    test('a row rejected mid-write rolls the whole seed back', () async {
-      // The manuals are written first and are individually valid; the inventory
-      // then trips drift's length check on `name`. Without a transaction the
-      // database would keep three manuals and a marker vouching for an inventory
-      // that was never inserted — seeded enough to look healthy, and permanently
-      // skipped on the next launch.
-      final json = _fixtureJson(
-        partsOverride: [
-          {'sku': 'BRK-990-XP', 'name': 'x' * 200, 'stock': 2},
-        ],
+    test('a failure mid-write rolls the whole seed back', () async {
+      // Failure is injected at the *last* step — the marker write, after both
+      // datasets are in — which is the worst case the transaction exists for.
+      // Without it the database would hold three manuals and five parts with no
+      // marker (so it re-seeds forever), or in the mirror case a marker vouching
+      // for rows that were rolled back (so it never seeds again).
+      //
+      // Deliberately not driven by drift's `withLength` check any more: R0-F2
+      // moved length validation into the parser, so an over-length name now fails
+      // before the transaction opens and could not reach this code path. Injecting
+      // the failure directly also stops this test from silently becoming a test of
+      // whichever column constraint happens to fire first.
+      final failing = _MarkerFailingDatabase();
+      addTearDown(failing.close);
+
+      await expectLater(
+        DatabaseInitializer(
+          database: failing,
+          source: _TextSeedSource(_fixtureJson(), seedId: 'test_seed'),
+        ).ensureSeeded(),
+        throwsA(isA<StateError>()),
       );
 
-      await expectLater(initializerFor(json).ensureSeeded(), throwsA(anything));
-
-      expect(await db.select(db.manualEntries).get(), isEmpty);
-      expect(await db.manualFtsIndexedDocumentCount(), 0);
-      expect(await db.allInventoryParts(), isEmpty);
-      expect(await db.seedMarker('test_seed'), isNull);
+      expect(await failing.select(failing.manualEntries).get(), isEmpty);
+      expect(await failing.manualFtsIndexedDocumentCount(), 0);
+      expect(await failing.allInventoryParts(), isEmpty);
+      expect(await failing.seedMarker('test_seed'), isNull);
     });
   });
 
@@ -217,6 +229,45 @@ void main() {
       expect(await db.manualFtsIndexedDocumentCount(), 3);
     });
 
+    test('a re-seed is upsert-shaped, not replace-shaped', () async {
+      // Pins the two limits of a revision bump that the README now states, because
+      // both are easy to assume the other way round and 1.4+ may lean on them.
+      await initializerFor(_fixtureJson()).ensureSeeded();
+
+      await initializerFor(
+        _fixtureJson(
+          revision: 2,
+          // E-204 dropped from the asset entirely...
+          manualsOverride: _defaultManuals()
+              .where((m) => m['id'] != 'apex_9_err_204')
+              .toList(growable: false),
+          // ...and BRK-990-XP re-sent with `location` omitted.
+          partsOverride: [
+            {
+              'sku': 'BRK-990-XP',
+              'name': 'Traction Brake Pad Assembly',
+              'stock': 9,
+            },
+          ],
+        ),
+      ).ensureSeeded();
+
+      // A dropped row is not deleted, and its FTS terms stay searchable.
+      expect(await db.manualEntryByCode('E-204'), isNotNull);
+      expect(await search('ledger'), ['apex_9_err_204']);
+      expect(await db.manualFtsIndexedDocumentCount(), 3);
+
+      // A re-sent row's present columns are overwritten...
+      final part = await db.inventoryPartBySku('BRK-990-XP');
+      expect(part?.stock, 9);
+      // ...and an omitted nullable column keeps its old value rather than being
+      // cleared, because drift leaves an absent column out of the DO UPDATE SET.
+      expect(part?.location, 'Aisle 4, Shelf B');
+
+      // Parts dropped from the asset survive too, so the count does not shrink.
+      expect(await db.allInventoryParts(), hasLength(5));
+    });
+
     test('a lower asset revision does not re-seed', () async {
       await initializerFor(_fixtureJson(revision: 7)).ensureSeeded();
 
@@ -287,6 +338,39 @@ void main() {
       expect((await db.inventoryPartBySku('brk-990-xp'))?.stock, 2);
       expect((await db.inventoryPartBySku('  BRK-990-XP  '))?.stock, 2);
       expect((await db.inventoryPartBySku(' Brk-990-Xp '))?.stock, 2);
+    });
+
+    test('upsertInventoryParts canonicalises the SKU it stores', () async {
+      // R0-F1. The write side of `normalizeSku` had no regression guard: deleting
+      // it from `upsertInventoryParts` left all 269 tests green, because every SKU
+      // reaching that method in this suite had already been canonicalised by
+      // `SeedBundle.parse`, and the one test that writes a non-canonical SKU (the
+      // next one) goes through `customStatement` and bypasses the method entirely.
+      //
+      // That gap mattered because three documents call this layer the *primary*
+      // mechanism and the collation only a backstop — and the collation genuinely
+      // cannot cover this case: whitespace survives NOCASE, so the row would be
+      // permanently unreachable. `upsertInventoryParts` is public API and the seed
+      // parser is not its only future caller (from 1.5 the SKU comes from the
+      // model, in Tier 2 from speech).
+      await db.upsertInventoryParts([
+        const InventoryPartRow(
+          sku: '  lot-888-pad  ',
+          name: 'Padded Write Part',
+          stock: 7,
+          location: 'Aisle 7',
+        ),
+      ]);
+
+      // Both halves. The *stored* form is canonical...
+      expect(
+        (await db.allInventoryParts()).map((p) => p.sku),
+        contains('LOT-888-PAD'),
+        reason: 'the write path is what makes the stored form canonical',
+      );
+      // ...and the canonical lookup therefore reaches it. Without write-side
+      // normalisation the row is stored as `"  lot-888-pad  "` and this is null.
+      expect((await db.inventoryPartBySku('LOT-888-PAD'))?.stock, 7);
     });
 
     test(
@@ -540,6 +624,100 @@ void main() {
           'from a procedure that needs no tools',
     );
 
+    // R0-F2: these two bounds are the reason the parser's promise is now true.
+    // Drift declares them with `withLength`, whose check runs in
+    // `validateIntegrity` at *insert* time — inside the seeding transaction, i.e.
+    // too late to be a parse error. Both are validated here against the same
+    // constants the columns use, so the two cannot drift apart.
+    rejects(
+      'a part name longer than the column stores',
+      _fixtureJson(
+        partsOverride: [
+          {'sku': 'A-1', 'name': 'x' * (kPartNameMaxLength + 1), 'stock': 1},
+        ],
+      ),
+      because: 'drift would otherwise reject it mid-transaction instead',
+    );
+
+    rejects(
+      'a SKU longer than the column stores',
+      _fixtureJson(
+        partsOverride: [
+          {'sku': 'S' * (kSkuMaxLength + 1), 'name': 'n', 'stock': 1},
+        ],
+      ),
+    );
+
+    // Named so `tables.dart` can point at it: kSkuMaxLengthAgreesWithColumn.
+    test('the parser bounds equal the column bounds', () async {
+      // The constants and the `withLength` literals are duplicated by necessity —
+      // `drift_dev` reads `withLength`'s arguments from the source expression and
+      // silently drops a named constant, emitting `checkTextLength(minTextLength: 1)`
+      // with no max and no diagnostic. So the agreement has to be asserted through
+      // behaviour: one character past the constant must be rejected *by the column*.
+      //
+      // Deliberately routed through the database rather than the parser: the parser
+      // is what uses the constants, the column is what uses the literals, and this
+      // test exists to catch them diverging.
+      final tooLongName = 'x' * (kPartNameMaxLength + 1);
+      await expectLater(
+        () => db.upsertInventoryParts([
+          InventoryPartRow(sku: 'LEN-1', name: tooLongName, stock: 1),
+        ]),
+        throwsA(anything),
+        reason:
+            'kPartNameMaxLength ($kPartNameMaxLength) is larger than the '
+            "column's own limit, or the column lost its max entirely",
+      );
+
+      final tooLongSku = 'S' * (kSkuMaxLength + 1);
+      await expectLater(
+        () => db.upsertInventoryParts([
+          InventoryPartRow(sku: tooLongSku, name: 'ok', stock: 1),
+        ]),
+        throwsA(anything),
+        reason:
+            'kSkuMaxLength ($kSkuMaxLength) exceeds the column, or the '
+            'column lost its max',
+      );
+
+      // And exactly at the bound the column accepts, so the constants are not
+      // merely *below* the column's limit but equal to it.
+      await db.upsertInventoryParts([
+        InventoryPartRow(
+          sku: 'S' * kSkuMaxLength,
+          name: 'x' * kPartNameMaxLength,
+          stock: 1,
+        ),
+      ]);
+      expect(
+        (await db.inventoryPartBySku('S' * kSkuMaxLength))?.name,
+        hasLength(kPartNameMaxLength),
+      );
+    });
+
+    test('a name at exactly the limit is accepted', () {
+      // The bound is inclusive; an off-by-one here would reject a legal asset,
+      // which is a worse failure than the one being guarded.
+      final bundle = SeedBundle.parse(
+        _fixtureJson(
+          partsOverride: [
+            {'sku': 'A-1', 'name': 'x' * kPartNameMaxLength, 'stock': 1},
+          ],
+        ),
+      );
+
+      expect(bundle.inventoryParts.single.name, hasLength(kPartNameMaxLength));
+    });
+
+    rejects(
+      'a manual id padded with whitespace',
+      _fixtureJson(manualsOverride: [_manual(' padded ')]),
+      because:
+          'id is the primary key and is deliberately not canonicalised, so '
+          '"m1" and "m1 " would pass the duplicate check as distinct rows',
+    );
+
     test('an absent required_tools defaults to an empty list', () {
       final bundle = SeedBundle.parse(
         _fixtureJson(manualsOverride: [_manual('x')]),
@@ -638,6 +816,24 @@ void main() {
       expect(version.read<int>('user_version'), 3);
     });
   });
+}
+
+/// A database whose marker write always fails, so the seeding transaction can be
+/// made to fail at its final step with both datasets already written.
+///
+/// Plaintext and in-memory: encryption is irrelevant to whether a transaction rolls
+/// back, and `DatabaseService`'s constructor takes any [QueryExecutor], so this needs
+/// no production seam.
+class _MarkerFailingDatabase extends DatabaseService {
+  _MarkerFailingDatabase() : super(NativeDatabase.memory());
+
+  @override
+  Future<void> recordSeedMarker({
+    required String id,
+    required int revision,
+    DateTime? appliedAt,
+  }) =>
+      Future.error(StateError('injected failure after the rows were written'));
 }
 
 /// A [SeedSource] that returns text handed to it, standing in for the asset bundle.
