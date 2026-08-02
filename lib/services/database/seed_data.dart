@@ -69,11 +69,25 @@ class SeedBundle {
 
   /// Parses [json] (the raw asset text) into a validated bundle.
   ///
-  /// Throws [SeedFormatException] on anything the loader cannot honestly apply:
-  /// a non-object root, a missing or non-integer `revision`, a missing dataset, a
-  /// row missing a required field, a blank id/code/sku, a whitespace-padded `id`,
-  /// a `sku`/`name` longer than its column stores, or a **duplicate** id or sku
-  /// within the asset.
+  /// Throws [SeedFormatException] on anything the loader cannot honestly apply.
+  /// This list is the complete set, because the README points here for it:
+  ///
+  /// * text that is not valid JSON, or a root that is not an object;
+  /// * a missing or non-integer `revision`;
+  /// * either dataset missing, not an array, or holding a non-object element;
+  /// * a required field missing, of the wrong type, or blank
+  ///   (`id`/`section`/`code`/`title`/`symptoms`/`procedure`; `sku`/`name`);
+  /// * a whitespace-padded `id`;
+  /// * a `sku` or `name` longer than its column stores ([kSkuMaxLength],
+  ///   [kPartNameMaxLength]);
+  /// * `stock` absent, non-integer, or negative;
+  /// * `location` present but not a string;
+  /// * `required_tools`/`required_parts` present but not an array, or holding a
+  ///   non-string element;
+  /// * a **duplicate** `id` or `sku` within the asset (SKUs compared after
+  ///   canonicalisation, so `A-1` and `a-1` collide).
+  ///
+  /// It does not validate *meaning* — see the library header.
   ///
   /// Duplicates are rejected rather than deduplicated because the upsert that
   /// applies this bundle is last-write-wins: a duplicated id would seed silently
