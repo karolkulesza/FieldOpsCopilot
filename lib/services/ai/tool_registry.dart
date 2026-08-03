@@ -91,7 +91,10 @@ class ToolRegistry {
 
   /// The registered tool names, in registration order.
   ///
-  /// The **declared** names, so this list and [definitions] cannot disagree.
+  /// The **declared** names, so this list and [definitions] agree — given a stable
+  /// `AgentTool.definition`, which is the qualifier the rest of this file carries and
+  /// this line was left without (R3-F2). Both getters re-read `tool.definition` per
+  /// access, so a definition whose `name` changed between the two calls separates them.
   List<String> get toolNames => [
     for (final tool in _tools) tool.definition.name,
   ];
