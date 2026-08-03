@@ -370,12 +370,19 @@ brackets around fullwidth *letters*, which exercises nothing new.
 Matching on the general categories is what stops that recurring: it is a
 property of Unicode rather than a list someone maintained. **The residual is
 named rather than papered over**, and it is broader than one example suggests:
-bracket pieces and corner brackets (`⎡`, `⌜` — category `So`), the
-quotation-class guillemets (`«` `»` — `Pi`/`Pf`) and plain `<` `>` are all
-outside `Ps`/`Pe` and all survive, as does a header written with no delimiter at
-all. A test pins each of them, plus the counter-case that keeps the boundary
-honest — the CJK corner bracket `「` *is* `Ps` and *is* rewritten, so the list
-cannot be read as "CJK punctuation survives".
+bracket pieces and corner brackets (`⎡`, `⌜`), the quotation-class guillemets
+(`«` `»`) and plain `<` `>` are all outside `Ps`/`Pe` and all survive, as does a
+header written with no delimiter at all. A test pins each of them, plus the
+counter-case that keeps the boundary honest — the CJK corner bracket `「` *is*
+`Ps` and *is* rewritten, so the list cannot be read as "CJK punctuation
+survives".
+
+Those survivors are listed without their general-category names deliberately.
+The previous version labelled them, and one label was wrong — U+23A1 is `Sm`,
+not `So` — which travelled through this file, a doc comment, a test comment and
+a review turn before anyone ran it past `unicodedata`. The rule asks exactly one
+question, `Ps`/`Pe` membership, and the test answers it behaviourally; the
+category names were decoration that nothing checked.
 
 None of the survivors is a homoglyph of `[`, which is the class that actually
 forges these delimiters and is closed. The rest is the general look-alike case
