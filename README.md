@@ -846,14 +846,20 @@ moving plugin management back to CocoaPods (where the floor is a literal
 tool-call event** — a name plus a JSON-decoded argument map, produced by weights
 and therefore untrusted — and a Dart executor with a real signature.
 
-`ToolRegistry` owns both directions, and keeping them on one object is what makes
-them impossible to disagree: `registry.definitions` is what goes into
-`LlmEngine.generate(tools: …)`, and `registry.dispatch(call)` is what routes the
-result back. A tool the model was told about is a tool the registry can execute,
-because the declaration and the dispatch key are the *same* string —
-`definition.name`. This paragraph used to say "by construction" while the dispatch
-key came from a separate overridable getter, which is precisely how the two halves
-*could* disagree; see the correction below.
+`ToolRegistry` owns both directions, and keeping them on one object is what keeps
+them from disagreeing — **so long as a tool's `definition` is stable**:
+`registry.definitions` is what goes into `LlmEngine.generate(tools: …)`, and
+`registry.dispatch(call)` is what routes the result back. A tool the model was told
+about is a tool the registry can execute, because the declaration and the dispatch
+key are the *same* string, `definition.name`.
+
+Both hedges were earned in review rather than written up front. This paragraph used
+to say the halves were "impossible to disagree, by construction" while the dispatch
+key came from a separate overridable getter — precisely how they *could* disagree
+(R0-F2). Deleting that getter fixed it; documenting the one hazard left then showed
+"impossible" was *still* too strong, because the dispatch map is snapshotted at
+construction while the declarations are recomputed per call (R2-F2). Both corrections
+are described below.
 
 **The set is validated at construction**, not at the first `generate()`. That is
 the rule Task 1.8 arrived at from the other side: neither consumer of a tool
