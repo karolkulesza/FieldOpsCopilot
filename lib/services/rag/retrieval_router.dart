@@ -34,6 +34,7 @@ class RetrievalResult {
     required this.rawQuery,
     required this.entries,
     required this.codeHitIds,
+    required this.ftsHitIds,
     required this.resolvedCodes,
     required this.unresolvedCodes,
     required this.searchedTerms,
@@ -47,9 +48,20 @@ class RetrievalResult {
   /// full-text hits in `bm25()` rank order, skipping ids already present.
   final List<ManualEntryRow> entries;
 
-  /// Ids in [entries] that the exact code lookup produced. A document found by
-  /// *both* legs is listed here — the code leg is what guarantees it.
+  /// Ids the exact code lookup produced.
   final Set<String> codeHitIds;
+
+  /// Ids the full-text leg produced, **before** de-duplication against
+  /// [codeHitIds]. A document both legs found appears in both sets, and appears
+  /// once in [entries], in the code leg's position.
+  ///
+  /// Recorded separately rather than derived from [entries] because the two are
+  /// not the same question. `entries.length > codeHitIds.length` looks like a
+  /// test for "did full text contribute" and is not one: when every full-text
+  /// hit is also a code hit — `"door clutch belt slipping, E-305"`, the input
+  /// TC-RAG-COMP-02 uses — the merged list grows by nothing and that expression
+  /// reports the full-text leg as silent when it in fact returned the row.
+  final Set<String> ftsHitIds;
 
   /// Canonical fault codes extracted from [rawQuery] that matched a manual row,
   /// in extraction order.
@@ -72,7 +84,7 @@ class RetrievalResult {
   /// Which legs produced rows.
   RetrievalRoute get route {
     final hasCode = codeHitIds.isNotEmpty;
-    final hasFts = entries.length > codeHitIds.length;
+    final hasFts = ftsHitIds.isNotEmpty;
     if (hasCode && hasFts) return RetrievalRoute.hybrid;
     if (hasCode) return RetrievalRoute.code;
     if (hasFts) return RetrievalRoute.fullText;
@@ -186,6 +198,7 @@ class RetrievalRouter {
       rawQuery: rawText,
       entries: List.unmodifiable(merged),
       codeHitIds: Set.unmodifiable(codeHits.map((e) => e.id)),
+      ftsHitIds: Set.unmodifiable(ftsHits.map((e) => e.id)),
       resolvedCodes: List.unmodifiable(resolved),
       unresolvedCodes: List.unmodifiable(unresolved),
       searchedTerms: List.unmodifiable(terms),
