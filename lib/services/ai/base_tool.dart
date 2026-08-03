@@ -43,6 +43,14 @@ abstract class AgentTool {
   /// with `objectSchema()`. `ToolRegistry`'s constructor enforces that with the same
   /// `assertToolDefinitionsUsable` both `LlmEngine` implementations run, so a
   /// registry that constructs cannot produce a definition the device rejects.
+  ///
+  /// **Must also be stable** — the same `name` on every access. `ToolRegistry`
+  /// snapshots its dispatch map in the constructor while `definitions`/`toolNames`
+  /// recompute this getter per call, so a definition whose `name` changed between
+  /// calls would reintroduce exactly the declaration-vs-dispatch divergence that
+  /// deleting `AgentTool.name` removed. Every tool here uses a `final` field; this
+  /// says so out loud because nothing enforces it. (Raised as a non-blocking review
+  /// note in round 1.)
   ToolDefinition get definition;
 
   // There is deliberately **no `name` getter here.** An earlier version had one,

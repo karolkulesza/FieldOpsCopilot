@@ -849,8 +849,11 @@ and therefore untrusted — and a Dart executor with a real signature.
 `ToolRegistry` owns both directions, and keeping them on one object is what makes
 them impossible to disagree: `registry.definitions` is what goes into
 `LlmEngine.generate(tools: …)`, and `registry.dispatch(call)` is what routes the
-result back. A tool the model was told about is, by construction, a tool the
-registry can execute.
+result back. A tool the model was told about is a tool the registry can execute,
+because the declaration and the dispatch key are the *same* string —
+`definition.name`. This paragraph used to say "by construction" while the dispatch
+key came from a separate overridable getter, which is precisely how the two halves
+*could* disagree; see the correction below.
 
 **The set is validated at construction**, not at the first `generate()`. That is
 the rule Task 1.8 arrived at from the other side: neither consumer of a tool
@@ -863,15 +866,21 @@ What is load-bearing there is *what the validator is handed*, not when it runs:
 `definitions` is derived from the full tool list, so it still contains both of two
 tools sharing a name and the duplicate check can fire. Hand it a name-keyed
 collection instead and that pair collapses into one entry, silently disarming the
-check — which is the mutation the test suite's `M4` performs, killing exactly
-`rejects two tools registered under the same name`.
+check. Making that substitution kills exactly one test,
+`rejects two tools registered under the same name`, which is the evidence for this
+paragraph. (An earlier version credited "the test suite's `M4`" — there is no `M4`
+in the test suite; it was a row in a review ledger that gets deleted when the review
+closes, so the reader could not follow it. R1-F2.)
 
 The statement *order* in the constructor is **not** load-bearing, and an earlier
 version of this section said it was — claiming "a test restores that ordering and
 fails" when no such test exists and swapping the two statements leaves all tests
 green. Caught in review as R0-F1, which is this project's most-repeated failure
 mode: a claim asserting a regression guard that nothing implements. The mutation
-table was right; three prose descriptions of it were wrong.
+evidence was right; **four** prose descriptions of it were wrong — and the fourth,
+found only in the next review round, was the comment on the test the false claim had
+named as the guard. The count is stated as four rather than three because the first
+correction said three and missed one (R1-F1).
 
 The dispatch key is `definition.name` — the same string the declaration carries.
 That is also a correction: `AgentTool` used to expose an overridable `name` getter
