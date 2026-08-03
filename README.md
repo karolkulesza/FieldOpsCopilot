@@ -859,12 +859,31 @@ surfaces two layers away as "the model is bad at tool calling". `ToolRegistry`
 runs the same `assertToolDefinitionsUsable` both `LlmEngine` implementations run,
 so a registry that *builds* cannot produce a definition the device rejects.
 
-One ordering detail there is load-bearing rather than stylistic: the constructor
-validates the **list** of definitions before building its name-keyed dispatch
-map. Building the map first is the natural way to write it and quietly disarms
-the duplicate-name check — `{for (final t in tools) t.name: t}` collapses two
-tools sharing a name into one entry, so the check would receive a set that can no
-longer contain a duplicate. A test restores that ordering and fails.
+What is load-bearing there is *what the validator is handed*, not when it runs:
+`definitions` is derived from the full tool list, so it still contains both of two
+tools sharing a name and the duplicate check can fire. Hand it a name-keyed
+collection instead and that pair collapses into one entry, silently disarming the
+check — which is the mutation the test suite's `M4` performs, killing exactly
+`rejects two tools registered under the same name`.
+
+The statement *order* in the constructor is **not** load-bearing, and an earlier
+version of this section said it was — claiming "a test restores that ordering and
+fails" when no such test exists and swapping the two statements leaves all tests
+green. Caught in review as R0-F1, which is this project's most-repeated failure
+mode: a claim asserting a regression guard that nothing implements. The mutation
+table was right; three prose descriptions of it were wrong.
+
+The dispatch key is `definition.name` — the same string the declaration carries.
+That is also a correction: `AgentTool` used to expose an overridable `name` getter
+defaulting to `definition.name`, and the registry routed on *it*, so a subclass
+overriding one getter would be declared under one name and dispatched under
+another, permanently `unknown_tool`. Rather than assert the two agree, the second
+name was deleted — the registry now reads `definition.name` and nothing else.
+Precisely: a subclass can still define a `name` member of its own, but nothing in
+the registry consults one, so it cannot affect what is declared or what is
+dispatchable. That is narrower than "divergence is impossible", and it is what the
+code actually buys. A test pins the invariant directly: every declared name
+resolves and dispatches.
 
 ### A bad call is data, not an exception
 

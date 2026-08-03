@@ -8,7 +8,11 @@
 ///    `LlmToolCall` to the matching [AgentTool] and returns a [ToolOutcome].
 ///
 /// Keeping both on one object is what makes the two halves impossible to disagree: a
-/// tool the model was told about is, by construction, a tool the registry can execute.
+/// tool the model was told about is a tool the registry can execute, because the
+/// declaration and the dispatch key are the *same* string — `definition.name`. That
+/// wording is deliberate: it used to say "by construction" while the dispatch key came
+/// from a separate overridable getter, which is exactly how the two halves *could*
+/// disagree (review finding R0-F2).
 library;
 
 import 'package:flutter/foundation.dart';
@@ -35,14 +39,31 @@ class ToolRegistry {
   /// model or the technician did.
   ToolRegistry(Iterable<AgentTool> tools)
     : _tools = List<AgentTool>.unmodifiable(tools) {
-    // Validate the *list*, not a name-keyed map built from it. Building the map first
-    // would be the natural order and would quietly disarm the duplicate-name check:
-    // `{for (final t in tools) t.name: t}` collapses two tools sharing a name into
-    // one entry, so `assertToolDefinitionsUsable` would receive a set that can no
-    // longer contain a duplicate and the check could never fire. Pinned by
+    // What is load-bearing here is *what the validator is handed*, not when it runs.
+    // `definitions` is derived from `_tools`, so it still contains both of two tools
+    // sharing a name and the duplicate check can fire. Handing it a name-keyed
+    // collection instead — `{for (final t in _tools) t.definition.name: t}.values` —
+    // collapses that pair into one entry and silently disarms the check. That
+    // substitution is the mutation tabled as M4, and it kills exactly
     // 'rejects two tools registered under the same name'.
+    //
+    // The statement *order* below is NOT load-bearing, and an earlier version of this
+    // comment claimed it was — in three documents, citing a regression guard that does
+    // not exist. Building `_byName` first leaves every test green (review finding
+    // R0-F1, reproduced before this correction was written). Validating first is only
+    // a fail-before-you-build preference.
     assertToolDefinitionsUsable(definitions);
-    _byName = {for (final tool in _tools) tool.name: tool};
+
+    // Keyed on `definition.name`: the same string `definitions` declares, and the only
+    // one the model is ever told. This is the fix for R0-F2, and it is a deletion
+    // rather than a check — `AgentTool` used to carry an overridable `name` getter that
+    // the registry routed on, so a subclass overriding it was declared under one name
+    // and dispatched under another. Removing it leaves no second name for the registry
+    // to read, which is stronger than asserting two names agree. Precisely: a subclass
+    // may still define its own `name` member, but nothing here consults one, so it
+    // cannot affect declaration or dispatch. Pinned by
+    // 'every declared name is dispatchable'.
+    _byName = {for (final tool in _tools) tool.definition.name: tool};
   }
 
   final List<AgentTool> _tools;
@@ -59,7 +80,11 @@ class ToolRegistry {
   ];
 
   /// The registered tool names, in registration order.
-  List<String> get toolNames => [for (final tool in _tools) tool.name];
+  ///
+  /// The **declared** names, so this list and [definitions] cannot disagree.
+  List<String> get toolNames => [
+    for (final tool in _tools) tool.definition.name,
+  ];
 
   /// The tool registered under [name], or `null`.
   AgentTool? toolNamed(String name) => _byName[name];
@@ -95,12 +120,12 @@ class ToolRegistry {
     }
     try {
       final payload = await tool.execute(call.arguments);
-      return ToolSuccess(toolName: tool.name, payload: payload);
+      return ToolSuccess(toolName: tool.definition.name, payload: payload);
     } on ToolArgumentException catch (error) {
       // Listed before `on Exception` because it implements it; Dart takes the first
       // matching clause, so the order is load-bearing rather than stylistic.
       return ToolFailure(
-        toolName: tool.name,
+        toolName: tool.definition.name,
         code: error.code,
         message: error.message,
         parameter: error.parameter,
@@ -110,12 +135,14 @@ class ToolRegistry {
       // The message the model sees says only that the lookup failed. `error` is kept
       // on the outcome and logged, but stays out of `payload` — see
       // [ToolFailure.cause].
-      debugPrint('[ToolRegistry] ${tool.name} threw: $error\n$stackTrace');
+      debugPrint(
+        '[ToolRegistry] ${tool.definition.name} threw: $error\n$stackTrace',
+      );
       return ToolFailure(
-        toolName: tool.name,
+        toolName: tool.definition.name,
         code: ToolFailureCode.executionFailed,
         message:
-            'the "${tool.name}" tool could not complete; '
+            'the "${tool.definition.name}" tool could not complete; '
             'report that the local lookup failed rather than guessing a result',
         cause: error,
       );

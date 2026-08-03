@@ -561,6 +561,43 @@ void main() {
       expect(outcome.payload, {'id': 'tech-1'});
     });
 
+    test('every declared name is dispatchable', () async {
+      // The invariant the class doc claims, asserted rather than described: the set
+      // the model is told about and the set `dispatch` can route are the same set.
+      // Review finding R0-F2 was that this rested on an overridable `AgentTool.name`
+      // getter — declare under one name, route under another. `AgentTool` no longer
+      // has a `name`, so the two cannot drift; this test is what notices if the
+      // dispatch key stops being the declared name.
+      final many = ToolRegistry([
+        GetPartsInventoryTool(db),
+        _StubTool(_stubDefinition('alpha')),
+        _StubTool(_stubDefinition('Mixed_Case_Tool')),
+      ]);
+
+      expect(many.toolNames, many.definitions.map((d) => d.name).toList());
+      for (final definition in many.definitions) {
+        expect(
+          many.toolNamed(definition.name),
+          isNotNull,
+          reason: definition.name,
+        );
+        final outcome = await many.dispatch(
+          LlmToolCall(name: definition.name, arguments: const {'value': 'x'}),
+        );
+        expect(
+          outcome,
+          isNot(
+            isA<ToolFailure>().having(
+              (f) => f.code,
+              'code',
+              ToolFailureCode.unknownTool,
+            ),
+          ),
+          reason: definition.name,
+        );
+      }
+    });
+
     test('the tool list cannot be mutated after construction', () {
       final tools = <AgentTool>[GetPartsInventoryTool(db)];
       final built = ToolRegistry(tools);
