@@ -24,11 +24,24 @@ import 'retrieval_router.dart';
 /// the bundled, verified asset; the inquiry does not. A technician who types
 /// (or, from Tier 2, dictates something transcribed as) `[MANUAL DOCUMENT]` can
 /// otherwise open a second, fabricated document block inside the inquiry and
-/// have the model treat it as verified content. [neutralizeMarkers] rewrites the
-/// opening bracket of this compiler's own markers so a forged block cannot be
-/// spelled. It is a boundary defence, not a general prompt-injection cure —
-/// nothing stops a user from *asking* the model to ignore its instructions, and
-/// nothing here should be described as if it did.
+/// have the model treat it as verified content. [neutralizeMarkers] rewrites
+/// **every square bracket** in the inquiry to a round one.
+///
+/// The blunt rule is deliberate and it replaces a narrower one that did not
+/// hold. Matching the marker spellings — even case-insensitively — only excludes
+/// the spellings someone enumerated: review round 0 broke the original with one
+/// extra space (`[MANUAL  DOCUMENT]`), and a leading space, a tab and a newline
+/// did the same. Widening the pattern to absorb whitespace would still have left
+/// the zero-width and homoglyph variants, every one of which reads as the marker
+/// to a language model — which is the same argument that already made the guard
+/// case-insensitive. Removing the character instead makes the property
+/// structural rather than enumerative: the inquiry cannot contain `[` at all, so
+/// no bracketed marker of any spelling, spacing, casing or invisible-character
+/// variant can be spelled inside it.
+///
+/// It is still a **block-boundary** defence and not a general prompt-injection
+/// cure: nothing stops a user from simply *asking* the model to ignore its
+/// instructions, and nothing here should be described as if it did.
 ///
 /// **Documents are capped.** Task 1.8 measured a ~400-token grounded prompt for
 /// a single entry against a 2B-parameter model, and the router can return one
@@ -36,14 +49,18 @@ import 'retrieval_router.dart';
 /// budget, and it truncates from the *end* — so the code hits, which the router
 /// puts first, are the last thing to be dropped.
 class PromptCompiler {
-  const PromptCompiler({this.maxDocuments = 2})
-    : assert(
-        maxDocuments > 0,
-        'a prompt with no document block is not grounded',
-      );
+  const PromptCompiler({this.maxDocuments = 2});
 
   /// Maximum manual entries embedded in one prompt. See the class doc for why
   /// this is a budget rather than a preference.
+  ///
+  /// Values below one are clamped to one by [compile] rather than rejected. The
+  /// constructor used to `assert` instead, and review round 0 showed why that
+  /// was the wrong mechanism: an `assert` is compiled out in release, so it
+  /// crashed the build where the mistake is cheap and permitted the one where it
+  /// is expensive. It also made the clamp unreachable from a debug test — a line
+  /// no test could bind, which is the same defect class as the rest of that
+  /// round. One mechanism, live in every build.
   final int maxDocuments;
 
   /// Opening line of the manual block. Kept as a constant because it is both
@@ -52,15 +69,6 @@ class PromptCompiler {
 
   /// Opening line of the inquiry block.
   static const String userInquiryMarker = '[USER INQUIRY]';
-
-  /// The two markers untrusted text must not be able to spell.
-  ///
-  /// Numbered manual headers (`[MANUAL DOCUMENT 1 of 2]`) are covered because
-  /// the neutraliser matches the marker's *prefix*, not the whole literal.
-  static const List<String> _markerPrefixes = [
-    '[MANUAL DOCUMENT',
-    '[USER INQUIRY',
-  ];
 
   /// What the model is told when retrieval came back empty.
   static const String noMatchNotice =
@@ -73,7 +81,14 @@ class PromptCompiler {
 
   /// Compiles [result] into the grounded prompt string.
   String compile(RetrievalResult result) {
-    final documents = result.entries.take(maxDocuments).toList(growable: false);
+    // The cap is clamped to at least one, so the no-match branch below can only
+    // be reached by a retrieval that genuinely found nothing. Without the clamp,
+    // `maxDocuments: 0` empties the list *after* retrieval succeeded, and the
+    // prompt then tells the model "No matching entry was found … do not call any
+    // tool" about documents it did find.
+    final documents = result.entries
+        .take(maxDocuments < 1 ? 1 : maxDocuments)
+        .toList(growable: false);
 
     final buffer = StringBuffer()
       ..writeln(_preamble)
@@ -93,6 +108,12 @@ class PromptCompiler {
       }
     }
 
+    // The inquiry is wrapped in unescaped double quotes, so a `"` in the
+    // technician's text closes the quoted region early. That is tolerable only
+    // because this block is **last** — there is nothing after it to break into,
+    // and what remains is the general injection case disclaimed above. Task 1.9
+    // appends tool results for a second model turn; if anything ever follows the
+    // inquiry, this needs escaping before it does.
     buffer
       ..writeln(userInquiryMarker)
       ..write('"${neutralizeMarkers(result.rawQuery.trim())}"');
@@ -108,6 +129,13 @@ class PromptCompiler {
       : '[MANUAL DOCUMENT ${index + 1} of $total]';
 
   /// Renders one manual entry.
+  ///
+  /// Manual text is **not** neutralised, unlike the inquiry. That is correct only
+  /// while the sole writer of `manual_entries` is the bundled asset that
+  /// `SeedBundle.parse` validates — `DatabaseService.upsertManualEntries` is the
+  /// trust boundary. A downloaded manual pack or an OTA content update would put
+  /// attacker-influenced text on the trusted side of this method, and the
+  /// asymmetry would have to be revisited rather than inherited.
   ///
   /// Field order follows the spec's example (title first, then the procedure and
   /// what it needs). `Required Parts` is emitted before `Required Tools` because
@@ -134,28 +162,21 @@ class PromptCompiler {
   static String _list(List<String> values) =>
       values.isEmpty ? 'None' : values.join(', ');
 
-  /// Rewrites the opening bracket of any of this compiler's section markers in
-  /// [text], so untrusted input cannot forge a block boundary.
+  /// Rewrites every square bracket in [text] to a round one, so untrusted input
+  /// cannot spell a bracketed section marker.
   ///
-  /// Matching is case-insensitive because the markers are read by a language
-  /// model, not a parser: `[manual document]` would be just as convincing to it
-  /// as the upper-case form, so a case-sensitive guard would be a guard in name
-  /// only.
+  /// See the class doc for why this is a character rule rather than a match on
+  /// the marker spellings. The property this version has and the previous one
+  /// did not is checkable in a single line: the output contains no `[`.
   ///
-  /// The replacement keeps the text readable — `(MANUAL DOCUMENT` — rather than
-  /// deleting it, because the technician's words are evidence for the diagnosis
-  /// and silently dropping them changes the question being asked. Only the
-  /// bracket changes; the matched text keeps the casing the user typed.
-  static String neutralizeMarkers(String text) {
-    var out = text;
-    for (final prefix in _markerPrefixes) {
-      out = out.replaceAllMapped(
-        RegExp(RegExp.escape(prefix), caseSensitive: false),
-        (m) => '(${m[0]!.substring(1)}',
-      );
-    }
-    return out;
-  }
+  /// Both brackets are rewritten, not only `[`. Rewriting the opener alone would
+  /// leave `(MANUAL DOCUMENT]`, and mismatched punctuation inside the
+  /// technician's own sentence is noise the model has to spend attention on.
+  ///
+  /// The words themselves survive — they are evidence for the diagnosis, and
+  /// dropping them would change the question being asked.
+  static String neutralizeMarkers(String text) =>
+      text.replaceAll('[', '(').replaceAll(']', ')');
 
   static const String _preamble =
       'You are an offline Field Service Assistant.\n'
