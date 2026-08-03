@@ -34,10 +34,21 @@ import 'retrieval_router.dart';
 /// did the same. Widening the pattern to absorb whitespace would still have left
 /// the zero-width and homoglyph variants, every one of which reads as the marker
 /// to a language model — which is the same argument that already made the guard
-/// case-insensitive. Removing the character instead makes the property
-/// structural rather than enumerative: the inquiry cannot contain `[` at all, so
-/// no bracketed marker of any spelling, spacing, casing or invisible-character
-/// variant can be spelled inside it.
+/// case-insensitive. Removing the delimiter instead makes the property
+/// structural rather than enumerative: **every character Unicode classifies as
+/// opening or closing punctuation** (`\p{Ps}` / `\p{Pe}`) is rewritten, so the
+/// only bracket characters an inquiry can contain are the plain round ones this
+/// rule emits. No bracketed marker can be spelled inside it whatever its
+/// spacing, casing, invisible characters, or bracket homoglyph — `［`, `【`,
+/// `⟦`, `〔` are all `Ps` and all rewritten.
+///
+/// The residual is named rather than hidden, because the first two versions of
+/// this paragraph both claimed more than the code did. A look-alike *outside*
+/// those categories is not covered: `⎡` (U+23A1, a bracket **piece**, category
+/// `So`) survives, and there is a test asserting that it does. So does a header
+/// written with no brackets at all. Neither is a forgery of this compiler's
+/// delimiters; both are the general look-alike case, which is the same bucket as
+/// the disclaimer below.
 ///
 /// It is still a **block-boundary** defence and not a general prompt-injection
 /// cure: nothing stops a user from simply *asking* the model to ignore its
@@ -162,21 +173,37 @@ class PromptCompiler {
   static String _list(List<String> values) =>
       values.isEmpty ? 'None' : values.join(', ');
 
-  /// Rewrites every square bracket in [text] to a round one, so untrusted input
-  /// cannot spell a bracketed section marker.
+  /// Rewrites every Unicode opening/closing punctuation character in [text] to
+  /// a round bracket, so untrusted input cannot spell a bracketed section
+  /// marker.
   ///
   /// See the class doc for why this is a character rule rather than a match on
-  /// the marker spellings. The property this version has and the previous one
-  /// did not is checkable in a single line: the output contains no `[`.
+  /// the marker spellings, and for the residual it does *not* cover. The
+  /// property this version has, and neither previous one did, is checkable
+  /// without enumerating attacks: the output's only `Ps`/`Pe` characters are the
+  /// `(` and `)` this rule emits.
   ///
-  /// Both brackets are rewritten, not only `[`. Rewriting the opener alone would
-  /// leave `(MANUAL DOCUMENT]`, and mismatched punctuation inside the
-  /// technician's own sentence is noise the model has to spend attention on.
+  /// Matching on the general categories rather than a list of bracket codepoints
+  /// is the same choice one level down. A curated list of homoglyphs would be
+  /// exactly the enumeration this rewrite exists to stop relying on — the review
+  /// round that produced it caught the previous version claiming to handle
+  /// homoglyphs while knowing a single codepoint.
   ///
-  /// The words themselves survive — they are evidence for the diagnosis, and
-  /// dropping them would change the question being asked.
-  static String neutralizeMarkers(String text) =>
-      text.replaceAll('[', '(').replaceAll(']', ')');
+  /// Closers are rewritten too, not only openers: leaving `(MANUAL DOCUMENT]`
+  /// puts mismatched punctuation in the middle of the technician's own sentence,
+  /// which is noise the model has to spend attention on. The words themselves
+  /// survive — they are evidence for the diagnosis, and dropping them would
+  /// change the question being asked.
+  static String neutralizeMarkers(String text) => text
+      .replaceAll(_openingPunctuation, '(')
+      .replaceAll(_closingPunctuation, ')');
+
+  /// Every codepoint Unicode gives General_Category `Ps` — `[`, `(`, `{`, and
+  /// the fullwidth/CJK/mathematical bracket homoglyphs.
+  static final RegExp _openingPunctuation = RegExp(r'\p{Ps}', unicode: true);
+
+  /// The `Pe` counterpart.
+  static final RegExp _closingPunctuation = RegExp(r'\p{Pe}', unicode: true);
 
   static const String _preamble =
       'You are an offline Field Service Assistant.\n'
