@@ -32,8 +32,11 @@ database to help technicians diagnose faults and produce structured repair plans
   against the fake engine (initialise → stream a scripted response token by
   token → render).
 - **Seed dataset** (`assets/elevator_manual_seed.json`) — three Apex-9 manual
-  entries (fault code, symptoms, procedure, required tools/parts) used to seed
-  the local manual database.
+  entries (fault code, symptoms, procedure, required tools/parts) and five parts
+  inventory rows, applied to the local database on first launch.
+- **First-launch seeding** — a validated, transactional loader that applies the
+  bundled dataset once, records what it applied, and does not overwrite stock a
+  technician has changed. See _First-launch seeding_ below.
 - **Encrypted local database** — a [drift](https://drift.simonbinder.eu/)
   schema (technician profile, parts inventory, work orders) stored in an
   encrypted SQLite file. See _Data persistence & encryption_ below.
@@ -55,8 +58,13 @@ database to help technicians diagnose faults and produce structured repair plans
   on-device integration tier for the model itself. (Deliberately no count here: the
   number went stale in three consecutive review rounds. `flutter test` is the source of
   truth, and per-task counts live in the sprint plan, which is a dated snapshot.)
-- **CI** — GitHub Actions running `dart format`, `flutter analyze`, and
-  `flutter test` on every push and pull request.
+- **CI** — GitHub Actions running a codegen-freshness gate (`build_runner build`
+  followed by `git diff --exit-code` plus an untracked-output check, since generated
+  Drift code is committed and can drift from its sources), then `dart format`,
+  `flutter analyze`, and `flutter test` on every push and pull request. Reproducing
+  the gate locally needs a **cold** build: with a warm `.dart_tool/build` cache
+  build_runner writes zero outputs and leaves a stale in-source file alone, so the
+  check passes without having verified anything.
 
 ## Architecture
 
@@ -94,6 +102,8 @@ lib/
     │   ├── tables/
     │   │   └── manual_fts_table.dart # Structured manual entries (backs the FTS index)
     │   ├── fts_query_sanitizer.dart  # Free text → safe FTS5 MATCH expression
+    │   ├── seed_data.dart            # Seed asset → validated rows (no DB access)
+    │   ├── database_initializer.dart # First-launch seeding, transactional
     │   ├── database_service.drift    # FTS5 virtual table, sync triggers, ranked query
     │   ├── database_service.dart     # Encrypted drift database (+ .g.dart codegen)
     │   └── ...
@@ -115,7 +125,9 @@ on-device implementations are injected at runtime by overriding the providers in
 
 Structured local data lives in an encrypted SQLite database managed by
 [drift](https://drift.simonbinder.eu/) (`lib/services/database/`). The schema
-covers the technician profile, the local parts inventory, and work orders.
+covers the technician profile, the local parts inventory, work orders, the manual
+entries backing the FTS index, and a record of which seed dataset has been applied
+(schema version 3).
 
 Encryption uses **SQLite3MultipleCiphers**, bundled through the `sqlite3`
 package's build hook (`hooks: user_defines: sqlite3: source: sqlite3mc` in
@@ -176,6 +188,82 @@ joins with `OR`. `OR` rather than `AND` is the deliberate choice: symptom text i
 noisy, so `"squealing noise"` must still find the belt entry even though the
 manual never says "noise" — recall comes from `OR`, precision from `bm25()`
 ranking. Strict `AND` would let one unmatched word return nothing.
+
+## First-launch seeding
+
+The manual and the parts inventory ship as one bundled asset
+(`assets/elevator_manual_seed.json`) and are written into the encrypted database by
+`DatabaseInitializer.ensureSeeded()`. Three decisions are worth naming, because each
+one is answering a way this could go quietly wrong.
+
+**The asset's structure is validated before anything is written.** It is a build
+input in the same sense as the model's URL and digest — it lives inside the bundle
+and nothing at runtime can repair it — so `SeedBundle.parse` rejects anything the
+loader could not honestly apply: wrong shapes and types, missing or blank required
+fields, out-of-range `stock`, values longer than the column that will store them,
+and duplicate or whitespace-padded keys. It does not validate *meaning*: a manual
+citing an unstocked SKU parses fine.
+
+The authoritative list is `SeedBundle.parse`'s docstring, deliberately not repeated
+here — this paragraph carried its own copy for two commits and was wrong in both,
+first by claiming completeness it did not have and then by omitting the three rules
+that gave it completeness.
+
+Two of those rules are worth their own line, because the reason is not obvious:
+
+- **Duplicates are an error rather than a silent dedup.** The write is an upsert, so
+  a duplicated id would seed one row short of what the asset appears to declare and
+  nothing downstream would look wrong. A whitespace-padded `id` is rejected for the
+  same reason — `id` is the primary key and, unlike `code`/`sku`, is deliberately not
+  canonicalised, so `"m1"` and `"m1 "` would otherwise pass the duplicate check as
+  distinct and produce two manual entries nothing could tell apart.
+- **Lengths are checked here rather than left to the column.** Drift's `withLength`
+  check runs at insert time, which is *inside* the seeding transaction — correct
+  behaviour, but too late to be a parse error. (The bounds are duplicated between
+  `kSkuMaxLength`/`kPartNameMaxLength` and the `withLength` literals out of necessity:
+  `drift_dev` reads those arguments from the source expression and silently drops a
+  named constant, emitting no max at all. A test pins the two together.)
+
+**Seeding runs once, not on every launch.** A `seed_markers` row records which
+dataset revision was applied. This is not an optimisation — `inventory_parts.stock`
+is operational data that the agent reads and that consuming a part decrements, so
+re-applying the asset at every start would roll a technician's work back silently.
+Bumping the asset's `revision` re-seeds deliberately, overwriting both the manual
+text and the stock levels; a real fleet would *sync* inventory rather than seed it,
+which is the offline-sync design in the "narrate, don't build" section.
+
+A re-seed is **upsert-shaped, not replace-shaped**, and the difference is worth
+knowing before anything relies on it: rows present in the new asset are overwritten,
+but a row *dropped* from the asset survives in the database (a removed manual stays
+searchable), and a key omitted from a row — `location`, say — is left at its old
+value rather than cleared, because drift leaves absent columns out of the
+`DO UPDATE SET`. Deleting content therefore needs a migration, not a revision bump.
+
+**The write is one transaction.** Manuals, inventory and the marker commit together
+or not at all. A seed that inserted the manuals and then failed on the inventory
+would leave a database that looks healthy, holds a marker it has not earned, and is
+therefore skipped forever after.
+
+Two smaller details that carry more weight than they look like:
+
+- **Manual rows go through `upsertManualEntries`**, which is `ON CONFLICT DO
+  UPDATE` — *not* `INSERT OR REPLACE`. OR REPLACE deletes the conflicting row
+  implicitly, and with `recursive_triggers` off (SQLite's default) that delete
+  fires no trigger, so on a **re-seed** the replaced row's terms would stay in the
+  FTS index permanently. `COUNT(*)` cannot see that; only a search for a term that
+  lived solely in the replaced text can.
+- **`inventory_parts.sku` is `COLLATE NOCASE`**, and lookups go through
+  `normalizeSku` (trim + upper-case). The two are not the same mechanism: the
+  normalisation is what makes a model-supplied `" brk-990-xp "` match, and the
+  collation is the backstop for a row written past the normaliser by some other
+  path. The collation also keeps equality searchable through the primary-key index,
+  which an `upper(sku)` comparison in the query would not.
+
+Schema **v3** carries both of those: it creates `seed_markers` and rewrites
+`inventory_parts` to attach the collation (SQLite has no `ALTER COLUMN`, so a
+collation change is a table rewrite). As in v2, `Migrator.createTable` creates the
+table only — anything else has to be created explicitly, or upgraded installs
+diverge from fresh ones.
 
 ## Model provisioning
 
@@ -628,10 +716,12 @@ flutter test
 Tests are split into two tiers:
 
 - **Unit tier** (`test/`) — pure Dart, deterministic, runs in CI on every commit
-  (engine fakes, database, FTS, model provisioning, widget tests). The HTTP
+  (engine fakes, database, FTS, seeding, model provisioning, widget tests). The HTTP
   transport is covered against a loopback `HttpServer` rather than a mock, because
   the behaviour worth testing is HTTP behaviour: redirect hops, `Content-Length`
-  vs. chunked, and which requests carry the access token.
+  vs. chunked, and which requests carry the access token. The seeding suite reads
+  the **shipped** asset off disk as well as its own fixtures, so a broken bundled
+  JSON cannot pass behind green fixtures and fail on the device.
 - **Integration tier** (`integration_test/`) — on-device runs against real
   backends. `flutter test` does not pick this directory up, so CI stays host-only.
   Both suites **skip** with an actionable message unless the model defines above are
