@@ -158,6 +158,45 @@ Once I have the stock level I'll finish the plan.''';
       expect(call.arguments, {'sku': 'BRK-990-XP'});
     });
 
+    test('a decoded argument that jsonEncode would refuse is a failure', () {
+      // R0-F1: this path skipped the encodability probe because decoded arguments were
+      // claimed "JSON-encodable by construction". A numeric literal that overflows a
+      // double decodes to `Infinity`, which `jsonEncode` refuses — so the guard was
+      // handing the agent loop the exact value whose serialisation throws an
+      // uncatchable `Error`. Measured: `jsonDecode('{"n": 1e400}')` yields `Infinity`.
+      const text = '{"tool": "$toolName", "arguments": {"qty": 1e400}}';
+
+      final result = guard.inspectText(text);
+
+      expect(result, isA<GuardFailure>());
+      expect(
+        (result as GuardFailure).reason,
+        GuardFailureReason.argumentsNotEncodable,
+      );
+    });
+
+    test('the overflow case really does decode to a value jsonEncode refuses', () {
+      // The premise of the test above, asserted rather than assumed — otherwise it could
+      // go green for some unrelated parse failure and still leave the hole open.
+      final decoded = jsonDecode('{"qty": 1e400}') as Map<String, Object?>;
+
+      expect(decoded['qty'], isA<double>());
+      expect((decoded['qty']! as double).isFinite, isFalse);
+      expect(
+        () => jsonEncode(decoded),
+        throwsA(isA<JsonUnsupportedObjectError>()),
+      );
+    });
+
+    test('a nested decoded overflow is caught too', () {
+      const text = '{"tool": "$toolName", "arguments": {"a": {"b": [1e999]}}}';
+
+      expect(
+        (guard.inspectText(text) as GuardFailure).reason,
+        GuardFailureReason.argumentsNotEncodable,
+      );
+    });
+
     test('accepts each name key alias', () {
       for (final key in ['tool', 'tool_name', 'name', 'function_name']) {
         final text =
@@ -181,14 +220,36 @@ Once I have the stock level I'll finish the plan.''';
       }
     });
 
-    test('a brace inside a string value does not truncate the object', () {
+    test('an unbalanced brace inside a string value does not truncate it', () {
       // The reason `_matchingBrace` tracks string state rather than counting braces:
       // a SKU containing a brace is nonsense, but a *procedure step* quoted into an
       // argument is not, and one unbalanced brace in a string would otherwise cut the
       // object short and leave the whole call unparseable.
-      const text = '{"tool": "$toolName", "arguments": {"sku": "A}B{C"}}';
+      //
+      // The fixture must be **unbalanced** for that to be what is tested. It was
+      // `"A}B{C"` — a matched `}`…`{` pair, which a plain brace counter walks straight
+      // through to the same closing brace, so the test was green with or without string
+      // tracking and its comment claimed otherwise (R0-F2). With `"A}B"` a counter closes
+      // on the in-string `}`, the extent loses its final `}`, and `jsonDecode` rejects it.
+      const text = '{"tool": "$toolName", "arguments": {"sku": "A}B"}}';
 
-      expect(guardedCall(guard.inspectText(text)).arguments, {'sku': 'A}B{C'});
+      expect(guardedCall(guard.inspectText(text)).arguments, {'sku': 'A}B'});
+    });
+
+    test('the first name key and argument key in preference order win', () {
+      // `_nameKeys` and `_argumentKeys` are documented "in preference order" and nothing
+      // bound that: no other fixture carries two name keys or two argument keys, so
+      // reversing either list failed no test (R0-F3). An object with both has to resolve
+      // somehow, and this is the answer — `tool` before `name`, `arguments` before
+      // `parameters`.
+      const text =
+          '{"tool": "$toolName", "name": "some_other_tool", '
+          '"arguments": {"sku": "BRK-990-XP"}, "parameters": {"sku": "WRONG-000"}}';
+
+      final call = guardedCall(guard.inspectText(text));
+
+      expect(call.name, toolName);
+      expect(call.arguments, {'sku': 'BRK-990-XP'});
     });
 
     test('an escaped quote inside a string value does not end it', () {
@@ -492,13 +553,15 @@ Sure!! ###{{{ tool call:: get inventory ]] "sku" -> BRK-990-XP <<<
     }
 
     test('resolution applies on the text path too', () {
-      final call = guardedCall(
-        guard.inspectText(
-          '{"tool": "Get-Local-Parts-Inventory", "args": {"sku": "BRK-990-XP"}}',
-        ),
+      final result = guard.inspectText(
+        '{"tool": "Get-Local-Parts-Inventory", "args": {"sku": "BRK-990-XP"}}',
       );
 
-      expect(call.name, toolName);
+      expect(guardedCall(result).name, toolName);
+      // `renamedFrom` on the text path could be deleted with all tests green while its
+      // native twin was bound ten times over (R0-F4) — a property with a correct
+      // implementation and no guard.
+      expect((result as GuardedCall).renamedFrom, 'Get-Local-Parts-Inventory');
     });
 
     test('arguments are carried through a rename untouched', () {
