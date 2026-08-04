@@ -250,7 +250,9 @@ class ToolCallGuard {
   /// [GuardFailureReason.noToolCallFound], because "your call was malformed" and "you
   /// did not call anything" are different things to tell a model. The third entry was
   /// missing from this list in the very commit that made it reachable from here (R1-F5);
-  /// the *behaviour* was right — the precedence test covers it — but the doc was not.
+  /// the *behaviour* was right — `a specific failure outranks noToolCallFound` covers it —
+  /// but the doc was not. Named exactly rather than as "the precedence test", which
+  /// string-collides with `a usable candidate outranks an earlier malformed one` beside it.
   GuardResult inspectText(String text) {
     GuardFailure? specific;
     for (final candidate in _jsonObjectCandidates(text)) {
