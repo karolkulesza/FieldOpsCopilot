@@ -1030,17 +1030,27 @@ returning constants — `isFunctionCallStart` → `false`, `isDefinitelyText` �
 text parser; Gemma 4 gets none, because it is expected to deliver structured calls
 through the SDK instead.
 
-That fifth override is the one that matters most for this argument, and this
-paragraph originally said "four" and omitted it — because the grep that produced
-the list was truncated at twenty lines, while the prose claimed the file had been
-read (R1-F1). `parseAll` is the entry point the plugin's `JsonFunctionCallFormat`
-uses to pull *several* calls out of one text buffer, so its returning `const []`
-for Gemma 4 is the sharpest available statement that this model family gets no
-text parsing at all. **An enumeration is only as good as the read that produced
-it** — and a `head`-limited grep is not a read of the file. So a Gemma 4 turn that spells a
-call out in prose reaches the app as plain text that nothing will parse — which is
-this guard's entire reason to exist, and it is a stronger argument than the one
-this section originally made from first principles.
+This paragraph originally said "four" and omitted `parseAll` — because the grep
+that produced the list was truncated at twenty lines, while the prose claimed the
+file had been read (R1-F1). **An enumeration is only as good as the read that
+produced it**, and a `head`-limited grep is not a read of the file.
+
+The override that carries the argument is `parse` → `null`, not `parseAll`. A
+first correction of this passage called `parseAll` "the sharpest available
+statement" because it is what the plugin uses for multi-call text parsing — but
+`FunctionCallFormat` supplies a *concrete default* `parseAll` that delegates to
+`parse` and returns `[]` when it yields `null`
+(`function_call_format.dart:23-27`), so for this class the explicit override is
+belt-and-braces rather than the load-bearing line. The ranking came from the
+review and was adopted and hardened here without opening the base class — the same
+"a reviewer's claim needs measuring too" trap Task 1.5 recorded as R3-F1, and the
+reviewer caught its own version of it (R2-F3). Reading one more file would have
+settled it.
+
+Either way the conclusion is the plugin's, not this README's: a Gemma 4 turn that
+spells a call out in prose reaches the app as plain text that nothing will parse.
+That is this guard's entire reason to exist, and it is a stronger argument than the
+one this section originally made from first principles.
 
 **Extract-and-parse only.** A string-aware scan finds the *extent* of a JSON
 object and `jsonDecode` decides whether it is one. There is no bracket repair, no
@@ -1160,38 +1170,56 @@ passed for a reason unrelated to the criterion it was mapped to, the pattern
 Tasks 1.2, 1.4 and 1.8 each recorded. It is replaced by two tests that bind the
 real ordering, each needing a fixture where the two candidate orders disagree.
 Adversarial review then ran its own mutations and found more. Across two rounds it
-wrote 38 of them; **14 survived**. Four of the eleven findings came out of those
+wrote 38 of them; **14 survived**. Four of the fifteen findings came out of those
 mutations — R0-F3 and R0-F4 from survivors, R1-F4 from a survivor of the round-1
 fixes, and R0-F2 from the *kill-list* of a mutation that died (it killed the test
-beside the one whose criterion it was): the remaining seven came from re-reading
-source and re-measuring claims, which is the cheaper half of the work and found the
-High. The behavioural ones were the
-encodability hole above (R0-F1) and a gap in that very fix (R1-F4): the probe reads
-the *decoded* arguments, but `object` is also in scope and also a
-`Map<String, Object?>`, so swapping the subject compiles, passes everything, and
-reopens R0-F1 for arguments delivered as a JSON *string* — whose value is then a
-perfectly encodable `String` that nothing looks through. The rest were an
-enumeration nothing bound (R0-F3, four entries deleted), a `renamedFrom` guarded on
-one path and not the other (R0-F4), and — the one worth its own line — **a test
-whose fixture did not exercise its own criterion**: `a brace inside a string value
-does not truncate the object` used `"A}B{C"`, a *balanced* `}`…`{` pair that a plain
-brace counter walks straight through, so string-awareness was bound only by the
-escaped-quote test beside it while the test written for it was green either way
-(R0-F2). One character of fixture.
+beside the one whose criterion it was): the rest came from re-reading source and
+re-measuring claims, which is the cheaper half of the work and found the High. Exactly one was **behavioural** — the encodability hole above (R0-F1), where
+shipped code did the wrong thing.
 
-The suite now stands at **438 tests and 33 mutations, 0 survivors**, seven of the
-mutations added specifically to bind the two rounds of fixes.
+Three more were **correct code with nothing holding it there**, which is the
+category this project keeps rediscovering. R0-F4: `renamedFrom` was guarded on the
+native path ten times over and on the text path not at all. R1-F4: a gap in R0-F1's
+own fix — the probe reads the *decoded* arguments, but `object` is also in scope and
+also a `Map<String, Object?>`, so swapping the subject compiles, passes everything,
+and reopens R0-F1 for arguments delivered as a JSON *string*, whose value is then a
+perfectly encodable `String` that nothing looks through. And R0-F2, the one worth
+its own line, is the same category expressed in a *fixture*: `a brace inside a
+string value does not truncate the object` used `"A}B{C"`, a **balanced** `}`…`{`
+pair that a plain brace counter walks straight through, so string-awareness was
+bound only by the escaped-quote test beside it while the test written for it was
+green either way. One character of fixture.
 
-Two corrections in this paragraph are themselves worth keeping, because the
-paragraph exists to be accurate about measurement and its first version was not.
-It claimed "six of the reviewer's mutations survived, four became findings" — the
-reviewer's own ledger records 13 survivors in round 0 alone, 7 of which fed 2
-findings, so the numbers were wrong in both directions and had been copied from a
-summary rather than counted. And "33 mutations" was true of the *list* while two
-entries were byte-identical edits, making 32 distinct ones; the duplicate has been
-replaced with the R1-F4 mutation, so 33 is now 33 real edits and the harness is
-checked for duplicate (anchor, replacement) pairs. **A count of mutations is a
-claim like any other, and a list is not a set.**
+The remaining eleven were claims — in comments, docstrings, this README and the
+review ledger — that the code, the dependency, or the measurement did not support.
+
+The suite now stands at **438 tests and 33 mutations, 0 survivors**. Six of those
+mutations were added to bind the review rounds' fixes (M29–M34) and one more
+(M28) to bind a defect self-caught before handoff; an earlier version of this
+sentence said seven for the review rounds by counting M34 twice, since round 2
+*replaced* a duplicated slot rather than adding one — "a list is not a set", one
+paragraph after coining the phrase.
+
+The corrections in this section are themselves worth keeping, because it exists to
+be accurate about measurement and each version of it was not. It claimed "six of
+the reviewer's mutations survived, four became findings" — the reviewer's ledger
+records 13 survivors in round 0 alone, 7 of which fed 2 findings, so both numbers
+were wrong and both had been copied from a summary rather than counted. It said "33
+mutations" while two entries were byte-identical edits, i.e. 32 distinct ones; that
+slot now holds the R1-F4 mutation. **A count of mutations is a claim like any other,
+and a list is not a set.**
+
+And then the sharpest one, because it is this section's own prescription failing:
+the fix for that duplicate was **claimed before it existed**. This paragraph
+asserted that "the harness is checked for duplicate (anchor, replacement) pairs"
+when the harness contained no such check — the check had been run once, by hand, in
+a throwaway one-liner, and writing it up as a property of the tool was the same
+move as calling a truncated grep a read of the file. The reviewer grepped for it and
+found nothing (R2-F1). **A mechanical check is only mechanical once it is in the
+tool**; `mutate.py` now refuses to run when two mutations share an `(anchor,
+replacement)` pair, and that refusal was verified by re-inserting the duplicate and
+watching it fire — because a guard nobody has watched fail is the thing this whole
+section is about.
 
 One process note worth keeping, because it is a lesson this repo had already
 written down: the harness reverts with `git checkout`, so it **requires a
