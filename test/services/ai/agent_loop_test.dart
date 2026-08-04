@@ -319,6 +319,38 @@ void main() {
       );
     });
 
+    test('a refused text attempt drops the echo too', () async {
+      // Review finding R1-F1: the first fix derived "did the call come from
+      // text" from the invocations' `source`, and `invocations` is **empty**
+      // when every text-path attempt was refused — so the proxy said "native"
+      // for a turn that was nothing but text, and the echo came back mangled.
+      // This is the worse case, not a symmetric one: there is no `[TOOL CALL]`
+      // block beside it, so the paren-mangled line is the *only* rendering the
+      // model sees, directly above an instruction to send well-formed JSON.
+      final (loop, engine) = await loopOver([
+        [
+          const LlmToken(
+            'Let me look that up.\n'
+            '{"tool":"get_local_parts_inventory","arguments":"BRK-990-XP"}',
+          ),
+          const LlmDone(),
+        ],
+        [const LlmToken('Give me the SKU as JSON.'), const LlmDone()],
+      ]);
+
+      final result = await loop.runToCompletion('[GROUNDED PROMPT]');
+
+      // The premise: refused, so nothing ran and `invocations` is empty — which
+      // is exactly what made the old discriminator wrong.
+      expect(result.turns.first.invocations, isEmpty);
+      expect(result.turns.first.rejectedCalls, hasLength(1));
+      expect(result.turns.first.textScannedForCall, isTrue);
+
+      expect(engine.prompts[1], isNot(contains(AgentLoop.assistantMarker)));
+      expect(engine.prompts[1], isNot(contains('("tool":')));
+      expect(engine.prompts[1], contains(AgentLoop.rejectedCallMarker));
+    });
+
     test('a native-path turn keeps its echo', () async {
       // The other half, so the rule is bound in both directions rather than
       // "the echo is sometimes absent".
@@ -517,6 +549,62 @@ void main() {
         result.invocations.single.renamedFrom,
         'Get-Local-Parts-Inventory',
       );
+    });
+  });
+
+  group('the echo discriminator', () {
+    // R1-F1 again, from the other side. `.any` and `.every` over the
+    // invocations' source differ only when `invocations` is empty — so the two
+    // tests above and this one together are what make the discriminator's
+    // *value* bound rather than just its branch.
+
+    test('a native turn whose only call was refused keeps its echo', () async {
+      // No native invocation survives the guard here, so `.every` would report
+      // "text" and drop an echo that is genuine reasoning. `textScannedForCall`
+      // is false because a native event did arrive.
+      final (loop, engine) = await loopOver([
+        [
+          const LlmToken('The manual names BRK-990-XP. Checking stock.'),
+          LlmToolCall(
+            name: GetPartsInventoryTool.toolName,
+            arguments: {'sku': DateTime(2026)},
+          ),
+          const LlmDone(),
+        ],
+        [const LlmToken('done'), const LlmDone()],
+      ]);
+
+      final result = await loop.runToCompletion('[GROUNDED PROMPT]');
+
+      expect(result.turns.first.invocations, isEmpty);
+      expect(result.turns.first.rejectedCalls, hasLength(1));
+      expect(result.turns.first.textScannedForCall, isFalse);
+      expect(engine.prompts[1], contains(AgentLoop.assistantMarker));
+      expect(engine.prompts[1], contains('The manual names BRK-990-XP'));
+    });
+
+    test('the flag records where the guard looked, not what it found', () async {
+      // Stated as its own test because the field is easy to re-derive wrongly:
+      // it is about the *guard\'s input*, not about the outcome.
+      final (loop, _) = await loopOver([
+        [inventoryCall('BRK-990-XP'), const LlmDone()],
+        [
+          const LlmToken(
+            '{"tool":"get_local_parts_inventory",'
+            '"arguments":{"sku":"BELT-330-DRV"}}',
+          ),
+          const LlmDone(),
+        ],
+        [const LlmToken('both checked'), const LlmDone()],
+      ]);
+
+      final result = await loop.runToCompletion('[GROUNDED PROMPT]');
+
+      expect(result.turns.map((t) => t.textScannedForCall), [
+        false, // a native event arrived
+        true, // no native event, so the text was scanned
+        true, // plain prose: scanned, nothing found
+      ]);
     });
   });
 

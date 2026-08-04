@@ -95,6 +95,7 @@ class AgentTurn {
     required this.text,
     required this.invocations,
     required this.rejectedCalls,
+    required this.textScannedForCall,
   });
 
   /// Zero-based turn number within the run.
@@ -118,6 +119,21 @@ class AgentTurn {
   /// [GuardFailureReason.noToolCallFound], which is not a refusal at all — it
   /// means there was no call here — and never lands in this list.
   final List<GuardFailure> rejectedCalls;
+
+  /// Whether the guard was asked to read this turn's **text** for a call —
+  /// true exactly when the turn emitted no native tool-call event.
+  ///
+  /// Recorded rather than derived, and that distinction is review finding
+  /// R1-F1. [AgentLoop.continuationOf] needs to know whether the turn's text
+  /// was a *call attempt* or *commentary*, and the obvious proxy — "does any
+  /// invocation have `GuardSource.text`" — is silently wrong for the turn where
+  /// every text-path attempt was **refused**: [invocations] is then empty, so
+  /// the proxy says "native" for a turn that was nothing but text. That is the
+  /// case where getting it wrong costs most, because there is no `[TOOL CALL]`
+  /// block beside the echo to show the model what the call should have looked
+  /// like. The loop knows the answer directly (`nativeCalls.isEmpty`), so it
+  /// carries it instead of inferring it.
+  final bool textScannedForCall;
 
   /// Whether this turn asked the loop to do anything before answering.
   bool get requestedWork => invocations.isNotEmpty || rejectedCalls.isNotEmpty;
@@ -438,6 +454,7 @@ class AgentLoop {
         text: turnText.toString(),
         invocations: List.unmodifiable(invocations),
         rejectedCalls: List.unmodifiable(rejected),
+        textScannedForCall: nativeCalls.isEmpty,
       );
       turns.add(turn);
 
@@ -504,7 +521,7 @@ class AgentLoop {
   /// embedded value can start one**:
   ///
   /// * The call and result blocks are single lines, written by
-  ///   [_encodeOneLine]. `jsonEncode` alone is **not** enough for that, and the
+  ///   [encodeOneLine]. `jsonEncode` alone is **not** enough for that, and the
   ///   first version of this comment claimed it was: it escapes every code unit
   ///   below `0x20` plus `"` and `\`, and passes **U+0085 NEL, U+2028 LINE
   ///   SEPARATOR, U+2029 PARAGRAPH SEPARATOR and U+007F through raw**. U+2028
@@ -513,7 +530,7 @@ class AgentLoop {
   ///   reached the echoed payload verbatim and opened a real second
   ///   `[TOOL RESULT]` at column 0 — the exact attack this paragraph said was
   ///   closed (review finding R0-F1, reproduced against the loop before this
-  ///   fix). [_encodeOneLine] re-escapes the survivors as `\uXXXX`.
+  ///   fix). [encodeOneLine] re-escapes the survivors as `\uXXXX`.
   /// * The echoed turn text *can* contain line breaks, so it gets the other
   ///   rule instead: [PromptCompiler.neutralizeMarkers] rewrites every Unicode
   ///   `Ps`/`Pe` codepoint to a round bracket, so it cannot spell a bracketed
@@ -521,23 +538,37 @@ class AgentLoop {
   ///   above never applied to it. Reused rather than reimplemented; a second
   ///   copy of that rule would be a second thing to keep true.
   ///
-  /// **The echo is dropped when the turn's call came out of text.** On that
-  /// path the turn text *is* the call, and `neutralizeMarkers` rewrites every
-  /// brace in it — so echoing it showed the next turn a syntactically corrupted
-  /// copy of the very JSON shape the guard needs it to keep producing,
-  /// immediately above the correct rendering in the `[TOOL CALL]` block
-  /// (R0-F5). On the native path the echo is kept, because there it really is
-  /// the reasoning that led to the call and the next turn is being asked to
-  /// finish it.
+  /// **The echo is dropped whenever the guard read this turn's text**, i.e.
+  /// whenever no native event arrived — see [AgentTurn.textScannedForCall].
+  /// `neutralizeMarkers` rewrites every brace, so echoing that text showed the
+  /// next turn a syntactically corrupted copy of the very JSON shape the guard
+  /// needs it to keep producing (R0-F5). The refused case is the worse one and
+  /// the first fix missed it (R1-F1): there is no `[TOOL CALL]` block beside
+  /// the mangled line, so it is the *only* rendering the model sees, directly
+  /// above an instruction to send well-formed JSON.
+  ///
+  /// **What that costs, stated rather than glossed.** The turn text is not
+  /// always *only* the call — `inspectText` scans for a JSON object anywhere in
+  /// the text, so `"Let me look that up. {…}"` is a legitimate turn and its
+  /// first sentence is dropped with the rest. The loop cannot separate the
+  /// prose from the call without re-deriving the guard's extent scan, and
+  /// showing mangled JSON is worse than losing a sentence of preamble. The
+  /// canonical `[TOOL CALL]` block carries what the next turn needs. (The
+  /// earlier claim here — "on that path the turn text *is* the call" — was
+  /// wider than `inspectText`'s own contract: R1-F2.)
+  ///
+  /// On the native path the echo is kept, because there it really is the
+  /// reasoning that led to the call and the next turn is being asked to finish
+  /// it.
   String continuationOf(String previous, AgentTurn turn) {
     final buffer = StringBuffer(previous)
       ..writeln()
       ..writeln();
 
-    final callCameFromText = turn.invocations.any(
-      (invocation) => invocation.source == GuardSource.text,
-    );
-    final echo = callCameFromText
+    // See [AgentTurn.textScannedForCall]. Deriving this from the invocations'
+    // `source` was R1-F1: it reads "native" for a turn whose only text-path
+    // attempt was refused, which is the turn that can least afford it.
+    final echo = turn.textScannedForCall
         ? ''
         : PromptCompiler.neutralizeMarkers(turn.text.trim());
     if (echo.isNotEmpty) {
@@ -625,7 +656,7 @@ class AgentLoop {
       );
 
   /// Every control, line separator and paragraph separator — the categories
-  /// that contain what `jsonEncode` leaves raw. See [_encodeOneLine].
+  /// that contain what `jsonEncode` leaves raw. See [encodeOneLine].
   static final RegExp _rawLineTerminators = RegExp(
     r'[\p{Cc}\p{Zl}\p{Zp}]',
     unicode: true,

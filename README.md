@@ -1422,12 +1422,27 @@ Only the *prompt* copy is neutralised. `AgentTurn.text` keeps what the model
 actually said, because that is what the technician saw and what Task 1.10 will
 snapshot.
 
-**The echo is dropped entirely when the call came out of text.** On the degraded
-path the turn text *is* the call, so neutralising it showed the next turn a
-brace-mangled copy of the very JSON shape the guard needs it to keep producing,
-immediately above the correct rendering in the `[TOOL CALL]` block. Found in
-review: the justification for keeping the echo — "it is the reasoning that led
-to the call" — is true on the native path and false on this one.
+**The echo is dropped whenever the guard read the turn's text** — that is,
+whenever no native event arrived. Neutralising that text brace-mangles it, so
+echoing it showed the next turn a corrupted copy of the very JSON shape the
+guard needs it to keep producing. Found in review; the justification for keeping
+the echo ("it is the reasoning that led to the call") is true on the native path
+and false on this one.
+
+The first version of that fix asked the wrong question — "does any *invocation*
+have a text source" — which is silently wrong for a turn whose only text-path
+attempt was **refused**, because then there are no invocations at all. That is
+the case that can least afford it: with nothing dispatched there is no
+`[TOOL CALL]` block beside the echo, so the mangled line is the only rendering
+the model sees, directly above an instruction to send well-formed JSON. The loop
+already knows the answer (`nativeCalls.isEmpty`) and now records it on the turn
+instead of inferring it.
+
+What that costs is stated rather than glossed: `inspectText` scans for a JSON
+object *anywhere* in the text, so `"Let me look that up. {…}"` is a legitimate
+turn and its first sentence goes with the rest. Showing mangled JSON is worse
+than losing a sentence of preamble, and the canonical `[TOOL CALL]` block
+carries what the next turn actually needs.
 
 One change this forced upstream: the compiled prompt's `[USER INQUIRY]` block
 used to be wrapped in **unescaped** quotes, which Task 1.4 recorded as safe
@@ -1461,13 +1476,20 @@ rather than inherit Task 1.4's reasoning about it. Measured on the shipped seed
 |---|---|
 | Two-document grounded prompt (turn 1) | 1581 |
 | After one tool round trip (turn 2) | 2064 (+483) |
-| **Ceiling — four turns, the shipped `maxTurns`** | **2900** |
+| **Ceiling — four turns, the shipped `maxTurns`** | **~2900** |
 | A third document, if the cap allowed it | +619 |
 
 The ceiling row exists because the first version of this table stopped at 2064
 and the test producing it was named "the widest round-trip prompt the loop can
 build" — which it was not, since it drove two turns against a default of four.
 The bound is `maxTurns`-scaled, and the number that matters is the last one.
+
+It is approximate for a reason worth naming: each turn appends an echo of what
+the model said, so the ceiling moves with the *script*, not just with the loop.
+This suite's script measures `[1581, 2038, 2469, 2900]`; a reviewer's, with
+longer per-turn text, measured `[1581, 2066, 2525, 2984]`. The shape — one
+grounded prompt plus three transcript blocks, monotonically growing — is the
+property the test pins; the last digit is not.
 
 **Characters, not tokens.** The tokenizer ships with the weights, so a token
 count computed on the host would be a guess wearing a number, and this repo has
