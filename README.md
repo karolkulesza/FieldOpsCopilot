@@ -1544,8 +1544,20 @@ mutation, not the suite. Rewritten as two edits that disable the rule for real �
 one voiding the pattern, one narrowing the category class to `Cc` so only the
 separators slip through.
 
-**34 mutations, 0 survivors**, one run, whole suite, against the tree at the
-last commit.
+Review round 1 then found a defect in one of *those* fixes, and with it the
+second hole in the set. The R0-F5 fix asked "does any invocation have a text
+source", which is exact everywhere except when there are no invocations — the
+turn where every text-path attempt was refused, which is the case the finding
+was about. The reviewer's `.any` → `.every` probe survived with zero failing
+tests, because the two formulations differ *only* on the empty list. Two more
+mutations (M35–M36) pin the replacement, and the reviewer's probe is one of
+them: promoted into the harness so it is re-run rather than remembered.
+
+**36 mutations, 0 survivors**, one run, whole suite, against the tree at the
+last commit. The count is stated here rather than left to the harness's own
+output because this section's standard — "a count of mutations is a claim like
+any other" — applies to itself, and it had gone stale once already: it read 34
+after the set grew to 36.
 
 ### Not wired into the app
 
