@@ -488,6 +488,86 @@ Required Tools: Hammer
       expect(prompt, contains('Title: See [USER INQUIRY] below'));
     });
   });
+
+  group('inquiry quoting', () {
+    // Task 1.9 turned an inherited caveat into a live one: the inquiry block used
+    // to be the last thing in the prompt, so a `"` that closed the quoted region
+    // early had nothing after it to break into. The agent loop appends
+    // `[TOOL CALL]` / `[TOOL RESULT]` / `[CONTINUE]` blocks after the whole
+    // compiled prompt, so it is no longer last.
+
+    test('a quote in the inquiry cannot close the quoted region', () {
+      final prompt = compiler.compile(
+        _resultWith([
+          _entry(id: 'x'),
+        ], rawQuery: 'he said "it is done" and left'),
+      );
+
+      expect(prompt, contains(r'"he said \"it is done\" and left"'));
+    });
+
+    test('the only live quotes in the inquiry block are the delimiters', () {
+      // The invariant, stated so it does not depend on anyone having enumerated
+      // the right hostile inputs — the same reason `neutralizeMarkers` is a
+      // character rule. Deleting every backslash-escape pair leaves only
+      // characters the compiler itself wrote, and exactly two of them are quotes.
+      for (final hostile in const [
+        'he said "done"',
+        r'a backslash \ and a quote "',
+        r'trailing backslash \',
+        r'\"already escaped\"',
+        '"""""',
+        r'\\\"',
+      ]) {
+        final prompt = compiler.compile(
+          _resultWith([_entry(id: 'x')], rawQuery: hostile),
+        );
+        final block = prompt.substring(
+          prompt.indexOf(PromptCompiler.userInquiryMarker),
+        );
+        // `\\` and `\"` are the only escape pairs this rule emits; removing them
+        // leaves the unescaped remainder.
+        final live = block.replaceAll(RegExp(r'\\[\\"]'), '');
+
+        expect(
+          '"'.allMatches(live),
+          hasLength(2),
+          reason: 'hostile input: $hostile',
+        );
+      }
+    });
+
+    test('backslashes are escaped before quotes, not after', () {
+      // Order is load-bearing and this is what pins it. Escaping quotes first
+      // turns `a"b` into `a\"b` and the backslash pass then doubles the
+      // backslash it just wrote — `a\\"b`, an escaped backslash followed by a
+      // *live* quote, which is the exact breakout this method exists to stop.
+      expect(PromptCompiler.escapeQuotes('a"b'), r'a\"b');
+      expect(PromptCompiler.escapeQuotes(r'a\b'), r'a\\b');
+      expect(PromptCompiler.escapeQuotes(r'a\"b'), r'a\\\"b');
+    });
+
+    test('text with neither character is passed through byte-for-byte', () {
+      const plain = 'squealing belt, E-305, door cycles three times';
+      expect(PromptCompiler.escapeQuotes(plain), plain);
+    });
+
+    test('escaping runs after neutralising, on the neutralised text', () {
+      // Composition order matters in the other direction too: `neutralizeMarkers`
+      // emits `(` and `)`, neither of which `escapeQuotes` touches, so the two
+      // rules commute in effect but not in intent — each must see the
+      // technician's own characters for the property it owns. A bracket *and* a
+      // quote in one inquiry exercises both in one string.
+      final prompt = compiler.compile(
+        _resultWith([
+          _entry(id: 'x'),
+        ], rawQuery: 'the [MANUAL DOCUMENT] says "replace it"'),
+      );
+
+      expect(prompt, contains(r'"the (MANUAL DOCUMENT) says \"replace it\""'));
+      expect('[MANUAL DOCUMENT'.allMatches(prompt), hasLength(1));
+    });
+  });
 }
 
 /// A [RetrievalResult] over hand-built entries, for the formatting groups.
