@@ -10,8 +10,8 @@ database to help technicians diagnose faults and produce structured repair plans
 > engine-abstraction layer, the encrypted database, offline retrieval, model
 > provisioning, the **on-device LLM engine** and the **agent loop** that ties
 > retrieval to inference are in place. STT and vision are still fakes, and the
-> demo screen that puts the loop on screen is the next task — they slot in
-> behind the interfaces described below.
+> golden snapshot suite and the demo screen that puts the loop on screen are the
+> next two tasks — they slot in behind the interfaces described below.
 
 ## What's implemented so far
 
@@ -1364,8 +1364,9 @@ of one condition, rather than two that differ by which layer noticed first.
 ### Two bounds, doing different work
 
 - **`maxTurns`** (default 4) is the hard bound on calls to `generate`. Two turns
-  is the shortest complete run, so the default leaves room for one correction
-  round. Hitting it stops the loop with `AgentStopReason.iterationCapReached`
+  is the shortest complete run and a correction round costs one turn, so the
+  default leaves room for **two** of them. (This said "one" in three documents
+  until review did the arithmetic.) Hitting it stops the loop with `AgentStopReason.iterationCapReached`
   and a message that *reports the failure* rather than summarising a diagnosis
   the loop never obtained. It is **clamped**, not asserted — an `assert` is
   compiled out in release and would make the clamp unreachable from any test.
@@ -1377,7 +1378,10 @@ of one condition, rather than two that differ by which layer noticed first.
   re-execution could not promise for a tool that is not a pure read. Top-level
   argument keys are sorted so key order does not make one call look like two;
   nested maps are left alone, and a reordered nested map costs one extra
-  execution rather than a wrong answer.
+  execution rather than a wrong answer. **It caches failures too, including
+  `execution_failed`** — for an identical call there is nothing left to correct,
+  so replaying it costs no turn out of a four-turn budget; a *different* call is
+  a different key and stays open.
 
 ### The continuation prompt cannot be forged
 
@@ -1392,13 +1396,22 @@ and upper-case, no character filtering — so **the model chooses the content of
 The defence is that every marker in this prompt starts a line, and no embedded
 value can start one:
 
-- **The call and result blocks are single `jsonEncode` lines.** `jsonEncode`
-  escapes every newline inside a string as the two characters `\n`, so no value
-  it emits can contain a real line break, whatever the model wrote. That is a
-  property of the encoder rather than a list of characters to strip — the shape
-  Task 1.4 learned to prefer over enumeration. The tool *name* is inside that
-  encoded line too, not written as bare prose, because a name recovered from
-  text is a decoded JSON string and really can contain a newline.
+- **The call and result blocks are single lines, written by
+  `AgentLoop.encodeOneLine`.** `jsonEncode` on its own is *not* enough, and the
+  first version of this section claimed it was. It escapes every code unit below
+  `0x20` plus `"` and `\`, and leaves **U+0085 NEL, U+2028 LINE SEPARATOR,
+  U+2029 PARAGRAPH SEPARATOR and U+007F raw**. U+2028 and U+2029 are Unicode
+  *mandatory* line breaks, and `normalizeSku` is `trim().toUpperCase()` — so an
+  interior U+2028 in a model-supplied SKU reached the echoed payload verbatim
+  and opened a real second `[TOOL RESULT]` at column 0. Exactly the attack this
+  section said was closed, found in review and reproduced against the loop.
+  `encodeOneLine` re-escapes the survivors as `\uXXXX`, matched by general
+  category (`Cc`, `Zl`, `Zp`) rather than by listing four codepoints, for the
+  same reason `neutralizeMarkers` is a category rule one layer down. Re-escaping
+  rather than stripping keeps the line valid JSON *and* lossless — a test
+  asserts `jsonDecode` of the output equals the input. The tool *name* is inside
+  that encoded line too, not written as bare prose, because a name recovered
+  from text is a decoded JSON string and really can contain a line break.
 - **The echoed turn text is the one piece that can legitimately contain line
   breaks**, so it gets the other rule instead: `PromptCompiler.neutralizeMarkers`
   rewrites every Unicode `Ps`/`Pe` codepoint to a round bracket, so it cannot
@@ -1408,6 +1421,13 @@ value can start one:
 Only the *prompt* copy is neutralised. `AgentTurn.text` keeps what the model
 actually said, because that is what the technician saw and what Task 1.10 will
 snapshot.
+
+**The echo is dropped entirely when the call came out of text.** On the degraded
+path the turn text *is* the call, so neutralising it showed the next turn a
+brace-mangled copy of the very JSON shape the guard needs it to keep producing,
+immediately above the correct rendering in the `[TOOL CALL]` block. Found in
+review: the justification for keeping the echo — "it is the reasoning that led
+to the call" — is true on the native path and false on this one.
 
 One change this forced upstream: the compiled prompt's `[USER INQUIRY]` block
 used to be wrapped in **unescaped** quotes, which Task 1.4 recorded as safe
@@ -1441,7 +1461,13 @@ rather than inherit Task 1.4's reasoning about it. Measured on the shipped seed
 |---|---|
 | Two-document grounded prompt (turn 1) | 1581 |
 | After one tool round trip (turn 2) | 2064 (+483) |
+| **Ceiling — four turns, the shipped `maxTurns`** | **2900** |
 | A third document, if the cap allowed it | +619 |
+
+The ceiling row exists because the first version of this table stopped at 2064
+and the test producing it was named "the widest round-trip prompt the loop can
+build" — which it was not, since it drove two turns against a default of four.
+The bound is `maxTurns`-scaled, and the number that matters is the last one.
 
 **Characters, not tokens.** The tokenizer ships with the weights, so a token
 count computed on the host would be a guess wearing a number, and this repo has
@@ -1460,7 +1486,8 @@ because this task's behaviour spans two, and it refuses a dirty baseline,
 duplicate mutation *edits* and duplicate mutation *labels*.
 
 **27 killed on the first pass; 2 survived, and both were gaps in the tests
-rather than in the code.** Both are failure modes this repo had already
+rather than in the code.** (Review then found a third and fourth hole the set
+did not probe at all — see the round-1 additions below.) Both are failure modes this repo had already
 recorded, which is the interesting part:
 
 - **Deleting the loop's engine-readiness check killed nothing**, because
@@ -1478,6 +1505,13 @@ recorded, which is the interesting part:
 
 **After both fixes, all 29 die** — re-measured by running the whole set again
 against the tree at the last commit, not carried over from the first pass.
+
+Review round 0 then showed the set had a hole of its own: nothing in it touched
+`AgentToolCallRejected` or `AgentToolCallStarted.repeated`, and two probes the
+reviewer added survived with zero failing tests. Four mutations were added
+(M30–M33) covering the line-terminator re-escaping, the two unbound stream
+signals, and the dropped echo on the degraded path. **34 mutations, 0
+survivors** on the final run.
 
 ### Not wired into the app
 

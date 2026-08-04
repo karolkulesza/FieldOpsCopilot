@@ -24,6 +24,8 @@ library;
 import 'dart:collection';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import '../../engines/llm_engine.dart';
 import '../rag/prompt_compiler.dart';
 import 'base_tool.dart';
@@ -251,9 +253,13 @@ class AgentLoop {
   }) : maxTurns = maxTurns < 1 ? 1 : maxTurns,
        guard = ToolCallGuard(registry.toolNames);
 
-  /// Turn cap when none is given. Two turns is the shortest complete run — call
-  /// a tool, then answer with the result — so this leaves room for one
-  /// correction round on top of a two-turn happy path.
+  /// Turn cap when none is given.
+  ///
+  /// Two turns is the shortest complete run — call a tool, then answer with the
+  /// result — and a correction round costs one turn each, so four leaves room
+  /// for **two** of them on top of the happy path. The first version of this
+  /// sentence said "one", in three documents (review finding R0-F7); the
+  /// arithmetic, not the number, was wrong.
   static const int defaultMaxTurns = 4;
 
   final LlmEngine engine;
@@ -497,26 +503,43 @@ class AgentLoop {
   /// The defence is that **every marker in this prompt starts a line, and no
   /// embedded value can start one**:
   ///
-  /// * The call and result blocks are single `jsonEncode` lines. `jsonEncode`
-  ///   escapes every newline inside a string as the two characters `\n`, so no
-  ///   value it emits can contain a real line break, whatever the model wrote.
-  ///   This is a property of the encoder rather than a list of characters to
-  ///   strip — the shape Task 1.4 learned to prefer over enumeration.
+  /// * The call and result blocks are single lines, written by
+  ///   [_encodeOneLine]. `jsonEncode` alone is **not** enough for that, and the
+  ///   first version of this comment claimed it was: it escapes every code unit
+  ///   below `0x20` plus `"` and `\`, and passes **U+0085 NEL, U+2028 LINE
+  ///   SEPARATOR, U+2029 PARAGRAPH SEPARATOR and U+007F through raw**. U+2028
+  ///   and U+2029 are Unicode *mandatory* line breaks, and `normalizeSku` is
+  ///   `trim().toUpperCase()`, so an interior one in a model-supplied SKU
+  ///   reached the echoed payload verbatim and opened a real second
+  ///   `[TOOL RESULT]` at column 0 — the exact attack this paragraph said was
+  ///   closed (review finding R0-F1, reproduced against the loop before this
+  ///   fix). [_encodeOneLine] re-escapes the survivors as `\uXXXX`.
   /// * The echoed turn text *can* contain line breaks, so it gets the other
   ///   rule instead: [PromptCompiler.neutralizeMarkers] rewrites every Unicode
   ///   `Ps`/`Pe` codepoint to a round bracket, so it cannot spell a bracketed
-  ///   marker at all. Reused rather than reimplemented — a second copy of that
-  ///   rule would be a second thing to keep true.
+  ///   marker at all — line-initial or not, which is why the terminator gap
+  ///   above never applied to it. Reused rather than reimplemented; a second
+  ///   copy of that rule would be a second thing to keep true.
   ///
-  /// The echo is kept, rather than dropped as the cheaper way to close the
-  /// same hole, because it is the reasoning that led to the call and the next
-  /// turn is being asked to finish it.
+  /// **The echo is dropped when the turn's call came out of text.** On that
+  /// path the turn text *is* the call, and `neutralizeMarkers` rewrites every
+  /// brace in it — so echoing it showed the next turn a syntactically corrupted
+  /// copy of the very JSON shape the guard needs it to keep producing,
+  /// immediately above the correct rendering in the `[TOOL CALL]` block
+  /// (R0-F5). On the native path the echo is kept, because there it really is
+  /// the reasoning that led to the call and the next turn is being asked to
+  /// finish it.
   String continuationOf(String previous, AgentTurn turn) {
     final buffer = StringBuffer(previous)
       ..writeln()
       ..writeln();
 
-    final echo = PromptCompiler.neutralizeMarkers(turn.text.trim());
+    final callCameFromText = turn.invocations.any(
+      (invocation) => invocation.source == GuardSource.text,
+    );
+    final echo = callCameFromText
+        ? ''
+        : PromptCompiler.neutralizeMarkers(turn.text.trim());
     if (echo.isNotEmpty) {
       buffer
         ..writeln(assistantMarker)
@@ -528,14 +551,14 @@ class AgentLoop {
       buffer
         ..writeln(toolCallMarker)
         ..writeln(
-          jsonEncode({
+          encodeOneLine({
             'tool': invocation.call.name,
             'arguments': invocation.call.arguments,
             if (invocation.repeated) 'repeated': true,
           }),
         )
         ..writeln(toolResultMarker)
-        ..writeln(jsonEncode(invocation.outcome.payload))
+        ..writeln(encodeOneLine(invocation.outcome.payload))
         ..writeln();
     }
 
@@ -547,7 +570,7 @@ class AgentLoop {
         // is explicit about not doing that. Encoded anyway, for the same
         // single-line property as the blocks above.
         ..writeln(
-          jsonEncode({
+          encodeOneLine({
             'error': 'malformed_tool_call',
             'message': failure.message,
           }),
@@ -566,6 +589,48 @@ class AgentLoop {
     return buffer.toString();
   }
 
+  /// `jsonEncode(value)` with every line terminator it leaves raw re-escaped,
+  /// so the result is guaranteed to be one line.
+  ///
+  /// Public for the same reason [PromptCompiler.neutralizeMarkers] is: the
+  /// property it buys is asserted directly by a test, and routing that
+  /// assertion through [continuationOf] would test the caller instead.
+  ///
+  /// The guarantee `jsonEncode` gives is narrower than "no line breaks", and
+  /// the gap is the whole of review finding R0-F1. Measured on this toolchain
+  /// (`jsonEncode({'k': 'a<c>b'})`): LF, CR, VT, FF and every other code unit
+  /// below `0x20` come out escaped, while **U+0085, U+2028, U+2029 and U+007F
+  /// come out raw**. Two of those are Unicode mandatory line breaks.
+  ///
+  /// Matched by general category rather than by listing those four codepoints,
+  /// for the reason [PromptCompiler.neutralizeMarkers] gives one layer down: a
+  /// list only covers what someone enumerated. `Cc` is every C0/C1 control
+  /// (which subsumes U+0085 and U+007F), `Zl` is U+2028 and `Zp` is U+2029 —
+  /// so the question asked is membership, not spelling. Applying it to the
+  /// *whole* encoded string is safe because every structural character
+  /// `jsonEncode` emits is printable ASCII, so anything this matches was
+  /// necessarily inside a string literal.
+  ///
+  /// Re-escaped as `\uXXXX` rather than stripped or replaced with a space: that
+  /// keeps the line valid JSON *and* lossless, so the model still sees what it
+  /// sent — `jsonDecode` of the output equals the input map, which is asserted
+  /// by a test rather than argued here.
+  @visibleForTesting
+  static String encodeOneLine(Object? value) =>
+      jsonEncode(value).replaceAllMapped(
+        _rawLineTerminators,
+        (match) =>
+            '\\u'
+            '${match[0]!.codeUnitAt(0).toRadixString(16).padLeft(4, '0')}',
+      );
+
+  /// Every control, line separator and paragraph separator — the categories
+  /// that contain what `jsonEncode` leaves raw. See [_encodeOneLine].
+  static final RegExp _rawLineTerminators = RegExp(
+    r'[\p{Cc}\p{Zl}\p{Zp}]',
+    unicode: true,
+  );
+
   /// Canonical identity of a call, for the repeat short circuit.
   ///
   /// **What this bound is for.** The turn cap already stops an infinite run, so
@@ -575,6 +640,17 @@ class AgentLoop {
   /// disagree with what the model was already told, which a re-execution could
   /// if a tool were not a pure read. It is scoped to one run and nothing
   /// persists between runs.
+  ///
+  /// **It caches failures too, including `execution_failed`**, and that is
+  /// worth saying out loud because Task 1.5's `dispatch` describes the loop's
+  /// recovery as feeding the payload back "so the model can correct itself".
+  /// For an identical call there is nothing left to correct: the same arguments
+  /// against the same local database produce the same error, so a retry would
+  /// spend a turn out of a four-turn budget to be told the same thing. What the
+  /// model *can* still do is call with different arguments, or answer without
+  /// the tool — both of which stay open, because a different call is a
+  /// different key. Recorded rather than left implicit by this method's own
+  /// standard, and pinned by a test (review finding R0-F6).
   ///
   /// Top-level argument keys are sorted so the same call written in a different
   /// key order is one call. Nested maps are left as they are: a nested map
