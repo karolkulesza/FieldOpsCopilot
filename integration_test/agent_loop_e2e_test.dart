@@ -18,6 +18,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
+import 'e2e_fixtures.dart';
+
 /// TC-AGENT-E2E-01 — the whole Tier 1 slice on a real device, against real
 /// weights and the real seeded database.
 ///
@@ -128,10 +130,11 @@ void main() {
       }
       final database = db!;
 
-      // The AC's input, typed as a technician would.
-      const inquiry = 'cabin vibrating, E-102';
-
-      final retrieved = await RetrievalRouter(database).retrieve(inquiry);
+      // The AC's input, typed as a technician would. Shared with the host
+      // suite, which checks this premise in CI — see `e2e_fixtures.dart`.
+      final retrieved = await RetrievalRouter(
+        database,
+      ).retrieve(e2eGroundedInquiry);
       // A premise, not an assertion about the loop: if retrieval missed, every
       // downstream failure would be misattributed to the model.
       expect(retrieved.entryIds, contains('apex_9_err_102'));
@@ -140,17 +143,44 @@ void main() {
       final registry = ToolRegistry([GetPartsInventoryTool(database)]);
       final loop = AgentLoop(engine: engine!, registry: registry);
 
+      // Timed per turn as well as overall. The first device run reported only
+      // a total (11332ms for two turns), which cannot be turned into a
+      // throughput figure — and the sprint plan still lists throughput as
+      // unmeasured, with 1.8's "2.7 tok/s" recorded as arithmetic rather than a
+      // measurement. A per-turn split plus the generated character count is
+      // what makes the next run able to close that.
       final stopwatch = Stopwatch()..start();
-      final result = await loop.runToCompletion(prompt);
+      final turnElapsed = <int>[];
+      var lastMark = 0;
+      final result = await loop
+          .run(prompt)
+          .map((event) {
+            if (event is AgentTurnStarted && event.index > 0) {
+              turnElapsed.add(stopwatch.elapsedMilliseconds - lastMark);
+              lastMark = stopwatch.elapsedMilliseconds;
+            }
+            return event;
+          })
+          .fold<AgentRunResult?>(
+            null,
+            (acc, e) => e is AgentCompleted ? e.result : acc,
+          )
+          .then((r) => r!);
       stopwatch.stop();
+      turnElapsed.add(stopwatch.elapsedMilliseconds - lastMark);
 
       for (final turn in result.turns) {
+        final ms = turn.index < turnElapsed.length
+            ? turnElapsed[turn.index]
+            : -1;
         debugPrint(
           '[TC-AGENT-E2E-01] turn ${turn.index}: '
           'prompt ${turn.prompt.length} chars, '
           'text ${turn.text.length} chars, '
           'tools ${turn.invocations.length}, '
-          'rejected ${turn.rejectedCalls.length}',
+          'rejected ${turn.rejectedCalls.length}, '
+          'elapsed ${ms}ms'
+          '${turn.text.isEmpty || ms <= 0 ? '' : ' (~${(turn.text.length / (ms / 1000)).toStringAsFixed(0)} chars/s generated)'}',
         );
       }
       debugPrint(
@@ -208,9 +238,21 @@ void main() {
       // Task 1.4's no-match block tells the model there is no entry and not to
       // call any tool. If the loop still produces a confident procedure, the
       // grounding is decorative.
-      const inquiry = 'the hydraulic ram on the loading crane is leaking';
-      final retrieved = await RetrievalRouter(database).retrieve(inquiry);
-      expect(retrieved.isEmpty, isTrue);
+      // The fixture is shared with the host suite, which pins this premise in
+      // CI. It had to be: the first one — "the hydraulic ram on the loading
+      // crane is leaking" — retrieved two entries, so this test failed here on
+      // device, before the model was asked anything. `hydraulic` is in the
+      // manual (E-204's symptoms name the hydraulic manifold), and separately
+      // the stop words `the`/`on`/`is` each match on their own. See
+      // `e2e_fixtures.dart` and `tc_agent_e2e_premises_test.dart`.
+      final retrieved = await RetrievalRouter(
+        database,
+      ).retrieve(e2eNoMatchInquiry);
+      expect(
+        retrieved.isEmpty,
+        isTrue,
+        reason: 'pinned on the host by tc_agent_e2e_premises_test.dart',
+      );
 
       final registry = ToolRegistry([GetPartsInventoryTool(database)]);
       final loop = AgentLoop(engine: engine!, registry: registry);
