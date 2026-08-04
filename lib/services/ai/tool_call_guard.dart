@@ -245,9 +245,12 @@ class ToolCallGuard {
   ///
   /// When nothing is usable the *most specific* failure wins: a candidate that was
   /// clearly a call attempt but unusable ([GuardFailureReason.emptyToolName],
-  /// [GuardFailureReason.argumentsUnreadable]) is reported ahead of the generic
+  /// [GuardFailureReason.argumentsUnreadable] or
+  /// [GuardFailureReason.argumentsNotEncodable]) is reported ahead of the generic
   /// [GuardFailureReason.noToolCallFound], because "your call was malformed" and "you
-  /// did not call anything" are different things to tell a model.
+  /// did not call anything" are different things to tell a model. The third entry was
+  /// missing from this list in the very commit that made it reachable from here (R1-F5);
+  /// the *behaviour* was right — the precedence test covers it — but the doc was not.
   GuardResult inspectText(String text) {
     GuardFailure? specific;
     for (final candidate in _jsonObjectCandidates(text)) {
@@ -329,6 +332,13 @@ class ToolCallGuard {
     // throws the uncatchable `Error` this file spends fifteen lines guarding against on
     // the other path (review finding R0-F1). Model text is the *more* likely source of
     // such a literal, not the less.
+    //
+    // The subject is `arguments`, **not** `object`, and the difference is load-bearing:
+    // both are `Map<String, Object?>` and both are in scope, but the outer object's
+    // `arguments` value can be a *JSON string* whose contents this probe would never look
+    // through — a `String` is perfectly encodable. Probing `object` compiles and reopens
+    // R0-F1 for that shape (R1-F4). Pinned by
+    // 'an overflow inside arguments-as-a-JSON-string is caught too'.
     if (!_isJsonEncodable(arguments)) {
       return const GuardFailure(
         reason: GuardFailureReason.argumentsNotEncodable,
@@ -446,11 +456,20 @@ class ToolCallGuard {
   ///
   /// **These are a judgement about model *text*, and the entries that were only a
   /// judgement about nothing have been deleted.** `'function'`, `'recipient_name'` and
-  /// (below) `'parameter_values'` were removed in review: no test bound them and no
-  /// runtime attests them — `flutter_gemma` 1.4.1 and `flutter_gemma_litertlm` 1.3.1 use
-  /// none of those spellings anywhere, and the one place the plugin reads `function` it
-  /// holds a **Map**, which [_firstStringUnder] ignores. So the entry aimed at a shape
-  /// nothing produces (R0-F3). Decoration rots; deleting beats maintaining.
+  /// (below) `'parameter_values'` were removed in review, because no test bound them and
+  /// nothing attested them as a key holding a *name string* (R0-F3):
+  ///
+  /// * `'recipient_name'` and `'parameter_values'` appear nowhere in `flutter_gemma`
+  ///   1.4.1 or `flutter_gemma_litertlm` 1.3.1.
+  /// * `'function'` *does* appear — `sdk_response_parser.dart:134` reads
+  ///   `raw['function']` — but only ever as a **Map**, which [_firstStringUnder] ignores,
+  ///   so the entry aimed at a shape nothing produces.
+  ///
+  /// Split into two bullets because the single sentence this replaces claimed the plugins
+  /// "use none of those spellings anywhere" and then conceded the `function` hit twenty
+  /// words later, contradicting itself inside one sentence (R1-F2). The narrow claim was
+  /// true and the broad one was not, which is the recurring shape in this repo: **state
+  /// the claim at the width you checked.** Decoration rots; deleting beats maintaining.
   ///
   /// What is left is deliberate leniency, and the honest justification is *not* the
   /// plugin's key list: that list says what the plugin **parses**, which is weak evidence

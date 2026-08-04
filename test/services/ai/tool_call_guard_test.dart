@@ -197,6 +197,23 @@ Once I have the stock level I'll finish the plan.''';
       );
     });
 
+    test('an overflow inside arguments-as-a-JSON-string is caught too', () {
+      // R1-F4: the probe must run on the *decoded* arguments, not on the outer object.
+      // Both are `Map<String, Object?>` and both are in scope at the call site, so
+      // probing `object` instead compiles, passes every other test, and reopens R0-F1 for
+      // exactly this shape — the outer object's `arguments` value is a `String`, which is
+      // perfectly encodable, and nothing would look through it. The arguments-as-string
+      // shape is the one `flutter_gemma`'s own SDK parser tolerates, so it is not exotic.
+      const text =
+          r'{"tool": "get_local_parts_inventory", '
+          r'"arguments": "{\"qty\": 1e400}"}';
+
+      expect(
+        (guard.inspectText(text) as GuardFailure).reason,
+        GuardFailureReason.argumentsNotEncodable,
+      );
+    });
+
     test('accepts each name key alias', () {
       for (final key in ['tool', 'tool_name', 'name', 'function_name']) {
         final text =
