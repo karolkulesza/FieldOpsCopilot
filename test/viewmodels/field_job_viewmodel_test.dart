@@ -249,6 +249,57 @@ void main() {
       );
     });
 
+    // **The end-of-run assertion above is not enough, and mutation M5 proved it.**
+    // Dropping `activeTool: null` from the `AgentToolCallCompleted` row left every
+    // test green, because `AgentCompleted` clears it too — so the final state was
+    // identical and the mask was total. What it changes is the *middle*: the
+    // indicator would stay on "Checking inventory…" through the whole second turn,
+    // while the answer streams underneath it. That is the most-watched three
+    // seconds of the demo, describing work that finished.
+    //
+    // So the assertion is on the emitted sequence rather than the final state: at
+    // the instant the invocation is recorded, nothing is in flight any more.
+    test(
+      'the indicator clears when the lookup completes, not when the run does',
+      () async {
+        final container = await containerOver([
+          [
+            const LlmToken('Checking the warehouse.'),
+            inventoryCall('BRK-990-XP'),
+            const LlmDone(),
+          ],
+          const [LlmToken('There are 2 units in Aisle 4, Shelf B.'), LlmDone()],
+        ]);
+        final emitted = <FieldJobState>[];
+        container.listen(
+          fieldJobViewModelProvider,
+          (previous, next) => emitted.add(next),
+        );
+
+        await container
+            .read(fieldJobViewModelProvider.notifier)
+            .diagnose('cabin vibrating, E-102');
+
+        final atCompletion = emitted.firstWhere(
+          (s) => s.invocations.isNotEmpty,
+        );
+        expect(
+          atCompletion.phase,
+          FieldJobPhase.thinking,
+          reason: 'the run must still be going, or this proves nothing new',
+        );
+        expect(atCompletion.activeTool, isNull);
+
+        // And it stays clear for the rest of the run, so the second turn streams
+        // with no indicator claiming a lookup is happening.
+        final duringSecondTurn = emitted.where(
+          (s) => s.phase == FieldJobPhase.thinking && s.invocations.isNotEmpty,
+        );
+        expect(duringSecondTurn, isNotEmpty);
+        expect(duringSecondTurn.every((s) => s.activeTool == null), isTrue);
+      },
+    );
+
     // The live text is the *current* turn's. Without the reset at the turn
     // boundary the answer would arrive with the first turn's aside glued above it,
     // permanently.
