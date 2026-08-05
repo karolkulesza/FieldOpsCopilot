@@ -69,6 +69,12 @@ import 'retrieval_router.dart';
 /// cure: nothing stops a user from simply *asking* the model to ignore its
 /// instructions, and nothing here should be described as if it did.
 ///
+/// **The inquiry's own quotes are escaped** ([escapeQuotes]), which is a
+/// separate and much smaller property than the one above. It was not always
+/// so: the inquiry used to be wrapped in *unescaped* quotes, which was safe
+/// only while this block was the last thing in the prompt. Task 1.9's agent
+/// loop appends tool-call and tool-result blocks after it, so it no longer is.
+///
 /// **Documents are capped.** Task 1.8 measured a ~400-token grounded prompt for
 /// a single entry against a 2B-parameter model, and the router can return one
 /// row per resolved code plus its full-text hits. [maxDocuments] is the prompt
@@ -134,15 +140,16 @@ class PromptCompiler {
       }
     }
 
-    // The inquiry is wrapped in unescaped double quotes, so a `"` in the
-    // technician's text closes the quoted region early. That is tolerable only
-    // because this block is **last** — there is nothing after it to break into,
-    // and what remains is the general injection case disclaimed above. Task 1.9
-    // appends tool results for a second model turn; if anything ever follows the
-    // inquiry, this needs escaping before it does.
+    // The inquiry is wrapped in double quotes and its own quotes are escaped, so
+    // the quoted region cannot be closed early. This used to be unescaped, which
+    // was tolerable *only* while this block was last — there was nothing after it
+    // to break into. Task 1.9's agent loop appends `[TOOL CALL]` / `[TOOL RESULT]`
+    // blocks after the whole compiled prompt for the second model turn, so this
+    // block is no longer last, and the note left here for 1.9 ("this needs
+    // escaping before it does") is discharged rather than inherited.
     buffer
       ..writeln(userInquiryMarker)
-      ..write('"${neutralizeMarkers(result.rawQuery.trim())}"');
+      ..write('"${escapeQuotes(neutralizeMarkers(result.rawQuery.trim()))}"');
 
     return buffer.toString();
   }
@@ -212,6 +219,28 @@ class PromptCompiler {
   static String neutralizeMarkers(String text) => text
       .replaceAll(_openingPunctuation, '(')
       .replaceAll(_closingPunctuation, ')');
+
+  /// Escapes the two characters that can break out of a double-quoted region:
+  /// the backslash and the double quote, in that order.
+  ///
+  /// Backslash first is not stylistic — escaping quotes first would leave the
+  /// backslash this rule just emitted to be doubled by the second pass, so
+  /// `a"b` would come out `a\\"b`, whose `\\` is an escaped backslash followed
+  /// by a *live* quote. The order is pinned by a test rather than by this
+  /// comment.
+  ///
+  /// The property it buys is checkable without enumerating inputs, which is
+  /// what [neutralizeMarkers] learned to prefer: after this rewrite the only
+  /// unescaped `"` in the inquiry block are the two delimiters the compiler
+  /// itself wrote. A test asserts exactly that, by deleting every `\\`-escape
+  /// pair from the block and counting what is left.
+  ///
+  /// It is not a second injection defence. [neutralizeMarkers] is what stops a
+  /// bracketed section marker being forged; this stops a quote ending the
+  /// quoted span early and leaving the rest of the technician's sentence
+  /// sitting in the prompt as unquoted text.
+  static String escapeQuotes(String text) =>
+      text.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
 
   /// Every codepoint Unicode gives General_Category `Ps` — `[`, `(`, `{`, and
   /// the fullwidth/CJK/mathematical bracket homoglyphs.
