@@ -104,14 +104,37 @@ void main() {
       expect(engine.initializeCalls, 1);
     });
 
-    test('a call after ready does not load again', () async {
+    // **This test used to assert `initializeCalls == 1` and it proved nothing.**
+    // Deleting `state is EngineReady` from the guard left it green (mutation M11
+    // survived), because the *other* protection catches it: the second call
+    // reaches the `engine.isReady` branch below and adopts the engine without
+    // reloading. Two overlapping mechanisms, one test, and the test was bound by
+    // the one it was not written for.
+    //
+    // What the guard uniquely buys is that the state never leaves `EngineReady`.
+    // Without it a widget rebuild walks Ready → Loading → Ready, which on this
+    // screen is the static "loading the on-device model" row flashing over a
+    // working app — visible in the recording this task exists to produce. So the
+    // assertion is the emitted sequence, which only the guard can keep empty.
+    test('a call after ready is a no-op, emitting no state at all', () async {
       final engine = _GatedEngine();
       final container = containerWith(engine);
       final controller = controllerOf(container);
 
       await controller.warmUp();
+      expect(
+        container.read(engineWarmupControllerProvider),
+        isA<EngineReady>(),
+      );
+
+      final emitted = <EngineWarmupState>[];
+      container.listen(
+        engineWarmupControllerProvider,
+        (previous, next) => emitted.add(next),
+      );
       await controller.warmUp();
 
+      expect(emitted, isEmpty);
       expect(engine.initializeCalls, 1);
     });
 
