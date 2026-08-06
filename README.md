@@ -16,7 +16,9 @@ database to help technicians diagnose faults and produce structured repair plans
 ## What's implemented so far
 
 - **Runnable Flutter app** (iOS + Android) with a Material 3 UI and a single
-  home screen.
+  screen: type a fault, tap **Diagnose**, watch the on-device model stream a
+  grounded repair plan and check the local warehouse on the way. See _The demo
+  screen_ below.
 - **Riverpod dependency injection** (`ProviderScope`) as the seam for swapping
   fakes for real on-device engines without touching upstream code.
 - **Engine abstraction layer** — a Dart interface per on-device capability:
@@ -27,11 +29,11 @@ database to help technicians diagnose faults and produce structured repair plans
     transcripts.
   - `VisionEngine` — decodes barcodes/QR codes and OCR text from image bytes.
   - `PlatformTelemetry` — exposes device thermal state and battery status.
-- **Deterministic fakes** for each engine, enabling fast, device-free unit tests
-  and driving the skeleton UI.
-- **Home screen** that exercises the `LlmEngine` streaming contract end-to-end
-  against the fake engine (initialise → stream a scripted response token by
-  token → render).
+- **Deterministic fakes** for each engine, enabling fast, device-free unit tests.
+  They are reachable only by *overriding a provider in a test* — the production
+  graph never falls back to one, because an app that answers fluently from a
+  script on a device where the model never ran is indistinguishable from a working
+  app in a screen recording.
 - **Seed dataset** (`assets/elevator_manual_seed.json`) — three Apex-9 manual
   entries (fault code, symptoms, procedure, required tools/parts) and five parts
   inventory rows, applied to the local database on first launch.
@@ -71,8 +73,14 @@ database to help technicians diagnose faults and produce structured repair plans
   loop_ below.
 - **Model provisioning** — download-with-progress, streaming SHA-256 verification
   against a pinned digest, atomic install into no-backup storage, and a visible
-  "model ready" state on the home screen, with the trigger to fetch and verify.
+  "model ready" state on the demo screen, with the trigger to fetch and verify.
   See _Model provisioning_ below.
+- **The demo screen, and the end-to-end wiring under it** — the encrypted database
+  opened with a real key, the first-launch seed triggered as a *dependency* rather
+  than a call order, the device engine loaded before the UI needs to be
+  interactive, and a Riverpod viewmodel folding the agent loop's event stream into
+  UI state. This is the screen the portfolio recording is made from. See _The demo
+  screen_ below.
 - **On-device inference** — **Gemma 4 E2B** in a `.litertlm` container, run
   through `flutter_gemma` + `flutter_gemma_litertlm` (LiteRT-LM over `dart:ffi`)
   on a dedicated background isolate, behind the same `LlmEngine` interface the
@@ -1634,6 +1642,318 @@ and both device premises now live in `integration_test/e2e_fixtures.dart` with
 host tests asserting them in CI — none of that needed a device, and the run
 spent a build, a 2.6GB transfer and four minutes to learn it.
 
+## The demo screen
+
+One screen, and the whole Tier 1 slice behind it: type a fault, tap **Diagnose**,
+and the on-device model streams a repair plan grounded in the bundled service
+manual, checking the local warehouse table on the way.
+
+```
+[ technician types: "cabin vibrating, E-102" ]
+        │
+        ├─ RetrievalRouter ──── E-102 → structured column; "cabin vibrating" → FTS5
+        ├─ PromptCompiler ───── [MANUAL DOCUMENT] + [USER INQUIRY]
+        └─ AgentLoop ────────── Gemma 4 E2B → native tool call
+                                      │
+                                      ├─ get_local_parts_inventory(BRK-990-XP)
+                                      │        → {in_stock: 2, aisle: "Aisle 4, Shelf B"}
+                                      └─ turn 2 → grounded answer, streamed to screen
+```
+
+`lib/views/diagnose_screen.dart` renders it; `lib/viewmodels/field_job_viewmodel.dart`
+folds `AgentLoop.run`'s event stream into the state it draws from. The composition
+itself really is three lines, which is the point of everything above it:
+
+```dart
+final retrieval = await router.retrieve(inquiry);
+final prompt = compiler.compile(retrieval);
+final loop = AgentLoop(engine: warmup.engine, registry: registry);
+```
+
+### The three deferred wirings
+
+Tasks 1.3 through 1.10 each shipped a piece of the slice with no production call
+site, and each recorded the same reason: the piece needs a `DatabaseService`, and
+opening a database needs an encryption key nobody had decided on. This is where
+that ends.
+
+**1. The database, and therefore the key.** `databaseEncryptionKeyProvider` reads
+`--dart-define=FIELDOPS_DB_KEY` and falls back to a constant named
+`demoDatabaseKey`, whose value is literally `fieldops-demo-key-not-a-secret`.
+
+That name is doing work. A hardcoded key is acceptable for a demo and the brief
+says so, but only as a *recorded decision* — and the honest recording is that the
+cipher is real while the key management is not. ChaCha20-Poly1305 with pinned KDF
+iterations means a database file lifted off the device is ciphertext; a passphrase
+compiled into the binary means anyone who can read the app bundle can read the key.
+So this protects a stolen **file** and not a stolen **device**, and §3.2's
+"sensitive data remains sandboxed on the physical device" is true of the storage
+and only partly true of the threat model. The fleet answer — a key generated on
+first launch, held in the Keychain or Keystore behind device-passcode protection,
+never present in the binary — slots in behind this one provider without touching
+anything downstream, and is Appendix A's story.
+
+One operational hazard, because it is silent: the key is part of the database's
+identity. Add the define to a build that previously used the demo key and the
+existing file cannot be decrypted. It surfaces as a rendered startup failure on the
+screen, not as a fresh empty database, which is the failure worth fearing.
+
+**2. The first-launch seed — as a dependency, not a call order.** `ensureSeeded()`
+is called by `seedOutcomeProvider`, and everything on the retrieval path takes its
+database from `seededDatabaseProvider`, which cannot resolve until that has:
+
+```dart
+final seededDatabaseProvider = FutureProvider<DatabaseService>(retry: noRetry, (
+  ref,
+) async {
+  await ref.watch(seedOutcomeProvider.future);
+  return ref.watch(appDatabaseProvider.future);
+});
+```
+
+It is the same `DatabaseService` instance — nothing is wrapped — and the only thing
+it adds is an edge in the graph. A `main()` that called `ensureSeeded()` and then
+passed the database around would behave identically today, and would be one new
+entry point away from a screen querying an empty manual. Here there is no call
+order to get wrong, because there is no handle with which to make an unseeded
+query. A router over an unseeded database is the nastiest version of this bug: it
+answers every inquiry with *nothing*, which the prompt compiler renders as its
+no-match block, so the failure looks like a manual that has no entry for anything,
+phrased confidently.
+
+**3. The real engine, loaded before the UI needs to be interactive.**
+`agentEngineProvider` is the `LlmEngine` seam the screen resolves, and
+`EngineWarmupController` calls `initialize()` on it from the screen's own
+post-frame callback — so the weights load at app start, never on the Diagnose tap.
+
+**The plan predicted a different mechanism and the prediction does not
+type-check**, which is worth stating rather than quietly diverging from: it said
+"override `llmEngineProvider` with `deviceLlmEngineProvider` in a `ProviderScope`",
+but `llmEngineProvider` is a synchronous `Provider<LlmEngine>` and resolving the
+device engine means awaiting a verified model path, so the real binding is
+unavoidably a `Future`. Nothing upstream of the `LlmEngine` interface changed,
+which was the part of the prediction that mattered.
+
+`agentEngineProvider` answers **`null`** rather than falling back to the fake, and
+that is the decision most worth reading here. The fallback is one line and it is
+tempting, because it would make the screen work everywhere. What it would produce
+is an app that answers a technician's inquiry fluently, in well-formatted prose,
+from a scripted list — on a machine where the model never ran. There is no worse
+failure mode in this project, because it is indistinguishable from success in a
+screen recording, which is the artefact this task exists to make. So `null` is a
+first-class answer, the status row says "no verified weights on this device — the
+agent cannot run", and the button is dead. Tests reach the fake by overriding
+*this* provider, which is a deliberate act in a test file.
+
+### Nothing animates while the model works
+
+This is the design constraint Task 1.8's measurements imposed, and it is the one
+thing on this screen that would be wrong in an obvious implementation.
+
+On the demo device (iPad Air M4, iOS 26.5, Metal) Task 1.8 measured the **UI
+isolate** stalling **1445–1728ms** while the weights load — roughly 90 dropped
+frames at a 16.7ms budget — and dropping **5–8 frames** (77–135ms worst gap) while
+tokens stream. Inference genuinely runs on a background isolate the app owns; what
+stalls is the load, and the cause is still open (Task 1.8-F eliminated Metal
+pipeline compilation with a forced-CPU run that stalled *worse* while loading
+faster; memory traffic during the `mmap` walk and a shared-heap GC pause remain
+live).
+
+The trap: what stalls is the **UI isolate**, so a spinner displayed *during* the
+load freezes with it. A frozen progress indicator reads as a crashed app, which is
+strictly worse than a static label that says what is happening. So:
+
+- there is no `CircularProgressIndicator` and no `LinearProgressIndicator` anywhere
+  in `diagnose_screen.dart`, and `test/views/diagnose_screen_test.dart` asserts that
+  **structurally** — it walks the tree for any `ProgressIndicator` in the loading
+  state, the generating state and the tool-running state, rather than trusting this
+  paragraph;
+- `EngineWarmupController` sets `EngineLoading` *before* awaiting the load, so the
+  frame carrying the static row is painted on the other side of an await boundary,
+  i.e. before the work that blocks the isolate begins;
+- warm-up is kicked off from a post-frame callback, so the first frame exists before
+  the stall — calling it synchronously in `initState` would stall the isolate before
+  anything was on screen, which is a launch that looks like a hang;
+- the **live token stream is the progress indicator**. Text appearing is
+  unambiguous evidence of work, it cannot stutter in a way that reads as a hang, and
+  it is the most convincing thing in the recording.
+
+One exception stays, and it is a different thing: `ModelReadinessBanner` shows a
+determinate bar while *downloading* weights. A download is network I/O with no
+UI-isolate stall, and that widget is Task 1.7's.
+
+### All three stop reasons render differently
+
+`AgentStopReason` has three values and `AgentLoop` authors truthful, non-empty text
+for every one of them — `answered` carries the model's words, `emptyResponse` and
+`iterationCapReached` carry loop-authored messages. That is a trap for the UI: a
+screen could render all three identically and look correct in every test, while
+handing a technician *"the assistant kept requesting warehouse lookups without
+producing an answer, so it was stopped"* in the same panel, with the same styling,
+as a repair plan.
+
+So the viewmodel exposes one question — `FieldJobState.isDiagnosis` — and the
+screen branches on it once:
+
+| Stop reason           | Header               | What it means                                |
+| --------------------- | -------------------- | -------------------------------------------- |
+| `answered`            | **Repair plan**      | the model's own words, grounded              |
+| `emptyResponse`       | No answer produced   | nothing to render, said out loud rather than shown as a blank panel |
+| `iterationCapReached` | Diagnosis stopped    | the loop reports its own failure; it does not invent a diagnosis |
+
+Each outcome panel carries a key derived from the enum
+(`diagnose-outcome-<name>`), and there is one test per ending asserting that
+exactly its own panel is on screen and the other two are not.
+
+**Task 1.10 handed this task a gap and it is only half closed.** `emptyResponse`
+has no golden — two of the three stop reasons do — and adding the third scenario
+here was not possible: `test/golden/` exists only on Task 1.10's branch (PR #11),
+so there is no file in this tree to add a scenario to. Stacking this task on that
+branch to reach it would have dragged 1.10's whole diff into this PR or forced a
+rebase of an open PR, which costs a re-run of its 47 mutations. Instead the third
+ending is bound where it is actually needed — the viewmodel suite asserts the state
+and the widget suite asserts the rendering — and the golden is a one-line follow-up
+for whoever lands PR #11. Recorded as unfinished rather than quietly dropped.
+
+### What the screen shows besides the answer
+
+- **A "grounded in" line**, naming the manual entries retrieval found, on screen
+  *before* the first token. That ordering is deliberate: a grounding line that
+  appears with the answer annotates it, one that appears first frames it. It is the
+  architectural claim made visible — a viewer can see which documents the model was
+  given and compare them to what it said.
+- **A tool-activity line** while a lookup is in flight ("Checking local inventory
+  for BRK-990-XP…"), which is possible only because Task 1.9 emits
+  `AgentToolCallStarted` *before* running the query. It clears when the lookup
+  completes, not when the run ends — a distinction that survived only because a
+  mutation caught it: `AgentCompleted` also clears the field, so dropping the clear
+  from the completion event left every test green while the indicator would have
+  claimed a lookup was running through the entire second turn, over the streaming
+  answer.
+- **Completed lookups, summarised from the payload** rather than from the
+  arguments, so a viewer comparing the line to the answer is checking the grounding
+  by eye. Task 1.5's two success shapes stay apart on the page for the reason they
+  are apart in the payload: "the warehouse does not carry NOT-A-REAL-SKU" and
+  "BELT-330-DRV is carried but out of stock" are different sentences to a
+  technician.
+- **Refused call attempts**, reported rather than dropped. A technician watching the
+  model fumble a call and recover is the agent loop being legible instead of
+  magical, and silently hiding them would make a four-turn run look like an
+  inexplicably slow two-turn one.
+
+### Failures are screens, not exceptions
+
+A malformed seed asset or a key that no longer opens the database is a **build or
+configuration defect**, and Task 1.3 asked for it to fail loudly at startup. Loudly
+means legible: the error arrives as an errored `AsyncValue`, the screen renders it
+with the message attached, and Diagnose is dead until it is fixed. A grey screen
+with a stack trace in a console nobody is reading is the quiet version.
+
+A run that throws is a *different* thing and renders differently: the screen says
+what failed and the button comes back, because "that attempt did not work" and
+"this app is misconfigured" ask different things of whoever is looking.
+
+`on Exception`, never `on Object` — the rule `ToolRegistry.dispatch` writes down,
+one layer up. An `Error` means the app is broken, and dressing it as "the diagnosis
+could not be completed" hides a defect behind a plausible operational message.
+
+### A Riverpod 3 default that is wrong for every startup provider here
+
+Worth its own heading because it is a framework behaviour, not a choice, and it
+silently converts "fail loudly at startup" into "hang for half a minute, then fail".
+
+`ProviderContainer.defaultRetry` retries a provider whose body threw, with
+exponential backoff — 200ms doubling to a 6.4s cap, ten attempts — and it skips
+only `Error` and `ProviderException`. Every ordinary `Exception` is retried.
+Measured, by removing the policy and sampling: the seed provider's body ran **11
+times** and the element was still `AsyncLoading` at 30s, `AsyncError` by 45s.
+
+All three ways this app's startup fails are deterministic — a malformed asset
+(`SeedFormatException`), a key that does not open the file (`SqliteException`), a
+platform channel with no implementation (`MissingPluginException`) — so a retry
+cannot change the outcome. Worse than the delay is what is on screen during it: the
+provider stays in `AsyncLoading`, so the UI says "checking…" for half a minute and
+*then* reports a failure that was settled on the first attempt.
+
+`lib/services/retry_policy.dart` exports `noRetry`, applied per provider along the
+whole startup chain (including 1.7's model-status providers, which sit upstream of
+the engine seam and would otherwise hold the chain in `AsyncLoading` regardless of
+what the ones below declare). Scoped per provider rather than set container-wide on
+purpose: a container-wide default would silently apply to the next provider someone
+adds, including one that really is transient and really should back off. Naming the
+policy at each site keeps the claim — *this failure is deterministic* — next to the
+code that has to be true for it. It is the same rule
+`ModelProvisioningController` already writes down for a download that failed its
+digest: "a retry moves the same gigabytes and fails the same way."
+
+Bound by a test that counts provider builds, so deleting the policy fails rather
+than merely slows down.
+
+### Two things a host test cannot tell you, found by watching tests fail
+
+Both are recorded because each cost a debugging session and neither is guessable:
+
+- **`pumpEventQueue()` hangs inside `testWidgets`.** It awaits a zero-duration
+  `Future.delayed`, whose `Timer` the widget binding *fakes*, so nothing ever fires
+  it and the test sits until `pumpAndSettle`'s ten-minute deadline. Real
+  asynchronous work in a widget test needs `tester.runAsync`, which is the only way
+  the real event loop gets a slice.
+- **On the host this slice is too fast to observe.** drift's `NativeDatabase` runs
+  sqlite3 **synchronously in-process** (not `createInBackground`), and
+  `FakeLlmEngine` replays a turn as fast as it is drained — so retrieval,
+  compilation, both model turns and the inventory query all complete inside the
+  microtasks `tester.tap` awaits. There is *no frame* in which the run is in flight.
+  A test that taps, pumps once and asserts the button is disabled fails, not because
+  the button is wrong but because the state came and went between frames. So the
+  intermediate rendering is bound by injecting a `thinking` state, and the wired
+  test listens to the phase sequence instead of sampling frames. On device the run
+  takes seconds and the frames exist, which is what `demo_flow_test.dart` is for.
+
+That is also why the widget suite is split: *rendering* tests inject a
+`FieldJobState` and an `EngineWarmupState` and assert what is drawn (synchronous,
+un-flakeable, and the only way to reach `EngineLoading` at all on a host), while two
+*wiring* tests run the real graph through the button to prove the screen is
+connected to the state machine the other suite tested.
+
+### The no-match path: do not demo it yet
+
+Carried in from Task 1.9's device run and unresolved. The words `the`, `on` and `is`
+each retrieve manual entries on their own — Task 1.2's sanitizer joins terms with
+`OR` and FTS5's `porter` tokenizer removes no stop words — so almost any English
+sentence is a full-text hit, and an inquiry the manual has no entry for usually
+retrieves two *irrelevant* entries instead of triggering the no-match block. On
+stage that renders as a confident, well-formatted answer about the wrong fault.
+
+The screen does the honest thing when retrieval is genuinely empty ("No manual entry
+matched. The assistant has been told not to invent a procedure."), and the grounding
+line always names what was retrieved, so a viewer can see the mismatch. But the
+retrieval fix is not in this task: every obvious version is bad, and a threshold
+tuned against a three-document corpus is a number with no evidence. **Keep the demo
+on inquiries the manual covers and narrate the no-match design rather than running
+it.** Pinned by `test/services/ai/tc_agent_e2e_premises_test.dart` so it cannot be
+rediscovered by accident.
+
+### Running it
+
+```bash
+flutter run -d <device> \
+  --dart-define=FIELDOPS_MODEL_ID=gemma-4-e2b-it-int4 \
+  --dart-define=FIELDOPS_MODEL_URI=<resolve URL for the file you licensed> \
+  --dart-define=FIELDOPS_MODEL_SHA256=<its sha256>
+```
+
+Without the defines the app runs, the banner says the model source is not
+configured, and Diagnose stays dead — which is the correct behaviour, not a
+degraded one. Add `--dart-define=FIELDOPS_DB_KEY=<passphrase>` to use something
+other than the named demo key.
+
+The on-device acceptance test is `integration_test/demo_flow_test.dart`
+(TC-UI-DEMO-01). It is the only test in the repo that pumps `FieldOpsApp` with **no
+overrides at all**, so it is the only one that exercises the three wirings as the
+app performs them: the real application-support directory, `rootBundle` and a real
+`AssetBundle`, and the real 2.59GB artifact. Every one of those is faked in the host
+suite, so a failure in any of them is invisible to it.
+
 ## Getting started
 
 Requires the Flutter SDK (stable channel, Dart 3.12+). iOS 16.0+ / a 64-bit
@@ -1659,7 +1979,9 @@ Tests are split into two tiers:
 - **Unit tier** (`test/`) — pure Dart, deterministic, runs in CI on every commit
   (engine fakes, database, FTS, seeding, retrieval routing and prompt
   compilation, the agent tool registry, the tool-call guard, the agent loop,
-  model provisioning, widget tests). The HTTP
+  model provisioning, the startup wiring, the demo viewmodel, widget tests). The
+  widget suite is split on purpose — see _Two things a host test cannot tell you_
+  above; rendering tests inject state, wiring tests run the real graph. The HTTP
   transport is covered against a loopback `HttpServer` rather than a mock, because
   the behaviour worth testing is HTTP behaviour: redirect hops, `Content-Length`
   vs. chunked, and which requests carry the access token. The seeding suite reads
@@ -1708,7 +2030,29 @@ Tests are split into two tiers:
     produce by luck. A companion checks the other half of grounding: an inquiry
     the manual does not cover must call no tool and name no SKU.
 
-    **Not yet run.** It needs the demo device and the provisioned weights.
+    **Passed on the demo device** (iPad Air M4, iOS 26.5) against the real 2.59GB
+    artifact: 2 turns, 11332ms, `stop=answered`, and an answer quoting *2 units in
+    Aisle 4, Shelf B* — database facts, not elevator facts, so the weights could not
+    have supplied them. (This paragraph said "Not yet run" until Task 1.11 corrected
+    it: the run happened in commit `9afeb5b`, which updated the sprint plan and the
+    ledger and left the README behind.) The companion `-01b` **failed on its
+    premise**, which is the more valuable half — see _The no-match path_ above.
+  - `demo_flow_test.dart` (TC-UI-DEMO-01) — the same slice again, but through the
+    **UI**, and it is the only test in the repo that pumps `FieldOpsApp` with no
+    overrides at all. That is the whole reason it exists on top of the suite above:
+    it is the only place Task 1.11's three wirings run as the app performs them —
+    `DatabaseService.openDefault` in the real application-support directory with the
+    real key, `ensureSeeded()` through `rootBundle` and a real `AssetBundle`, and
+    `deviceLlmEngineProvider` loading the real artifact via the screen's own
+    post-frame warm-up. Every one of those is faked in the host suite, so a failure
+    in any of them is invisible to all of it.
+
+    It also ticks a 16ms timer on the UI isolate across both the warm-up and the
+    generation, so it reports the worst frame gap **for the flow being
+    screen-recorded** rather than for a synthetic prompt — and it asserts, on the
+    device where the stall is real, that no `ProgressIndicator` is in the tree while
+    the weights load. Timings are printed rather than asserted: a threshold that
+    fails on a warm device is a flaky test pretending to be an NFR.
 
 ## Tech stack
 
