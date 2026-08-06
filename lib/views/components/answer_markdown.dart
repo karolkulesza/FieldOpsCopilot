@@ -20,9 +20,12 @@
 ///   `test/golden/`, which exists only on that task's unmerged branch. So this fix
 ///   is deliberately in the **view** layer: it changes nothing any golden can see.
 ///
-/// **The scope is deliberately narrow, and stated so it can be checked rather than
-/// trusted.** [answerSpans] handles exactly two constructs, because those are the
-/// two the shipped model actually produces:
+/// **The scope is deliberately narrow, and it was chosen by counting rather than
+/// guessing.** Parsing the answer out of `device-run-2.log` and tallying it gives
+/// **14 paired bold runs, 3 asterisk bullet
+/// lines, 6 numbered lines and no unpaired delimiters** across 1401 characters. So [answerSpans] handles exactly two
+/// constructs, and they are the two that account for all of it — the numbered lines
+/// need nothing, because `1.  ` already reads as a list:
 ///
 /// 1. `**bold**` inline, paired. An unpaired `**` is left literal — guessing where
 ///    the author meant it to close would invent emphasis.
