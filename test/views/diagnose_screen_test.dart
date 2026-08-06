@@ -813,34 +813,85 @@ void main() {
   group('R0-F2: the advice-vs-failure decision is isDiagnosis', () {
     // Four documents claimed the screen branched on `isDiagnosis` while `_Body`
     // re-derived the decision from `stopReason` itself. The duplication is gone;
-    // this binds that the *treatment* follows the one question by checking the icon,
-    // which is what carries it visually, across all three endings.
-    testWidgets('the icon follows isDiagnosis, not the individual reason', (
+    // these bind that the *treatment* follows the one question, across all three
+    // endings, one test each so a stale tree cannot mask a case.
+    for (final reason in AgentStopReason.values) {
+      final isAnswer = reason == AgentStopReason.answered;
+      final header = switch (reason) {
+        AgentStopReason.answered => 'Repair plan',
+        AgentStopReason.emptyResponse => 'No answer produced',
+        AgentStopReason.iterationCapReached => 'Diagnosis stopped',
+      };
+
+      testWidgets(
+        '${reason.name} gets the ${isAnswer ? 'answer' : 'failure'} icon',
+        (tester) async {
+          await pumpState(tester, job: _doneWith(stopReason: reason));
+
+          expect(
+            find.byIcon(Icons.check_circle),
+            isAnswer ? findsOneWidget : findsNothing,
+          );
+          expect(
+            find.byIcon(Icons.report_problem_outlined),
+            isAnswer ? findsNothing : findsOneWidget,
+          );
+        },
+      );
+
+      // **The icon alone was not enough**: mutation M20 — making the header colour
+      // a constant `primary` while the icon still followed `isDiagnosis` — survived
+      // the icon test. Colour is the louder of the two signals in a recording, so
+      // it gets its own guard, tied to the icon rather than to a theme literal so
+      // the two cannot drift apart.
+      testWidgets('${reason.name} colours its header to match its icon', (
+        tester,
+      ) async {
+        await pumpState(tester, job: _doneWith(stopReason: reason));
+
+        final headerColour = tester
+            .widget<Text>(find.text(header))
+            .style
+            ?.color;
+        final icon = tester.widget<Icon>(
+          find.descendant(
+            of: find.byKey(DiagnoseKeys.outcome(reason)),
+            matching: find.byType(Icon),
+          ),
+        );
+
+        expect(headerColour, isNotNull);
+        expect(headerColour, icon.color);
+      });
+    }
+
+    // And the two treatments must actually differ, or "renders differently" is a
+    // claim about identical panels. Read off the widgets rather than compared to
+    // theme literals, so it stays true if the palette changes.
+    testWidgets('an answer and a failure are not the same colour', (
       tester,
     ) async {
       await pumpState(
         tester,
         job: _doneWith(stopReason: AgentStopReason.answered),
       );
-      expect(find.byIcon(Icons.check_circle), findsOneWidget);
-      expect(find.byIcon(Icons.report_problem_outlined), findsNothing);
+      final answerColour = tester
+          .widget<Text>(find.text('Repair plan'))
+          .style
+          ?.color;
 
-      for (final failing in [
-        AgentStopReason.emptyResponse,
-        AgentStopReason.iterationCapReached,
-      ]) {
-        await pumpState(tester, job: _doneWith(stopReason: failing));
-        expect(
-          find.byIcon(Icons.report_problem_outlined),
-          findsOneWidget,
-          reason: failing.name,
-        );
-        expect(
-          find.byIcon(Icons.check_circle),
-          findsNothing,
-          reason: failing.name,
-        );
-      }
+      await pumpState(
+        tester,
+        job: _doneWith(stopReason: AgentStopReason.iterationCapReached),
+      );
+      final failureColour = tester
+          .widget<Text>(find.text('Diagnosis stopped'))
+          .style
+          ?.color;
+
+      expect(answerColour, isNotNull);
+      expect(failureColour, isNotNull);
+      expect(answerColour, isNot(failureColour));
     });
   });
 
