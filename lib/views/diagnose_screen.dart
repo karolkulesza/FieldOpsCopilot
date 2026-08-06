@@ -476,9 +476,21 @@ class _CompletedTool extends StatelessWidget {
   /// Task 1.5's two success shapes are kept apart here for the reason it kept them
   /// apart there: "we do not carry this part" and "we carry it and have none" are
   /// different sentences to a technician.
+  ///
+  /// **Every branch below reads the inventory tool's payload shape, so the tool is
+  /// checked first.** One tool is registered today and the spec's §2.2 lists three
+  /// more; without this gate the first of them renders as "null: null in stock",
+  /// which is worse than useless because it looks like data. [_ToolActivity] already
+  /// had a generic fallback for an unrecognised tool and this did not — an asymmetry
+  /// between two functions doing the same job one line apart.
   static String _summarise(AgentToolInvocation invocation) {
     final payload = invocation.outcome.payload;
     final replayed = invocation.repeated ? ' (already answered)' : '';
+    if (invocation.call.name != GetPartsInventoryTool.toolName) {
+      return invocation.outcome is ToolFailure
+          ? '${invocation.call.name} could not be completed$replayed.'
+          : '${invocation.call.name} completed$replayed.';
+    }
     if (invocation.outcome is ToolFailure) {
       return 'Inventory lookup could not be completed$replayed.';
     }

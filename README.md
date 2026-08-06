@@ -1954,6 +1954,64 @@ app performs them: the real application-support directory, `rootBundle` and a re
 `AssetBundle`, and the real 2.59GB artifact. Every one of those is faked in the host
 suite, so a failure in any of them is invisible to it.
 
+### What the device run measured
+
+**TC-UI-DEMO-01 passed twice** on the demo device (iPad Air M4, iOS 26.5, Metal
+backend, real 2.59GB artifact). Both runs were a genuine first launch —
+`SeedApplied(revision: 1, manuals: 3, parts: 5, previousRevision: null)`, so the
+real asset bundle reached the real database through `rootBundle`.
+
+| | run 1 | run 2 |
+|---|---|---|
+| warm-up elapsed | 7822ms | 7395ms |
+| **worst UI-isolate gap during the load** | **2130ms** (~127 frames) | **1866ms** (~111 frames) |
+| frames the no-animation guard was checked on | not instrumented | **60** |
+| diagnose flow elapsed | 13296ms | 13665ms |
+| **worst UI-isolate gap during the flow** | **247ms** (~14 frames) | **250ms** (~14 frames) |
+| answer length | 1401 chars | 1401 chars |
+| characters per second, whole flow | ~105 | ~103 |
+| stop reason | `answered` | `answered` |
+
+Frame counts are derived on the page (`worstGap / 16.7`), not maintained by hand.
+
+Four things worth stating at the width they were actually measured:
+
+- **The load-time stall is confirmed and is at the high end of Task 1.8's range.**
+  1.8 measured 1445ms and 1728ms on the GPU backend and 2197ms forced onto the CPU;
+  2130ms and 1866ms sit inside that spread but above both GPU figures. The same
+  caveat 1.8 attached to its RSS figure applies here: both of these runs downloaded
+  the 2.6GB artifact **in the same process moments earlier**
+  (`FIELDOPS_TEST_PROVISION=true`), so they are an upper bound rather than a
+  side-loaded measurement. The cause is still Task 1.8-F's open question.
+- **The design holds where it matters.** Run 2 asserted, on **60 separate frames of
+  the real 7.4-second load**, that no `ProgressIndicator` was in the tree — so the
+  ~111 dropped frames land behind a static row, which is the entire point. The
+  frame count is asserted to be non-zero, because a guard that never ran is not a
+  guard.
+- **The 247–250ms gap is *not* comparable to Task 1.8's 77–135ms**, and the
+  difference is the measurement window rather than the device. 1.8 timed token
+  streaming; this probe spans the whole diagnose flow — retrieval, prompt
+  compilation, two model turns, the SQLite inventory query and the loop's
+  continuation prompt. It is the honest figure for the flow being screen-recorded,
+  and at ~14 dropped frames it is a visible hitch, which is why nothing on the
+  screen animates through it.
+- **Throughput: this is the long generation the plan asked for, and it yields
+  characters, not tokens.** 1401 characters in 13296ms across two turns is ~105
+  chars/s — and that window includes retrieval and a tool round trip, so it is a
+  *lower bound* on generation speed. It is deliberately **not** converted to
+  tokens per second: the app exposes no tokenizer, and multiplying by an assumed
+  chars-per-token ratio is arithmetic rather than measurement, which is exactly
+  what got Task 1.8's "2.7 tok/s" struck from the record. **§3.1's 15 tok/s target
+  therefore remains formally unmeasured**, and closing it needs a token count from
+  the runtime rather than another run.
+
+One consistency check fell out of it: the answer was **1401 characters in both
+runs, and 1401 characters in Task 1.9's hand-built device harness** for the same
+inquiry. Decoding is greedy, so identical output is expected from an identical
+prompt — which makes this evidence that the composition through the viewmodel and
+the composition in 1.9's harness build the same prompt. Equal *length* is not proof
+of equal text; it is consistent with it, which is as far as this observation goes.
+
 ## Getting started
 
 Requires the Flutter SDK (stable channel, Dart 3.12+). iOS 16.0+ / a 64-bit
