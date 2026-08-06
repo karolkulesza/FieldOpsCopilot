@@ -43,7 +43,10 @@ import 'e2e_fixtures.dart';
 /// 3. `deviceLlmEngineProvider` loading the real 2.59GB artifact, warmed up by
 ///    `EngineWarmupController` from the screen's own post-frame callback.
 ///
-/// Any one of those failing on device is invisible to all 583 host tests.
+/// Any one of those failing on device is invisible to the whole host suite — no
+/// count here, because the one this line first carried went stale in the very next
+/// commit (review finding R0-F7). `flutter test` is the source of truth, which is
+/// the rule the README already adopted for the same reason.
 ///
 /// **Assertions are fuzzy, as the tier requires.** A model's wording is not a
 /// contract. What is asserted is that the run ended because the model answered, that

@@ -4,6 +4,8 @@ import 'package:field_ops_copilot/services/database/database_initializer.dart';
 import 'package:field_ops_copilot/services/database/database_service.dart';
 import 'package:field_ops_copilot/services/database/providers.dart';
 import 'package:field_ops_copilot/services/database/seed_data.dart';
+import 'package:field_ops_copilot/services/models/providers.dart';
+import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -201,6 +203,44 @@ void main() {
           throwsA(isA<SeedFormatException>()),
         );
         expect(seedBuilds, 1);
+      },
+    );
+
+    // **The model-status chain needs its own guard, and review finding R0-F4 is
+    // that it did not have one.** `retry: noRetry` was applied to eleven providers
+    // and only two were bound; the reviewer measured that deleting it from
+    // `modelInstallStatusProvider`, `modelStorageProvider`, `retrievalRouterProvider`
+    // and `toolRegistryProvider` all survived the whole suite. The unbound one that
+    // matters most is the model-status site, because
+    // `lib/services/models/providers.dart` makes the strongest behavioural claim in
+    // the set — that without it the banner sits on "Checking model…" for half a
+    // minute before showing a status its own doc says must be distinguishable from
+    // ready and absent.
+    //
+    // Bound the same way the seed is, by counting builds. `modelStorageProvider` is
+    // the throwing surface because it is what actually fails when the platform
+    // channel is absent — the real-world case, and the one every host widget test
+    // hits — while `modelInstallStatusProvider` is the provider under test and
+    // inherits the policy through the dependency.
+    test(
+      'a failing model-status chain is built once rather than retried',
+      () async {
+        var storageBuilds = 0;
+        final container = ProviderContainer(
+          overrides: [
+            modelStorageProvider.overrideWith((ref) async {
+              storageBuilds++;
+              throw MissingPluginException('no application support directory');
+            }),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await expectLater(
+          container.read(modelInstallStatusProvider.future),
+          throwsA(isA<MissingPluginException>()),
+        );
+        expect(storageBuilds, 1);
       },
     );
   });

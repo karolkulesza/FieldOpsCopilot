@@ -120,47 +120,71 @@ class EngineWarmupController extends Notifier<EngineWarmupState> {
     // before the load that stalls the UI isolate begins. See the library doc.
     state = const EngineLoading();
 
-    final LlmEngine? engine;
+    // **The outer `on Object` does not swallow anything — it rethrows.** Raised as
+    // a non-blocking review note: an `Error` escaping this method left `state` at
+    // [EngineLoading] forever, and because `warmUp` returns early on that state,
+    // every later call was a no-op. The screen then read "Loading model weights —
+    // this takes a few seconds" indefinitely, which is the one place this file told
+    // the user something untrue.
+    //
+    // The `on Exception` rule below is unchanged and is still the point: an `Error`
+    // is a defect in the app and must not be reported as an operational condition.
+    // So it still propagates, unhandled, out of the post-frame callback that called
+    // this. All this clause changes is that the UI stops claiming a load is in
+    // progress when there is not one.
     try {
-      engine = await ref.read(agentEngineProvider.future);
-    } on Exception catch (error) {
-      // `on Exception`, not `on Object`, for the reason `ToolRegistry.dispatch`
-      // gives: an `Error` here means the app is broken rather than the device
-      // being unready, and reporting it as "the model could not load" would hide a
-      // defect behind a plausible operational message.
-      _fail('the model could not be prepared: $error');
-      return;
-    }
-    if (!ref.mounted) return;
+      final LlmEngine? engine;
+      try {
+        engine = await ref.read(agentEngineProvider.future);
+      } on Exception catch (error) {
+        // `on Exception`, not `on Object`, for the reason `ToolRegistry.dispatch`
+        // gives: an `Error` here means the app is broken rather than the device
+        // being unready, and reporting it as "the model could not load" would hide
+        // a defect behind a plausible operational message.
+        _fail('the model could not be prepared: $error');
+        return;
+      }
+      if (!ref.mounted) return;
 
-    if (engine == null) {
-      state = const EngineUnavailable();
-      return;
-    }
-    if (engine.isReady) {
-      // A rebuild of this controller over an engine that survived it. Loading
-      // again would spend seconds and gigabytes to reach the state it is in.
-      state = EngineReady(engine);
-      return;
-    }
+      if (engine == null) {
+        state = const EngineUnavailable();
+        return;
+      }
+      if (engine.isReady) {
+        // A rebuild of this controller over an engine that survived it. Loading
+        // again would spend seconds and gigabytes to reach the state it is in.
+        state = EngineReady(engine);
+        return;
+      }
 
-    try {
-      await engine.initialize();
-    } on Exception catch (error) {
-      _fail('the model failed to load: $error');
-      return;
-    }
-    if (!ref.mounted) return;
+      try {
+        await engine.initialize();
+      } on Exception catch (error) {
+        _fail('the model failed to load: $error');
+        return;
+      }
+      if (!ref.mounted) return;
 
-    // `isReady` is asked rather than assumed. `initialize()` returning without
-    // throwing is the engine's claim; this is the interface's own answer to the
-    // question the loop will ask, and `AgentLoop.run` throws a `StateError` if it
-    // is false — a crash rather than a message, on the tap that is being recorded.
-    state = engine.isReady
-        ? EngineReady(engine)
-        : const EngineFailed(
-            'the model reported that it loaded but is not ready to generate',
-          );
+      // `isReady` is asked rather than assumed. `initialize()` returning without
+      // throwing is the engine's claim; this is the interface's own answer to the
+      // question the loop will ask, and `AgentLoop.run` throws a `StateError` if it
+      // is false — a crash rather than a message, on the tap being recorded.
+      state = engine.isReady
+          ? EngineReady(engine)
+          : const EngineFailed(
+              'the model reported that it loaded but is not ready to generate',
+            );
+    } on Object {
+      // Deliberately no `catch (error)`: nothing here reads it, and putting an
+      // `Error`'s message on screen is what the `on Exception` rule exists to
+      // prevent. The state says only that the load did not finish.
+      if (ref.mounted && state is EngineLoading) {
+        state = const EngineFailed(
+          'the model could not be loaded because of an internal error',
+        );
+      }
+      rethrow;
+    }
   }
 
   void _fail(String message) {
