@@ -305,7 +305,14 @@ class _ResultPanel extends StatelessWidget {
             ],
             for (final invocation in job.invocations)
               _CompletedTool(invocation: invocation),
-            for (final failure in job.rejectedCalls)
+            // One line per refusal, counted rather than iterated, because nothing
+            // about the individual failure is rendered. `GuardFailure.message` is
+            // written *for the model* ("call the tool again with a tool name and
+            // JSON arguments"), so it is not a sentence to show a technician — and
+            // it deliberately does not reach the screen even as a `semanticsLabel`,
+            // which would replace the readable line above with it for anyone using
+            // assistive technology.
+            for (var i = 0; i < job.rejectedCalls.length; i++)
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Text(
@@ -313,7 +320,6 @@ class _ResultPanel extends StatelessWidget {
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.outline,
                   ),
-                  semanticsLabel: failure.message,
                 ),
               ),
             if (job.activeTool != null) _ToolActivity(started: job.activeTool!),
