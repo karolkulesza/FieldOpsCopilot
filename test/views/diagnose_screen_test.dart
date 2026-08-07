@@ -543,6 +543,44 @@ void main() {
       );
     });
 
+    // **Every other fixture in this file uses markup-free answer text, and that is
+    // exactly how the R0-F5 fix broke the device test unnoticed.** With raw and
+    // formatted identical, nothing here could tell a `Text` from a `Text.rich` or a
+    // consumed delimiter from a shown one. This fixture carries the real thing —
+    // the shape both device runs returned — so the host suite can.
+    testWidgets('an answer containing Markdown is rendered, not shown raw', (
+      tester,
+    ) async {
+      const raw =
+          '**Parts Check:**\n'
+          'The required part is the **BRK-990-XP**.\n'
+          '*   Torx T20 driver';
+
+      await pumpState(tester, job: _doneWith(answer: raw));
+
+      // The delimiters are gone and the bullet is a bullet.
+      expect(
+        find.text(
+          'Parts Check:\n'
+          'The required part is the BRK-990-XP.\n'
+          '•   Torx T20 driver',
+        ),
+        findsOneWidget,
+      );
+      // And nothing on screen still carries the raw syntax.
+      expect(find.textContaining('**'), findsNothing);
+      expect(find.text(raw), findsNothing);
+
+      // The bold really is bold, so "rendered" is not just "delimiters deleted".
+      final answer = tester.widget<Text>(find.textContaining('Parts Check:'));
+      final bold = (answer.textSpan! as TextSpan).children!
+          .cast<TextSpan>()
+          .where((span) => span.style?.fontWeight == FontWeight.bold)
+          .map((span) => span.text)
+          .toList();
+      expect(bold, ['Parts Check:', 'BRK-990-XP']);
+    });
+
     // The gap Task 1.10 handed this task: `emptyResponse` has no golden, and this
     // screen is the thing that has to render all three.
     testWidgets('emptyResponse says so instead of showing a blank panel', (
