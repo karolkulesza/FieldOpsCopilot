@@ -1055,6 +1055,62 @@ void main() {
       );
     });
 
+    // **The slack's value, bound in the direction that constrains it** — review
+    // finding R2-F4 measured that `_followSlack = 0` survived the suite, so nothing
+    // held the constant except an upper bound. A reader who nudges up by less than a
+    // line has not asked to stop following, and this is the case that says so.
+    testWidgets('a nudge smaller than the slack keeps following', (
+      tester,
+    ) async {
+      final long = List.generate(80, (i) => 'Procedure step $i.').join('\n');
+      final container = await pumpState(
+        tester,
+        job: const FieldJobState(
+          phase: FieldJobPhase.thinking,
+          inquiry: 'cabin vibrating, E-102',
+          streamedText: 'Isolate the main power bus.',
+        ),
+      );
+      await pushJob(
+        tester,
+        container,
+        FieldJobState(
+          phase: FieldJobPhase.thinking,
+          inquiry: 'cabin vibrating, E-102',
+          streamedText: long,
+        ),
+      );
+
+      // Nudge up by 20px — well inside the 48px band, and far too small to be a
+      // deliberate "stop following".
+      final controller = _panelScrollController(tester);
+      final nudged = controller.position.maxScrollExtent - 20;
+      controller.jumpTo(nudged);
+      await tester.pump();
+
+      await pushJob(
+        tester,
+        container,
+        FieldJobState(
+          phase: FieldJobPhase.thinking,
+          inquiry: 'cabin vibrating, E-102',
+          streamedText: '$long\nProcedure step 80.',
+        ),
+      );
+
+      final after = _panelScrollController(tester);
+      expect(
+        after.offset,
+        after.position.maxScrollExtent,
+        reason: 'a 20px nudge is not a request to leave the stream',
+      );
+      expect(
+        after.offset,
+        greaterThan(nudged),
+        reason: 'and the panel actually moved, so this is not a no-op',
+      );
+    });
+
     // And the follow resumes once the reader returns to the bottom — otherwise the
     // guard above would be a one-way door out of following the stream.
     testWidgets('scrolling back to the bottom resumes the follow', (

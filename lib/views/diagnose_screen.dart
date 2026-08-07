@@ -338,10 +338,23 @@ class _ResultPanelState extends State<_ResultPanel> {
     super.dispose();
   }
 
-  /// A reader within this many pixels of the bottom counts as still following the
-  /// stream. Roughly two lines of `bodyLarge`, which is the smallest gap that is
-  /// plainly a deliberate scroll rather than a rounding artefact of the previous
-  /// jump.
+  /// A reader within this many pixels of the bottom still counts as following the
+  /// stream, so the panel keeps scrolling for them.
+  ///
+  /// **A deliberate comfort band, not a correction for measurement error** — review
+  /// finding R2-F4. The first version of this comment called 48px "the smallest gap
+  /// that is plainly a deliberate scroll rather than a rounding artefact of the
+  /// previous jump", and there is no such artefact to defend against: R1-F4
+  /// established that the jump lands *exactly* on the extent, asserted one screen
+  /// away in the same test file. Defending an imaginary hazard is how a magic number
+  /// acquires a respectable-looking justification.
+  ///
+  /// What it is actually for: a reader who nudges the panel up by a line — a
+  /// scroll-wheel click, a thumb drag that overshoots — has not asked to stop
+  /// following, and yanking them out of the stream for 20px of movement would be
+  /// worse than the alternative. Roughly two lines of `bodyLarge`. Bound in both
+  /// directions by `diagnose_screen_test.dart`: a scroll of less than the slack keeps
+  /// following, a scroll far beyond it does not.
   static const double _followSlack = 48;
 
   @override
