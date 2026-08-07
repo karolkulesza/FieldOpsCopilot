@@ -1,0 +1,302 @@
+{
+  "scenario": "recovery_ladder",
+  "inquiry": "cabin vibrating, E-102",
+  "retrieval": {
+    "entryIds": [
+      "apex_9_err_102"
+    ],
+    "codeHitIds": [
+      "apex_9_err_102"
+    ],
+    "ftsHitIds": [
+      "apex_9_err_102"
+    ],
+    "resolvedCodes": [
+      "E-102"
+    ],
+    "unresolvedCodes": [],
+    "searchedTerms": [
+      "cabin",
+      "vibrating"
+    ]
+  },
+  "result": {
+    "stopReason": "answered",
+    "turnCount": 4,
+    "isComplete": true,
+    "answer": [
+      "BRK-990-XP is in stock: 2 units at Aisle 4, Shelf B. Replace both pad assemblies and re-set caliper clearance to 0.5mm."
+    ]
+  },
+  "turns": [
+    {
+      "index": 0,
+      "prompt": [
+        "You are an offline Field Service Assistant.",
+        "Based ONLY on the verified technical manual document below, answer the user's inquiry and formulate a repair plan.",
+        "If parts are required, you MUST call the \"get_local_parts_inventory(sku)\" tool to check warehouse stock.",
+        "",
+        "[MANUAL DOCUMENT]",
+        "Title: Traction Brake Pad Wear & Vibration (Code: E-102)",
+        "Section: Brake Systems",
+        "Symptoms: High-pitched squealing during deceleration, cabin vibration at terminal landings, fault code E-102 displayed on machine room controller.",
+        "Procedure: 1. Isolate the main elevator power bus. 2. Lockout/tagout machine room breaker 4A. 3. Remove the magnetic brake cowl using a Torx T20 driver. 4. Inspect brake pad wear indicators. If thickness is less than 2.0mm, replace the assemblies. 5. Adjust caliper clearance to exactly 0.5mm.",
+        "Required Parts: BRK-990-XP",
+        "Required Tools: Torx T20, Digital Caliper, Lockout Tagout Kit",
+        "",
+        "[USER INQUIRY]",
+        "\"cabin vibrating, E-102\""
+      ],
+      "text": [
+        "Looking up the part."
+      ],
+      "textScannedForCall": false,
+      "requestedWork": true,
+      "invocations": [],
+      "rejectedCalls": [
+        {
+          "reason": "emptyToolName",
+          "message": "a tool call arrived with no tool name; call a tool by name or answer in plain text"
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "prompt": [
+        "You are an offline Field Service Assistant.",
+        "Based ONLY on the verified technical manual document below, answer the user's inquiry and formulate a repair plan.",
+        "If parts are required, you MUST call the \"get_local_parts_inventory(sku)\" tool to check warehouse stock.",
+        "",
+        "[MANUAL DOCUMENT]",
+        "Title: Traction Brake Pad Wear & Vibration (Code: E-102)",
+        "Section: Brake Systems",
+        "Symptoms: High-pitched squealing during deceleration, cabin vibration at terminal landings, fault code E-102 displayed on machine room controller.",
+        "Procedure: 1. Isolate the main elevator power bus. 2. Lockout/tagout machine room breaker 4A. 3. Remove the magnetic brake cowl using a Torx T20 driver. 4. Inspect brake pad wear indicators. If thickness is less than 2.0mm, replace the assemblies. 5. Adjust caliper clearance to exactly 0.5mm.",
+        "Required Parts: BRK-990-XP",
+        "Required Tools: Torx T20, Digital Caliper, Lockout Tagout Kit",
+        "",
+        "[USER INQUIRY]",
+        "\"cabin vibrating, E-102\"",
+        "",
+        "[ASSISTANT]",
+        "Looking up the part.",
+        "",
+        "[TOOL CALL REJECTED]",
+        "{\"error\":\"malformed_tool_call\",\"message\":\"a tool call arrived with no tool name; call a tool by name or answer in plain text\"}",
+        "",
+        "[CONTINUE]",
+        "That tool call could not be read. Either call the tool again with a tool name and JSON arguments, or answer the technician from the manual document alone. Do not state a stock level you were not given."
+      ],
+      "text": [
+        "Sorry \u2014 calling the inventory tool properly now."
+      ],
+      "textScannedForCall": false,
+      "requestedWork": true,
+      "invocations": [
+        {
+          "tool": "get_local_parts_inventory",
+          "arguments": {},
+          "source": "nativeEvent",
+          "renamedFrom": null,
+          "repeated": false,
+          "outcome": {
+            "kind": "failure",
+            "toolName": "get_local_parts_inventory",
+            "payload": {
+              "error": "missing_parameter",
+              "parameter": "sku",
+              "message": "required argument \"sku\" was not provided; call the tool again with \"sku\" set to a string value"
+            }
+          }
+        }
+      ],
+      "rejectedCalls": []
+    },
+    {
+      "index": 2,
+      "prompt": [
+        "You are an offline Field Service Assistant.",
+        "Based ONLY on the verified technical manual document below, answer the user's inquiry and formulate a repair plan.",
+        "If parts are required, you MUST call the \"get_local_parts_inventory(sku)\" tool to check warehouse stock.",
+        "",
+        "[MANUAL DOCUMENT]",
+        "Title: Traction Brake Pad Wear & Vibration (Code: E-102)",
+        "Section: Brake Systems",
+        "Symptoms: High-pitched squealing during deceleration, cabin vibration at terminal landings, fault code E-102 displayed on machine room controller.",
+        "Procedure: 1. Isolate the main elevator power bus. 2. Lockout/tagout machine room breaker 4A. 3. Remove the magnetic brake cowl using a Torx T20 driver. 4. Inspect brake pad wear indicators. If thickness is less than 2.0mm, replace the assemblies. 5. Adjust caliper clearance to exactly 0.5mm.",
+        "Required Parts: BRK-990-XP",
+        "Required Tools: Torx T20, Digital Caliper, Lockout Tagout Kit",
+        "",
+        "[USER INQUIRY]",
+        "\"cabin vibrating, E-102\"",
+        "",
+        "[ASSISTANT]",
+        "Looking up the part.",
+        "",
+        "[TOOL CALL REJECTED]",
+        "{\"error\":\"malformed_tool_call\",\"message\":\"a tool call arrived with no tool name; call a tool by name or answer in plain text\"}",
+        "",
+        "[CONTINUE]",
+        "That tool call could not be read. Either call the tool again with a tool name and JSON arguments, or answer the technician from the manual document alone. Do not state a stock level you were not given.",
+        "",
+        "[ASSISTANT]",
+        "Sorry \u2014 calling the inventory tool properly now.",
+        "",
+        "[TOOL CALL]",
+        "{\"tool\":\"get_local_parts_inventory\",\"arguments\":{}}",
+        "[TOOL RESULT]",
+        "{\"error\":\"missing_parameter\",\"parameter\":\"sku\",\"message\":\"required argument \\\"sku\\\" was not provided; call the tool again with \\\"sku\\\" set to a string value\"}",
+        "",
+        "[CONTINUE]",
+        "The tool results above are the authoritative local warehouse data \u2014 they come from this device, not from your training. Use them together with the manual document to answer the technician now. Do not call a tool again with arguments already answered above."
+      ],
+      "text": [
+        "With the SKU this time."
+      ],
+      "textScannedForCall": false,
+      "requestedWork": true,
+      "invocations": [
+        {
+          "tool": "get_local_parts_inventory",
+          "arguments": {
+            "sku": "BRK-990-XP"
+          },
+          "source": "nativeEvent",
+          "renamedFrom": null,
+          "repeated": false,
+          "outcome": {
+            "kind": "success",
+            "toolName": "get_local_parts_inventory",
+            "payload": {
+              "sku": "BRK-990-XP",
+              "in_stock": 2,
+              "aisle": "Aisle 4, Shelf B"
+            }
+          }
+        }
+      ],
+      "rejectedCalls": []
+    },
+    {
+      "index": 3,
+      "prompt": [
+        "You are an offline Field Service Assistant.",
+        "Based ONLY on the verified technical manual document below, answer the user's inquiry and formulate a repair plan.",
+        "If parts are required, you MUST call the \"get_local_parts_inventory(sku)\" tool to check warehouse stock.",
+        "",
+        "[MANUAL DOCUMENT]",
+        "Title: Traction Brake Pad Wear & Vibration (Code: E-102)",
+        "Section: Brake Systems",
+        "Symptoms: High-pitched squealing during deceleration, cabin vibration at terminal landings, fault code E-102 displayed on machine room controller.",
+        "Procedure: 1. Isolate the main elevator power bus. 2. Lockout/tagout machine room breaker 4A. 3. Remove the magnetic brake cowl using a Torx T20 driver. 4. Inspect brake pad wear indicators. If thickness is less than 2.0mm, replace the assemblies. 5. Adjust caliper clearance to exactly 0.5mm.",
+        "Required Parts: BRK-990-XP",
+        "Required Tools: Torx T20, Digital Caliper, Lockout Tagout Kit",
+        "",
+        "[USER INQUIRY]",
+        "\"cabin vibrating, E-102\"",
+        "",
+        "[ASSISTANT]",
+        "Looking up the part.",
+        "",
+        "[TOOL CALL REJECTED]",
+        "{\"error\":\"malformed_tool_call\",\"message\":\"a tool call arrived with no tool name; call a tool by name or answer in plain text\"}",
+        "",
+        "[CONTINUE]",
+        "That tool call could not be read. Either call the tool again with a tool name and JSON arguments, or answer the technician from the manual document alone. Do not state a stock level you were not given.",
+        "",
+        "[ASSISTANT]",
+        "Sorry \u2014 calling the inventory tool properly now.",
+        "",
+        "[TOOL CALL]",
+        "{\"tool\":\"get_local_parts_inventory\",\"arguments\":{}}",
+        "[TOOL RESULT]",
+        "{\"error\":\"missing_parameter\",\"parameter\":\"sku\",\"message\":\"required argument \\\"sku\\\" was not provided; call the tool again with \\\"sku\\\" set to a string value\"}",
+        "",
+        "[CONTINUE]",
+        "The tool results above are the authoritative local warehouse data \u2014 they come from this device, not from your training. Use them together with the manual document to answer the technician now. Do not call a tool again with arguments already answered above.",
+        "",
+        "[ASSISTANT]",
+        "With the SKU this time.",
+        "",
+        "[TOOL CALL]",
+        "{\"tool\":\"get_local_parts_inventory\",\"arguments\":{\"sku\":\"BRK-990-XP\"}}",
+        "[TOOL RESULT]",
+        "{\"sku\":\"BRK-990-XP\",\"in_stock\":2,\"aisle\":\"Aisle 4, Shelf B\"}",
+        "",
+        "[CONTINUE]",
+        "The tool results above are the authoritative local warehouse data \u2014 they come from this device, not from your training. Use them together with the manual document to answer the technician now. Do not call a tool again with arguments already answered above."
+      ],
+      "text": [
+        "BRK-990-XP is in stock: 2 units at Aisle 4, Shelf B. Replace both pad assemblies and re-set caliper clearance to 0.5mm."
+      ],
+      "textScannedForCall": true,
+      "requestedWork": false,
+      "invocations": [],
+      "rejectedCalls": []
+    }
+  ],
+  "events": [
+    {
+      "event": "turnStarted",
+      "index": 0
+    },
+    {
+      "event": "token",
+      "text": "Looking up the part."
+    },
+    {
+      "event": "toolCallRejected",
+      "reason": "emptyToolName"
+    },
+    {
+      "event": "turnStarted",
+      "index": 1
+    },
+    {
+      "event": "token",
+      "text": "Sorry \u2014 calling the inventory tool properly now."
+    },
+    {
+      "event": "toolCallStarted",
+      "tool": "get_local_parts_inventory",
+      "source": "nativeEvent",
+      "repeated": false
+    },
+    {
+      "event": "toolCallCompleted",
+      "tool": "get_local_parts_inventory",
+      "outcome": "failure"
+    },
+    {
+      "event": "turnStarted",
+      "index": 2
+    },
+    {
+      "event": "token",
+      "text": "With the SKU this time."
+    },
+    {
+      "event": "toolCallStarted",
+      "tool": "get_local_parts_inventory",
+      "source": "nativeEvent",
+      "repeated": false
+    },
+    {
+      "event": "toolCallCompleted",
+      "tool": "get_local_parts_inventory",
+      "outcome": "success"
+    },
+    {
+      "event": "turnStarted",
+      "index": 3
+    },
+    {
+      "event": "token",
+      "text": "BRK-990-XP is in stock: 2 units at Aisle 4, Shelf B. Replace both pad assemblies and re-set caliper clearance to 0.5mm."
+    },
+    {
+      "event": "completed",
+      "stopReason": "answered"
+    }
+  ]
+}
