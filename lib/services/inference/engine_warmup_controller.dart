@@ -113,6 +113,22 @@ class EngineWarmupController extends Notifier<EngineWarmupState> {
   /// `ModelProvisioningController.provision` invalidates
   /// `modelInstallStatusProvider` when it succeeds, so the engine this reads is a
   /// new one.
+  ///
+  /// **One latent shape, unreachable today, recorded because the thing that would
+  /// make it reachable is a plausible next feature.** If `modelInstallStatusProvider`
+  /// were ever invalidated *while* the state is [EngineReady], the rebuild would
+  /// dispose the old `GemmaLlmEngine` through `deviceLlmEngineProvider`'s `onDispose`
+  /// while this state still holds a reference to it — and the early return below
+  /// would keep that reference, so the screen would sit on a disposed engine and fail
+  /// at the next `generate`. It cannot happen now: `_ProvisioningSection` renders
+  /// nothing at all when the status is `ready` (`model_readiness_banner.dart`), so
+  /// the only invalidation is on a path that starts from [EngineUnavailable]. Raised
+  /// as a non-blocking review note, and traced to unreachable there rather than here.
+  ///
+  /// Deliberately **not** guarded. A guard against an unreachable state cannot be
+  /// tested, so it would be exactly the unbound claim this task keeps removing. What
+  /// would make it reachable is a "re-verify weights" action offered while the model
+  /// is already ready; whoever adds one owns this paragraph.
   Future<void> warmUp() async {
     if (state is EngineLoading || state is EngineReady) return;
 
