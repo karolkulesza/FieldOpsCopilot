@@ -171,6 +171,21 @@ void main() {
       expect(boldParts('a****b'), isEmpty);
     });
 
+    // **The invariant above strips `-` from both sides, so it cannot see a hyphen
+    // being eaten inside a bullet's content** — review finding R1-F5 measured that:
+    // making the bullet rewrite delete every `-` from the rest of the line survived
+    // the whole suite, and a SKU is `BRK-990-XP`. This case preserves markers, so it
+    // is the one that would catch it.
+    test('a hyphen inside a bullet line survives the rewrite', () {
+      expect(
+        rendered('*   BRK-990-XP, 2 in stock'),
+        '•   BRK-990-XP, 2 in stock',
+      );
+      // Only the *leading* marker is rewritten; a later `- ` is content.
+      expect(rendered('*   a - b'), '•   a - b');
+      expect(rendered('- BRK-990-XP'), '• BRK-990-XP');
+    });
+
     test('empty input yields one empty span rather than no spans', () {
       final spans = answerSpans('');
 

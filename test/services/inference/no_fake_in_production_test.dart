@@ -23,122 +23,203 @@ import 'package:flutter_test/flutter_test.dart';
 ///   `lib/services/inference/providers.dart` requires importing
 ///   `engines/providers.dart` or `engines/fakes/`, and the mutation harness applies
 ///   one contiguous string replacement — it cannot add an import as well, so the
-///   mutation only ever reports `NO_COMPILE`. That was review-round mutation M36,
-///   and it is recorded as inexpressible rather than as passing.
+///   mutation only ever reports `NO_COMPILE`. That was review mutation M36.
 ///
-/// What *is* checkable, cheaply and exactly, is that no file on the production path
-/// so much as mentions a fake. That is a stronger statement than any single
-/// behavioural test: it holds for code nobody has written yet.
+/// **This file has now been wrong twice, and both times a mutation found it. That
+/// history is why it is shaped the way it is.**
+///
+/// 1. The first version scanned for the string `FakeLlmEngine` outside an
+///    allow-list — one that includes `lib/engines/providers.dart`, whose *job* is
+///    binding fakes. So a fake bound there under a new name and consumed from the
+///    inference path was invisible (M36, retargeted).
+/// 2. The second version added an import check, but only over a hand-listed set of
+///    "production" directories that **did not include `lib/main.dart`** — the file
+///    holding the app's only root `ProviderScope`, and therefore the single most
+///    likely home for exactly this override. Review finding **R1-F3**: a `main.dart`
+///    importing `engines/providers.dart` and overriding `agentEngineProvider` with
+///    `llmEngineProvider` compiles, answers every inquiry from a script, and
+///    survived all four tests here.
+/// 3. And **neither detector could be disabled detectably** (review finding
+///    **R1-F2**): `if (false && …)` on either one left every test green, because a
+///    scan is only ever run over a tree with nothing to find, so a dead detector and
+///    a clean tree look identical. The test written as the answer to that grepped the
+///    fake's file directly and never ran the scan at all — a canary on the search
+///    literal, not on the detector.
+///
+/// So the scan is now **one function over the whole of `lib/`**, exempting
+/// `lib/engines/` rather than enumerating what to include ("what may not" is a
+/// closed question; "what counts as production" is not), and it is exercised in
+/// **both directions** — empty for the real tree, and *reporting the offender* when
+/// pointed at a tree that has one. A detector that has only ever returned empty is
+/// not a detector.
 void main() {
-  /// Where a fake is legitimate: the fakes themselves, and the Tier 0 DI seam that
-  /// binds them for tests and for `SttEngine`/`VisionEngine`/`PlatformTelemetry`,
-  /// none of which has a real backend yet.
-  const allowed = {
-    'lib/engines/fakes/fake_llm_engine.dart',
-    'lib/engines/fakes/fake_stt_engine.dart',
-    'lib/engines/fakes/fake_vision_engine.dart',
-    'lib/engines/fakes/fake_platform_telemetry.dart',
-    'lib/engines/providers.dart',
-  };
+  /// The one subtree where naming or binding a fake is legitimate: the fakes
+  /// themselves and the Tier 0 DI seam that binds them, which still serves
+  /// `SttEngine` / `VisionEngine` / `PlatformTelemetry` — none of which has a real
+  /// backend yet.
+  ///
+  /// An exemption rather than an inclusion list. `lib/main.dart` being absent from
+  /// an inclusion list is what R1-F3 was; a subtree that is *allowed* to mention
+  /// fakes is a closed set, so it cannot acquire a hole by omission.
+  const exemptPrefix = 'lib/engines/';
 
-  test('nothing on the production inference path references a fake engine', () {
+  /// Every `lib/` file that mentions a fake engine or reaches the seam that binds
+  /// one, as `path -> [line numbers]`.
+  ///
+  /// Takes its roots and exemption as parameters so the positive path is testable:
+  /// pointed at `lib/engines/` with nothing exempt, it must *find* something.
+  Map<String, List<int>> scan({required String root, required String exempt}) {
     final offenders = <String, List<int>>{};
 
-    for (final entity in Directory('lib').listSync(recursive: true)) {
+    for (final entity in Directory(root).listSync(recursive: true)) {
       if (entity is! File || !entity.path.endsWith('.dart')) continue;
       final path = entity.path.replaceAll(r'\', '/');
-      if (allowed.contains(path)) continue;
+      if (exempt.isNotEmpty && path.startsWith(exempt)) continue;
 
       final lines = entity.readAsLinesSync();
       for (var i = 0; i < lines.length; i++) {
-        final line = lines[i];
-        // Doc comments are where the *reason* for this rule is written down, so
-        // they must be able to name the class. Only code counts.
-        if (line.trimLeft().startsWith('///')) continue;
-        if (line.trimLeft().startsWith('//')) continue;
-        if (line.contains('FakeLlmEngine') || line.contains('engines/fakes/')) {
+        final trimmed = lines[i].trimLeft();
+        // Doc and line comments are where the *reason* for this rule is written
+        // down, so they must be able to name the class. Only code counts.
+        if (trimmed.startsWith('//')) continue;
+        final namesAFake =
+            trimmed.contains('FakeLlmEngine') ||
+            trimmed.contains('engines/fakes/');
+        // The import check is the half R1-F3 needed: a fake can be bound in the
+        // exempt seam under any name, so reaching that seam at all is the boundary.
+        final reachesTheSeam =
+            trimmed.startsWith('import ') &&
+            trimmed.contains('engines/providers.dart');
+        if (namesAFake || reachesTheSeam) {
           offenders.putIfAbsent(path, () => []).add(i + 1);
         }
       }
     }
+    return offenders;
+  }
 
+  test('no production file names a fake or reaches the seam that binds one', () {
     expect(
-      offenders,
+      scan(root: 'lib', exempt: exemptPrefix),
       isEmpty,
       reason:
-          'a production reference to a fake engine means the app can answer '
-          'from a script on a device where the model never ran, which is '
-          'indistinguishable from success in a recording. Offending lines: '
-          '$offenders',
+          'a production reference to a fake engine — or an import of the seam '
+          'that binds one — means the app can answer from a script on a device '
+          'where the model never ran, which is indistinguishable from success '
+          'in a recording',
     );
   });
 
-  // **The scan above has a hole, and the mutation that found it is why this second
-  // test exists.** `lib/engines/providers.dart` is allow-listed wholesale, because
-  // binding fakes is its job for the three engine seams with no real backend yet.
-  // So a fake could be bound *there* under a new name and consumed from the
-  // inference path without the string `FakeLlmEngine` ever appearing in a
-  // non-allow-listed file — mutation M36 did exactly that and survived.
-  //
-  // The real boundary is therefore the **import**: nothing on the path from the
-  // demo screen to the engine may reach the seam that binds fakes at all. Nothing
-  // does today (deleting the Tier 0 home screen removed the last consumer), which
-  // is what makes this checkable rather than aspirational.
-  test('the production path does not import the fake-binding seam', () {
-    const productionPaths = [
-      'lib/services/inference/',
-      'lib/services/ai/',
-      'lib/services/rag/',
-      'lib/viewmodels/',
-      'lib/views/',
-    ];
-    final offenders = <String>[];
+  group('the detector can actually detect', () {
+    // R1-F2: both detectors were disableable without a single test noticing,
+    // because a scan is only ever run over a tree with nothing to find. These run
+    // it over a tree that *does*, so a dead detector fails here.
+    test('it reports a file that names a fake', () {
+      final found = scan(root: 'lib/engines', exempt: '');
 
-    for (final entity in Directory('lib').listSync(recursive: true)) {
-      if (entity is! File || !entity.path.endsWith('.dart')) continue;
-      final path = entity.path.replaceAll(r'\', '/');
-      if (!productionPaths.any(path.startsWith)) continue;
+      expect(
+        found.keys,
+        contains('lib/engines/fakes/fake_llm_engine.dart'),
+        reason: 'detector 1 (the FakeLlmEngine name) must find the fake itself',
+      );
+      expect(found['lib/engines/fakes/fake_llm_engine.dart'], isNotEmpty);
+    });
 
-      for (final line in entity.readAsLinesSync()) {
-        final trimmed = line.trimLeft();
-        if (!trimmed.startsWith('import ')) continue;
-        if (trimmed.contains('engines/providers.dart')) offenders.add(path);
+    test('it reports a file that imports the fake-binding seam', () {
+      final probe = Directory.systemTemp.createTempSync('fieldops_scan_probe');
+      addTearDown(() => probe.deleteSync(recursive: true));
+      final root = probe.path.replaceAll(r'\', '/');
+      File('$root/offender.dart').writeAsStringSync(
+        "import '../../engines/providers.dart';\n"
+        'void main() {}\n',
+      );
+
+      final found = scan(root: root, exempt: '');
+
+      expect(
+        found['$root/offender.dart'],
+        [1],
+        reason: 'detector 2 (the seam import) must find it, on line 1',
+      );
+    });
+
+    // The exact shape R1-F3 demonstrated, written to a probe tree rather than to
+    // the real `lib/main.dart`: an override that binds the fake seam into
+    // `agentEngineProvider`. If this stops being reported, the hole is back.
+    test('it reports the R1-F3 shape — a root ProviderScope override', () {
+      final probe = Directory.systemTemp.createTempSync('fieldops_scan_main');
+      addTearDown(() => probe.deleteSync(recursive: true));
+      final root = probe.path.replaceAll(r'\', '/');
+      File('$root/main.dart').writeAsStringSync('''
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'engines/providers.dart';
+import 'services/inference/providers.dart';
+import 'app.dart';
+
+void main() {
+  runApp(
+    ProviderScope(
+      overrides: [
+        agentEngineProvider.overrideWith((ref) async => ref.watch(llmEngineProvider)),
+      ],
+      child: const FieldOpsApp(),
+    ),
+  );
+}
+''');
+
+      expect(scan(root: root, exempt: '').keys, contains('$root/main.dart'));
+    });
+
+    // And a clean tree must come back empty, or the two tests above would pass on
+    // a detector that reports everything.
+    test('it reports nothing for a file with no fake and no seam import', () {
+      final probe = Directory.systemTemp.createTempSync('fieldops_scan_clean');
+      addTearDown(() => probe.deleteSync(recursive: true));
+      final root = probe.path.replaceAll(r'\', '/');
+      File('$root/clean.dart').writeAsStringSync(
+        "import 'package:flutter/material.dart';\n"
+        '/// Mentions FakeLlmEngine only in a doc comment.\n'
+        'void main() {}\n',
+      );
+
+      expect(scan(root: root, exempt: ''), isEmpty);
+    });
+  });
+
+  group('the scan covers what it claims to', () {
+    // R1-F3's root cause was coverage, not detection: the file that mattered was
+    // simply not in the scanned set. Asserted directly, so narrowing the scan is a
+    // visible edit rather than a silent one.
+    test('the scanned set includes main.dart and app.dart', () {
+      final scanned = Directory('lib')
+          .listSync(recursive: true)
+          .whereType<File>()
+          .map((f) => f.path.replaceAll(r'\', '/'))
+          .where((p) => p.endsWith('.dart') && !p.startsWith(exemptPrefix))
+          .toSet();
+
+      expect(scanned, contains('lib/main.dart'));
+      expect(scanned, contains('lib/app.dart'));
+      expect(scanned, contains('lib/services/inference/providers.dart'));
+      expect(scanned, contains('lib/viewmodels/field_job_viewmodel.dart'));
+      expect(scanned, contains('lib/views/diagnose_screen.dart'));
+    });
+
+    // The exemption is a prefix, so it cannot grow to cover a file by omission —
+    // but it could be widened deliberately. Pin what it must never swallow.
+    test('the exemption does not cover the seam it protects', () {
+      for (final path in [
+        'lib/main.dart',
+        'lib/app.dart',
+        'lib/services/inference/providers.dart',
+        'lib/viewmodels/field_job_viewmodel.dart',
+        'lib/views/diagnose_screen.dart',
+      ]) {
+        expect(path.startsWith(exemptPrefix), isFalse, reason: path);
       }
-    }
-
-    expect(
-      offenders,
-      isEmpty,
-      reason:
-          'these files can reach a fake-bound provider without naming a fake, '
-          'which the scan above cannot see: $offenders',
-    );
-  });
-
-  // The guard above is worthless if its allow-list has quietly grown to cover the
-  // file it is meant to protect. Named explicitly, so widening it is a visible edit
-  // rather than a silent one.
-  test('the allow-list does not cover the inference seam it protects', () {
-    expect(allowed, isNot(contains('lib/services/inference/providers.dart')));
-    expect(allowed, isNot(contains('lib/viewmodels/field_job_viewmodel.dart')));
-    expect(allowed, isNot(contains('lib/views/diagnose_screen.dart')));
-  });
-
-  // And the detector has to be able to fail. A guard nobody has watched fail is the
-  // thing this project keeps paying for, so this asserts the scan finds what it is
-  // looking for when it *is* there — using the fake's own file, which the
-  // allow-list exempts precisely because it legitimately contains the name.
-  test('the scan does detect the string it searches for', () {
-    final fake = File(
-      'lib/engines/fakes/fake_llm_engine.dart',
-    ).readAsStringSync();
-
-    expect(
-      fake,
-      contains('FakeLlmEngine'),
-      reason:
-          'if this file stopped containing the name, the scan above would '
-          'pass by searching for something that no longer exists',
-    );
+    });
   });
 }
