@@ -2,8 +2,86 @@ import 'dart:io';
 
 import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_test/flutter_test.dart';
+
+/// Collects every type named in a supertype clause — `extends`, `implements`,
+/// `with`, `on` — paired with the declaration that names it.
+///
+/// Part of the fix for review finding **R6-F1**. Reaching for the AST rather than
+/// `grep -rn 'implements LlmEngine'` is not ceremony: the string form misses
+/// `implements LlmEngine<T>`, a wrapped clause, `extends` and `with`, and — the case
+/// this file has been burned by twice — anything inside a comment counts.
+class _SupertypeCollector extends RecursiveAstVisitor<void> {
+  final found = <(String declaration, String supertype)>[];
+
+  void _record(String declaration, NodeList<NamedType>? types) {
+    for (final type in types ?? const <NamedType>[]) {
+      found.add((declaration, type.name.lexeme));
+    }
+  }
+
+  @override
+  void visitClassDeclaration(ClassDeclaration node) {
+    final name = node.namePart.typeName.lexeme;
+    _record(name, node.implementsClause?.interfaces);
+    _record(name, node.withClause?.mixinTypes);
+    final extended = node.extendsClause?.superclass;
+    if (extended != null) found.add((name, extended.name.lexeme));
+    super.visitClassDeclaration(node);
+  }
+
+  @override
+  void visitEnumDeclaration(EnumDeclaration node) {
+    final name = node.namePart.typeName.lexeme;
+    _record(name, node.implementsClause?.interfaces);
+    _record(name, node.withClause?.mixinTypes);
+    super.visitEnumDeclaration(node);
+  }
+
+  @override
+  void visitMixinDeclaration(MixinDeclaration node) {
+    final name = node.name.lexeme;
+    _record(name, node.implementsClause?.interfaces);
+    _record(name, node.onClause?.superclassConstraints);
+    super.visitMixinDeclaration(node);
+  }
+
+  @override
+  void visitExtensionTypeDeclaration(ExtensionTypeDeclaration node) {
+    _record(
+      node.primaryConstructor.typeName.lexeme,
+      node.implementsClause?.interfaces,
+    );
+    super.visitExtensionTypeDeclaration(node);
+  }
+}
+
+/// Collects every provider-override site: `overrideWith…(…)` calls and any
+/// `overrides:` argument (which is how `ProviderScope` takes them).
+///
+/// The other half of **R6-F1**. These names are Riverpod's API, not this project's
+/// convention — which is what makes the set closed. A fake cannot reach the running
+/// app without one of them, whatever it is called and wherever it lives.
+class _OverrideCollector extends RecursiveAstVisitor<void> {
+  final sites = <(int offset, String what)>[];
+
+  @override
+  void visitMethodInvocation(MethodInvocation node) {
+    final name = node.methodName.name;
+    if (name.startsWith('overrideWith')) sites.add((node.offset, '$name(…)'));
+    super.visitMethodInvocation(node);
+  }
+
+  @override
+  void visitNamedExpression(NamedExpression node) {
+    if (node.name.label.name == 'overrides') {
+      sites.add((node.offset, 'overrides: …'));
+    }
+    super.visitNamedExpression(node);
+  }
+}
 
 /// A source-level guard on the one property this project cannot afford to lose:
 /// **the production graph never answers from `FakeLlmEngine`.**
@@ -358,44 +436,50 @@ void main() {
             "import 'package:field_ops_copilot/engines/providers.dart';\n",
       });
 
-      // `seam.dart` open, so the wrapped directive *inside* it is what has to be
-      // read for the closure to fire at all.
-      expect(
-        scan(
-          root: root,
-          exempt: '$root/engines/',
-          open: {'$root/engines/seam.dart', '$root/engines/stub.dart'},
-        )['$root/main.dart'],
-        [1],
-      );
+      // No `open:` set, and no comment claiming one. R6-F3: this case used to pass
+      // `open: {seam.dart, stub.dart}` — two files this probe tree does not contain —
+      // under a comment describing a wrapped directive that is not here either. Both
+      // were copied from the wrapped-directive case below. Deleting the argument left
+      // the file green, which is what makes it worth recording: an inert argument
+      // reads as coverage. What this case actually tests is the `package:` branch of
+      // [resolveUri], and that is all it now claims.
+      expect(scan(root: root, exempt: '$root/engines/')['$root/main.dart'], [
+        1,
+      ]);
     });
 
     // **R3-F1's wrapper — the shape that broke the transitivity argument.** An
     // exempt file that *reaches* a fake without naming one. Pass 2 skips it for being
     // exempt; the single-sweep pass 1 declined to flag it for not naming a fake, so
     // the reference was laundered and the consumer was invisible.
-    test(
-      'it reports a consumer of an exempt file that only reaches a fake',
-      () {
-        final root = probeTree('wrapper', {
-          'engines/providers.dart':
-              'final llmEngineProvider = Provider((ref) => FakeLlmEngine());\n',
-          'engines/demo_seam.dart':
-              "import 'providers.dart';\n"
-              'final demoEngineProvider = llmEngineProvider;\n',
-          'main.dart': "import 'engines/demo_seam.dart';\n",
-        });
+    test('it reports a consumer of an exempt file that only reaches a fake', () {
+      final root = probeTree('wrapper', {
+        'engines/providers.dart':
+            'final llmEngineProvider = Provider((ref) => FakeLlmEngine());\n',
+        'engines/demo_seam.dart':
+            "import 'providers.dart';\n"
+            'final demoEngineProvider = llmEngineProvider;\n',
+        'main.dart': "import 'engines/demo_seam.dart';\n",
+      });
 
-        final found = scan(root: root, exempt: '$root/engines/');
+      // `demo_seam.dart` declared **open**, so the closure is the only thing that
+      // can restrict it. R6-F2: without this the wrapper was restricted by
+      // *location* under R5-F1's inversion, so this test — R3-F1's own regression
+      // test, the finding that cost a round — passed with the closure deleted. Its
+      // stated reason had stopped being true of what executed.
+      final found = scan(
+        root: root,
+        exempt: '$root/engines/',
+        open: {'$root/engines/demo_seam.dart'},
+      );
 
-        expect(
-          found['$root/main.dart'],
-          [1],
-          reason:
-              'the wrapper names no fake, so only a closed pass 1 catches this',
-        );
-      },
-    );
+      expect(
+        found['$root/main.dart'],
+        [1],
+        reason:
+            'the wrapper names no fake, so only a closed pass 1 catches this',
+      );
+    });
 
     // The closure has to iterate, not just look one hop. Two wrappers in a chain.
     test('pass 1 closes over a chain of exempt wrappers', () {
@@ -481,9 +565,18 @@ void main() {
         'main.dart': "import 'engines/seam.dart';\n",
       });
 
-      expect(scan(root: root, exempt: '$root/engines/')['$root/main.dart'], [
-        1,
-      ]);
+      // `seam.dart` open — R6-F2 again, and this is the one whose vacuity my own
+      // R5-F2 answer diagnosed without recognising: the 7→6 drop happened because
+      // this file stopped needing its conditional import to be seeded. That was the
+      // vacuity, recorded as an explanation of a count.
+      expect(
+        scan(
+          root: root,
+          exempt: '$root/engines/',
+          open: {'$root/engines/seam.dart'},
+        )['$root/main.dart'],
+        [1],
+      );
     });
 
     // **The four shapes that defeated the regex, and the reason this uses a
@@ -827,6 +920,146 @@ void main() {
             'a file the parser cannot read is scanned from a recovered AST, so its '
             'directives are whatever survived — the guard would pass in silence',
       );
+    });
+  });
+
+  // **The sink, which six rounds of this file never looked at (R6-F1).**
+  //
+  // Everything above asks where an engine comes *from*: which file is a fake, which
+  // directive reaches it, which URI form hides the reach. Six times that question has
+  // been answered and six times the next round moved the fake somewhere the answer did
+  // not cover — a new name, a new directory, a new directive shape. The seventh hole
+  // was a `ScriptedDemoEngine` in `lib/services/inference/`, importing only the *open*
+  // `llm_engine.dart`: outside the exemption, so nothing classified it at all.
+  //
+  // These two tests ask where an engine goes *to*, and that question has an answer
+  // that does not depend on a fake's name or location. **Every one of the seven
+  // demonstrated exploits ends in the same statement** — an override of
+  // `agentEngineProvider` inside `lib/` — and every fake has to implement `LlmEngine`
+  // to be usable at all. Both are closed by construction over the property, and both
+  // are satisfied by the real tree today with no allow-list to maintain.
+  group('the sink: how an engine reaches the running app', () {
+    /// Every `.dart` under `lib/`, as path → source.
+    Map<String, String> productionSources() {
+      final sources = <String, String>{};
+      for (final entity in Directory('lib').listSync(recursive: true)) {
+        if (entity is! File || !entity.path.endsWith('.dart')) continue;
+        sources[entity.path.replaceAll(r'\', '/')] = entity.readAsStringSync();
+      }
+      return sources;
+    }
+
+    // Production wires its graph by *declaring* providers, never by overriding them.
+    // Overriding is a test's tool, and the doc has said so in prose since round 0 —
+    // "the fake is still exactly one line away from any *test* that wants it … a
+    // deliberate act in a test file". It had simply never been asserted, and it is the
+    // single statement every exploit needed.
+    //
+    // No allow-list, deliberately: there is nothing to allow today, and the first
+    // production override should be a conversation rather than an entry in a set.
+    test('no production file overrides a provider', () {
+      final offenders = <String, List<String>>{};
+      productionSources().forEach((path, source) {
+        final collector = _OverrideCollector();
+        parseString(
+          content: source,
+          throwIfDiagnostics: false,
+        ).unit.accept(collector);
+        if (collector.sites.isNotEmpty) {
+          offenders[path] = collector.sites.map((s) => s.$2).toList();
+        }
+      });
+
+      expect(
+        offenders,
+        isEmpty,
+        reason:
+            'overriding a provider in lib/ is how every fake in this review reached '
+            'the app; production declares its graph, tests override it',
+      );
+    });
+
+    // The interface is a far smaller and more stable surface than the fake's name.
+    // `LlmEngine` cannot be renamed without a compile error at every call site,
+    // whereas `FakeLlmEngine` was only ever a convention — which is exactly how R5-F1
+    // and R6-F1 got through.
+    const approvedImplementations = {
+      // The device engine — the implementation production is *supposed* to reach.
+      'lib/engines/impl/gemma_llm_engine.dart',
+      // The fake, which lives inside the exemption where the scan above confines it.
+      'lib/engines/fakes/fake_llm_engine.dart',
+    };
+
+    // **Transitive, and that is the point rather than thoroughness.** Writing this
+    // as `supertype == 'LlmEngine'` is an enumeration of one hop, and I found the
+    // second hop by attacking my own fix before claiming it:
+    // `class ScriptedDemoEngine extends GemmaLlmEngine { @override generate… }`
+    // names `GemmaLlmEngine`, not `LlmEngine`, and extends an *approved* file's class
+    // — so a one-hop check misses it, the source scan sees only a legitimate import
+    // of an open file, and returning it straight out of `agentEngineProvider` needs
+    // no override for the sibling test to catch. It is the same "case adjacent to
+    // the fix" this file has produced six times, so it is closed the same way pass 1
+    // closes: iterate to a fixed point instead of looking one hop.
+    //
+    // Keyed on type *name* across the whole tree, which is coarser than resolution
+    // and deliberately so — a collision flags, and this guard is meant to fail
+    // closed.
+    Set<String> engineTypes(Map<String, String> sources) {
+      final supertypes = <String, Set<String>>{};
+      for (final source in sources.values) {
+        final collector = _SupertypeCollector();
+        parseString(
+          content: source,
+          throwIfDiagnostics: false,
+        ).unit.accept(collector);
+        for (final (declaration, supertype) in collector.found) {
+          supertypes.putIfAbsent(declaration, () => {}).add(supertype);
+        }
+      }
+
+      final engines = <String>{'LlmEngine'};
+      for (var changed = true; changed;) {
+        changed = false;
+        supertypes.forEach((declaration, parents) {
+          if (engines.contains(declaration)) return;
+          if (parents.any(engines.contains)) {
+            engines.add(declaration);
+            changed = true;
+          }
+        });
+      }
+      return engines;
+    }
+
+    test('every LlmEngine implementation lives in an approved file', () {
+      final sources = productionSources();
+      final engines = engineTypes(sources);
+      final declarations = <String, List<String>>{};
+      sources.forEach((path, source) {
+        final collector = _SupertypeCollector();
+        parseString(
+          content: source,
+          throwIfDiagnostics: false,
+        ).unit.accept(collector);
+        final implementing = collector.found
+            .where((f) => engines.contains(f.$2))
+            .map((f) => f.$1)
+            .toSet()
+            .toList();
+        if (implementing.isNotEmpty) declarations[path] = implementing;
+      });
+
+      expect(
+        declarations.keys.toSet().difference(approvedImplementations),
+        isEmpty,
+        reason:
+            'a new LlmEngine implementation is how a scripted engine reaches the '
+            'demo; adding one must be a visible edit to this set',
+      );
+      // Both approved files must still declare one, or the set has rotted into a
+      // list of paths that no longer mean anything — the failure mode of every
+      // allow-list this file has carried.
+      expect(declarations.keys.toSet(), approvedImplementations);
     });
   });
 }
