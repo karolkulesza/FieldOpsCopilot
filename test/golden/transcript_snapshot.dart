@@ -5,14 +5,23 @@
 /// of noise and get deleted. Four rules make that true, and each one is a
 /// decision rather than a formatting preference:
 ///
-/// 1. **Multi-line strings are stored as arrays of lines.** A grounded prompt is
-///    ~1600 characters over ~15 lines. As a single JSON string it is one
-///    enormous escaped line, and a one-word change to the preamble produces a
-///    diff nobody can read — which would fail TC-GOLD-02's actual requirement
-///    ("a readable diff"), not just its letter. Split on `\n`, which is lossless
-///    (`lines.join('\n') == original`, asserted in `golden_harness_test.dart`).
-///    The rule is applied to exactly the three strings the loop assembles from
-///    parts — the prompt, the turn text and the answer.
+/// 1. **Multi-line strings are stored as arrays of lines.** Measured over the six
+///    committed goldens, a one-document grounded prompt is **933 characters over
+///    14 lines** (620 over 10 for the no-match block), and the widest prompt in
+///    the suite — `recovery_ladder`'s fourth turn — is **2363 characters**. As a
+///    single JSON string any of those is one enormous escaped line, and a
+///    one-word change to the preamble produces a diff nobody can read — which
+///    would fail TC-GOLD-02's actual requirement ("a readable diff"), not just
+///    its letter. Split on `\n`, which is lossless (`lines.join('\n') ==
+///    original`, asserted in `golden_harness_test.dart`). The rule is applied to
+///    exactly the three strings the loop assembles from parts — the prompt, the
+///    turn text and the answer.
+///
+///    The figures are this task's own. An earlier version of this paragraph said
+///    "~1600 characters over ~15 lines", which is 1.9's measurement for a
+///    **two**-document prompt — and no scenario here retrieves two documents, so
+///    it described nothing in this suite (review finding R0-F9). The argument
+///    survives at 933 characters; the number had to be the measured one.
 /// 2. **The file is 7-bit ASCII.** `jsonEncode` passes U+0085, U+2028, U+2029 and
 ///    U+007F through raw (Task 1.9's R0-F1 measured that), and U+2028/U+2029 are
 ///    Unicode *mandatory* line breaks — so a golden could contain a character
@@ -136,7 +145,14 @@ Map<String, Object?> _rejection(GuardFailure failure) => {
   'message': failure.message,
 };
 
-/// One event, identity only. See the library doc for why payloads stay out.
+/// One event: its kind, plus the minimum that makes the *sequence* legible.
+///
+/// Not "identity only", which is what this line first said and which the function
+/// below contradicts (review finding R0-F8): `AgentToken` carries the full token
+/// text — three of `e102_native_tool_call`'s eight events are token text — and
+/// `AgentToolCallStarted` carries the tool name, the guard source and the repeat
+/// flag. What is actually omitted is the call's `arguments` and the outcome's
+/// payload, both of which live in `turns` exactly once. See the library doc.
 Map<String, Object?> _event(AgentEvent event) => switch (event) {
   AgentTurnStarted(:final index) => {'event': 'turnStarted', 'index': index},
   AgentToken(:final text) => {'event': 'token', 'text': text},

@@ -257,29 +257,60 @@ class _DriftRegion {
 String goldenPathFor(String scenario) =>
     p.join(goldenDirectory, '$scenario.json');
 
-/// Asserts [snapshot] matches the committed golden for [scenario], writing it
-/// instead when [goldensAreBeingUpdated].
+/// Reconciles [snapshot] against [file], writing it when [update] asks for a
+/// rewrite, and returns the verdict **without failing anything**.
 ///
-/// The only part of this library that touches the filesystem or fails a test.
-void verifyGolden({
+/// The filesystem half, taken as parameters rather than read from the ambient
+/// environment and the committed directory — which is review finding R0-F2 and
+/// the same lesson [reconcileGolden] already learned one layer up. With the
+/// `File` and the flag baked in, the write was a line **no test could reach**:
+/// `goldensAreBeingUpdated` reads the process environment, Dart cannot change it
+/// in-process, so under `flutter test` the rewrite branch never executed.
+/// Deleting both of its statements left all 552 tests green. Worse, the test that
+/// *claimed* to bind it wrote the file itself and never called this function, so
+/// the comment asserting the property was the only thing holding it.
+///
+/// Why the write matters enough to bind: `UPDATE_GOLDENS=1 flutter test
+/// test/golden` is the documented regeneration path, and a broken write would
+/// keep printing `Golden rewritten: <path>` and failing the suite while changing
+/// nothing on disk — from the operator's side, indistinguishable from working.
+GoldenReconciliation applyGolden({
   required String scenario,
   required Map<String, Object?> snapshot,
+  required File file,
+  required bool update,
 }) {
-  final path = goldenPathFor(scenario);
-  final file = File(path);
   final actual = encodeSnapshot(snapshot);
   final reconciliation = reconcileGolden(
     scenario: scenario,
-    path: path,
+    path: file.path,
     actual: actual,
     committed: file.existsSync() ? file.readAsStringSync() : null,
-    update: goldensAreBeingUpdated,
+    update: update,
   );
 
   if (reconciliation.verdict == GoldenVerdict.rewrite) {
     file.parent.createSync(recursive: true);
     file.writeAsStringSync(actual);
   }
+  return reconciliation;
+}
+
+/// Asserts [snapshot] matches the committed golden for [scenario], writing it
+/// instead when [goldensAreBeingUpdated].
+///
+/// The only part of this library that fails a test. Everything else it does is
+/// [applyGolden]'s, so that the write is reachable from an ordinary test.
+void verifyGolden({
+  required String scenario,
+  required Map<String, Object?> snapshot,
+}) {
+  final reconciliation = applyGolden(
+    scenario: scenario,
+    snapshot: snapshot,
+    file: File(goldenPathFor(scenario)),
+    update: goldensAreBeingUpdated,
+  );
   if (!reconciliation.passes) {
     fail(reconciliation.report);
   }

@@ -8,10 +8,11 @@ database to help technicians diagnose faults and produce structured repair plans
 
 > **Status: vertical slice under construction.** The runnable app shell, the
 > engine-abstraction layer, the encrypted database, offline retrieval, model
-> provisioning, the **on-device LLM engine** and the **agent loop** that ties
-> retrieval to inference are in place. STT and vision are still fakes, and the
-> golden snapshot suite and the demo screen that puts the loop on screen are the
-> next two tasks — they slot in behind the interfaces described below.
+> provisioning, the **on-device LLM engine**, the **agent loop** that ties
+> retrieval to inference, and the **golden snapshot suite** that pins the whole
+> transcript on every CI run are in place. STT and vision are still fakes, and
+> the demo screen that puts the loop on screen is the next task — it slots in
+> behind the interfaces described below.
 
 ## What's implemented so far
 
@@ -1607,18 +1608,19 @@ reason about, and none of them fails a single other test in this repo.
 | `e102_native_tool_call` | The spec's §5.2 walkthrough: code resolved structurally, one document compiled, a native tool call, the real stock figure in the second prompt. |
 | `e305_degraded_text_call` | The guard's text path, a name the model misspelled and the guard canonicalised, a zero-stock payload, and `escapeQuotes` over 1.2's hostile inquiry. |
 | `no_manual_match` | Retrieval empty → the no-match notice → no tool called. |
-| `iteration_cap` | Four turns with a *different* SKU each time, so the cap is what stops it rather than the repeat short circuit. Records the widest prompt `maxTurns` permits. |
-| `recovery_ladder` | A guard refusal, then a `missing_parameter` from the registry, then a good call, then the answer — exactly `maxTurns` turns *and* an answer. |
+| `iteration_cap` | Four turns with a *different* SKU each time, so the cap is what stops it rather than the repeat short circuit. |
+| `recovery_ladder` | A guard refusal, then a `missing_parameter` from the registry, then a good call, then the answer — exactly `maxTurns` turns *and* an answer. Holds the suite's widest prompt at 2363 characters (measured; `iteration_cap` is 2347). |
 | `unknown_tool_repeated` | An unresolvable name reaching `dispatch` as `unknown_tool` (not a guard failure), then the same call replayed rather than re-executed. |
 
 ### Why the snapshots look the way they do
 
 Four rules, each a decision rather than a formatting preference:
 
-1. **Multi-line strings are stored as arrays of lines.** A grounded prompt is
-   ~1600 characters over ~15 lines; as one JSON string a one-word change to the
-   preamble produces a diff nobody can read. Splitting on `\n` is lossless and
-   makes the diff line-precise.
+1. **Multi-line strings are stored as arrays of lines.** A one-document grounded
+   prompt is 933 characters over 14 lines, and the widest prompt in the suite is
+   2363; as one JSON string a one-word change to the preamble produces a diff
+   nobody can read. Splitting on `\n` is lossless and makes the diff
+   line-precise.
 2. **The files are 7-bit ASCII.** `jsonEncode` passes U+0085, U+2028, U+2029 and
    U+007F through raw, and two of those are Unicode *mandatory* line breaks — so
    a golden could otherwise hold a character that editors and diff tools treat as
@@ -1676,11 +1678,18 @@ like anything else.
 ### What this suite cannot do
 
 * **It cannot notice a field the serializer never recorded.** Deleting a key from
-  the serializer breaks all six goldens at once — the committed files *are* the
-  regression guard for its completeness — but adding a field to `AgentTurn` and
-  forgetting to serialise it is invisible. Flutter has no mirrors, so there is no
-  mechanical guard; the mitigation is that `transcript_snapshot.dart` lists what
-  it deliberately leaves out.
+  the serializer breaks a golden — the committed files *are* the regression guard
+  for its completeness — but adding a field to `AgentTurn` and forgetting to
+  serialise it is invisible. Flutter has no mirrors, so there is no mechanical
+  guard; the mitigation is that `transcript_snapshot.dart` lists what it
+  deliberately leaves out.
+
+  **That guard is not uniform, either.** It is total for the top-level and
+  per-turn keys, which every golden has; below them it thins out with coverage.
+  Invocations per golden are 1, 1, 4, 0, 2, 2, so the invocation and outcome keys
+  are guarded by five of six. Rejections are 0, 0, 0, 0, 1, 0 — so the two keys
+  under `_rejection` are guarded by `recovery_ladder` **alone**. That is the thin
+  spot, and naming it is better than averaging it away.
 * **It cannot tell a good transcript from a bad one.** A golden says "this is what
   the code does", never "this is what the code should do" — which is why each
   scenario carries semantic assertions beside the byte comparison. Without them a
