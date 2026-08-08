@@ -1639,24 +1639,46 @@ UPDATE_GOLDENS=1 flutter test test/golden
 ```
 
 Two properties of that flag matter more than the convenience. A rewrite that
-**changes** a file still fails the test, so a CI job with the flag set by
-accident cannot turn a real regression green — it can only be green when the flag
-changed nothing. And the diff is printed in the rewrite report too: a regenerated
-golden nobody read is the same problem as a golden nobody wrote.
+**changes** a file still fails the test, so one `flutter test` invocation with the
+flag set by accident cannot turn a real regression green — it can only be green
+when the flag changed nothing. (Stated at that width deliberately: *two*
+invocations in one job would be green, because the first rewrites and fails and
+the second matches. Worth not over-claiming rather than engineering around.) And
+the diff is printed in the rewrite report too: a regenerated golden nobody read is
+the same problem as a golden nobody wrote.
 
 ### What mutation testing changed
 
-**44 mutations, 0 survivors** — 25 against the serializer, 14 against the
+**47 mutations, 0 survivors** — 25 against the serializer, 17 against the
 comparator, and 5 against the committed snapshots themselves. That last group is
 the most direct evidence this task can produce, and it exists because 1.10 ships
 no `lib/` code: its production artefacts are the harness *and the goldens*, so
-tampering with a golden's stock figure, its turn count, its rejection reason, a
-line of its grounded prompt or its trailing newline is a mutation like any other.
-Every one of the five failed a test. A golden that can be edited with the suite
-still green is decoration.
+tampering with a golden's stock figure, its turn count, a line of its grounded
+prompt, its rejection reason or its trailing newline is a mutation like any other.
+Every one of the five failed a test (3, 4, 4, 1 and 4 tests respectively). A
+golden that can be edited with the suite still green is decoration.
 
-Three properties had **correct code and nothing holding it there**, all found
-while designing the mutation set rather than by review:
+Every row failed at least one test; the widest is `reconcileGolden` always
+returning `match`, at 13. Exactly one row — the mutation that makes the golden
+write fire on any mismatch — dirties a file it did not edit, and the harness
+**detects** that rather than relying on anyone to remember it.
+
+**The first version of these numbers was measured over corrupted data, and that
+is the most useful thing this task learned.** The harness reverted the file it had
+edited, not the surface a mutation can damage. One mutation makes the suite
+overwrite a committed golden, so the golden stayed corrupted, nine later rows
+carried collateral failures, and five rows never ran at all. Two runs of the
+*identical* harness then disagreed about it: in one, a later scenario test hit the
+corrupted golden, failed, and — because that mutation's whole point is that the
+write fires on any mismatch — **rewrote it correctly**, so the run self-healed and
+reported a clean 44/44 over dirty data; in the other it stayed corrupted and the
+run crashed. A harness that can silently repair its own damage is worse than one
+that crashes, because only the crash tells you. The fix is mechanical, not
+attentional: revert the whole surface, assert the whole surface is clean before
+each row, and record `git status` per row.
+
+Four properties had **correct code and nothing holding it there** — three found
+while designing the mutation set, and one the review found afterwards:
 
 * **The `Set` sort.** No scenario retrieves two hits whose insertion order
   differs from sorted order, so removing the sort left every test green. It is
@@ -1670,6 +1692,14 @@ while designing the mutation set rather than by review:
   whatever the ambient environment held, so widening it to `value != null` stayed
   green in a normal run. Extracted as `updateRequested(String?)` and tested
   against eight spellings.
+* **The golden write itself** (found in review). `verifyGolden` baked in both the
+  `File` and the environment read, and Dart cannot change the process environment
+  in-process — so under `flutter test` the rewrite branch never executed at all,
+  and deleting both of its statements left the whole suite green. The test that
+  *claimed* to bind it wrote the file itself and never called the function. Now
+  `applyGolden(file:, update:)` takes both as parameters and three tests exercise
+  it in a scratch directory. Same defect class as 1.4's `assert`ed clamp, one
+  layer further out: the code that checks the code is code.
 
 The pattern is the one this repo keeps recording: the lines a golden suite cannot
 check are exactly the lines *of the golden suite*, and they need ordinary tests
