@@ -6,13 +6,35 @@ import 'package:analyzer/dart/ast/visitor.dart';
 import 'package:path/path.dart' as p;
 import 'package:flutter_test/flutter_test.dart';
 
-/// Collects every type named in a supertype clause — `extends`, `implements`,
-/// `with`, `on` — paired with the declaration that names it.
+/// Collects every type named in a supertype position — `extends`, `implements`,
+/// `with`, `on`, and a class type alias's `= Superclass` — paired with the
+/// declaration that names it.
 ///
 /// Part of the fix for review finding **R6-F1**. Reaching for the AST rather than
 /// `grep -rn 'implements LlmEngine'` is not ceremony: the string form misses
 /// `implements LlmEngine<T>`, a wrapped clause, `extends` and `with`, and — the case
 /// this file has been burned by twice — anything inside a comment counts.
+///
+/// **This is a list of the five declaration forms Dart has, and R7-F2 is what a
+/// missing one costs.** The first version handled four; `class X = S with M
+/// implements I;` dispatches to [visitClassTypeAlias], which was not overridden, so
+/// `class ScriptedDemoEngine = Object with _ScriptedBody implements LlmEngine;` in a
+/// plainly non-approved file was invisible — analyze clean, 654 tests green, and the
+/// matched control differing by one `=` was caught.
+///
+/// **Two things make the list honest rather than another patch.** First, every form
+/// is now bound by `the supertype collector sees every declaration form Dart has`,
+/// so a sixth form is a visible failure rather than a silent miss — that test is the
+/// point, not this comment. Second, the alternative was measured rather than
+/// dismissed: an `AnalysisContextCollection` over `lib/` answers this by construction
+/// via `allSupertypes` — no forms to enumerate, no closure to iterate — and it
+/// **works**, finding exactly the two real engines. It costs **10.3s** on this
+/// machine, roughly doubling the whole suite, and inside `flutter test` it needs an
+/// explicit `sdkPath` because the analyzer cannot locate the SDK from the Flutter
+/// test runner (`bin/cache/artifacts/engine/version` is absent). Hardcoding an SDK
+/// path into this project's most important guard trades a bounded enumeration for an
+/// environment dependency that fails differently on every machine, so it is recorded
+/// here as the way to retire the list rather than taken.
 class _SupertypeCollector extends RecursiveAstVisitor<void> {
   final found = <(String declaration, String supertype)>[];
 
@@ -55,6 +77,20 @@ class _SupertypeCollector extends RecursiveAstVisitor<void> {
       node.implementsClause?.interfaces,
     );
     super.visitExtensionTypeDeclaration(node);
+  }
+
+  /// `class X = S with M implements I;` — **R7-F2.** The superclass is a bare
+  /// [NamedType] rather than an `ExtendsClause`, which is why it needs naming
+  /// separately from the four above.
+  @override
+  void visitClassTypeAlias(ClassTypeAlias node) {
+    // `name`, not `namePart` — a class type alias is a `TypeAlias`, so it carries
+    // the plain token that `ClassDeclaration` replaced with a `ClassNamePart`.
+    final name = node.name.lexeme;
+    found.add((name, node.superclass.name.lexeme));
+    _record(name, node.withClause.mixinTypes);
+    _record(name, node.implementsClause?.interfaces);
+    super.visitClassTypeAlias(node);
   }
 }
 
@@ -957,9 +993,17 @@ void main() {
     //
     // No allow-list, deliberately: there is nothing to allow today, and the first
     // production override should be a conversation rather than an entry in a set.
-    test('no production file overrides a provider', () {
+    /// Override sites in [sources], as `path -> ['overrideWith(…)', …]`.
+    ///
+    /// Takes its sources as a parameter for the reason `scan` does, and R7-F3 is what
+    /// it cost not to: both sink detectors used to read `lib/` directly, so neither
+    /// had a positive path and **both could be disabled with the file green.** That
+    /// is R1-F2 verbatim, on new code, five rounds later — and it is *how* R7-F1 and
+    /// R7-F2 survived. A detector that has only ever returned empty is not a
+    /// detector.
+    Map<String, List<String>> overrideSites(Map<String, String> sources) {
       final offenders = <String, List<String>>{};
-      productionSources().forEach((path, source) {
+      sources.forEach((path, source) {
         final collector = _OverrideCollector();
         parseString(
           content: source,
@@ -969,9 +1013,12 @@ void main() {
           offenders[path] = collector.sites.map((s) => s.$2).toList();
         }
       });
+      return offenders;
+    }
 
+    test('no production file overrides a provider', () {
       expect(
-        offenders,
+        overrideSites(productionSources()),
         isEmpty,
         reason:
             'overriding a provider in lib/ is how every fake in this review reached '
@@ -983,11 +1030,18 @@ void main() {
     // `LlmEngine` cannot be renamed without a compile error at every call site,
     // whereas `FakeLlmEngine` was only ever a convention — which is exactly how R5-F1
     // and R6-F1 got through.
+    //
+    // **Keyed on `(file, declaration)`, not on file — R7-F1.** A set of *files* while
+    // the property is per-*declaration* means appending a second class to an
+    // already-approved file is invisible: `declarations.keys` is unchanged, so even
+    // the anti-rot equality below still passed. A scripted engine appended to
+    // `gemma_llm_engine.dart` and returned from `agentEngineProvider` needed no
+    // override, no new file and no new import, and the suite stayed 654 green.
     const approvedImplementations = {
       // The device engine — the implementation production is *supposed* to reach.
-      'lib/engines/impl/gemma_llm_engine.dart',
+      ('lib/engines/impl/gemma_llm_engine.dart', 'GemmaLlmEngine'),
       // The fake, which lives inside the exemption where the scan above confines it.
-      'lib/engines/fakes/fake_llm_engine.dart',
+      ('lib/engines/fakes/fake_llm_engine.dart', 'FakeLlmEngine'),
     };
 
     // **Transitive, and that is the point rather than thoroughness.** Writing this
@@ -1031,35 +1085,165 @@ void main() {
       return engines;
     }
 
-    test('every LlmEngine implementation lives in an approved file', () {
-      final sources = productionSources();
+    /// Every `(file, declaration)` in [sources] that reaches `LlmEngine`.
+    Set<(String, String)> engineDeclarations(Map<String, String> sources) {
       final engines = engineTypes(sources);
-      final declarations = <String, List<String>>{};
+      final declarations = <(String, String)>{};
       sources.forEach((path, source) {
         final collector = _SupertypeCollector();
         parseString(
           content: source,
           throwIfDiagnostics: false,
         ).unit.accept(collector);
-        final implementing = collector.found
-            .where((f) => engines.contains(f.$2))
-            .map((f) => f.$1)
-            .toSet()
-            .toList();
-        if (implementing.isNotEmpty) declarations[path] = implementing;
+        for (final (declaration, supertype) in collector.found) {
+          if (engines.contains(supertype)) {
+            declarations.add((path, declaration));
+          }
+        }
       });
+      return declarations;
+    }
+
+    test('every LlmEngine implementation lives in an approved file', () {
+      final declared = engineDeclarations(productionSources());
 
       expect(
-        declarations.keys.toSet().difference(approvedImplementations),
+        declared.difference(approvedImplementations),
         isEmpty,
         reason:
             'a new LlmEngine implementation is how a scripted engine reaches the '
             'demo; adding one must be a visible edit to this set',
       );
-      // Both approved files must still declare one, or the set has rotted into a
-      // list of paths that no longer mean anything — the failure mode of every
+      // Both approved declarations must still exist, or the set has rotted into a
+      // list of names that no longer mean anything — the failure mode of every
       // allow-list this file has carried.
-      expect(declarations.keys.toSet(), approvedImplementations);
+      expect(declared, approvedImplementations);
+    });
+
+    // **The positive path for both sinks — R7-F3.** Everything above asserts the real
+    // tree is clean, which a detector that never fires satisfies perfectly. These run
+    // the same two functions over trees built to offend, and over one built not to.
+    group('the sinks can actually detect', () {
+      test('an overrideWith call is reported', () {
+        expect(
+          overrideSites({
+            'main.dart':
+                'void main() {\n'
+                '  runApp(ProviderScope(overrides: const []));\n'
+                '}\n',
+            'other.dart':
+                'final x = engineProvider.overrideWith((ref) => 1);\n',
+          }),
+          {
+            'main.dart': ['overrides: …'],
+            'other.dart': ['overrideWith(…)'],
+          },
+        );
+      });
+
+      test('a file that overrides nothing is not reported', () {
+        expect(
+          overrideSites({
+            'clean.dart':
+                'final engineProvider = Provider((ref) => RealEngine());\n',
+          }),
+          isEmpty,
+          reason:
+              'a detector that reports everything passes the real-tree assertion '
+              'for the wrong reason',
+        );
+      });
+
+      test('a direct implementation is reported', () {
+        expect(
+          engineDeclarations({
+            'engine.dart': 'class Scripted implements LlmEngine {}\n',
+          }),
+          {('engine.dart', 'Scripted')},
+        );
+      });
+
+      // The chain that defeated the one-hop version, as a permanent test rather
+      // than the hand-run control it was in round 7.
+      test('a two-hop extends chain is reported', () {
+        expect(
+          engineDeclarations({
+            'gemma.dart': 'class Gemma implements LlmEngine {}\n',
+            'scripted.dart': 'class Scripted extends Gemma {}\n',
+          }),
+          {('gemma.dart', 'Gemma'), ('scripted.dart', 'Scripted')},
+        );
+      });
+
+      // **Declared child-first, and that ordering is the whole test.** A single pass
+      // that happens to visit `A` before `C` grows `engines` as it goes and finds all
+      // three anyway — so written parent-first this passes with the fixed-point loop
+      // replaced by one sweep, which I measured before trusting the comment I had
+      // written. Child-first, one sweep sees `C extends B` while `B` is not yet known
+      // to be an engine, and finds only `A`.
+      test(
+        'a three-hop chain is reported whatever order it is declared in',
+        () {
+          expect(
+            engineDeclarations({
+              'c.dart': 'class C extends B {}\n',
+              'b.dart': 'class B extends A {}\n',
+              'a.dart': 'class A implements LlmEngine {}\n',
+            }).map((d) => d.$2).toSet(),
+            {'A', 'B', 'C'},
+          );
+        },
+      );
+
+      test('a file declaring no engine is not reported', () {
+        expect(
+          engineDeclarations({
+            'clean.dart': 'class Widget extends StatelessWidget {}\n',
+          }),
+          isEmpty,
+        );
+      });
+
+      // **R7-F1's shape, permanently.** Two declarations in one file: approving the
+      // file must not approve the second declaration.
+      test('a second declaration in the same file is reported separately', () {
+        expect(
+          engineDeclarations({
+            'gemma.dart':
+                'class Gemma implements LlmEngine {}\n'
+                'class Scripted implements LlmEngine {}\n',
+          }),
+          {('gemma.dart', 'Gemma'), ('gemma.dart', 'Scripted')},
+        );
+      });
+
+      // **R7-F2's shape, and the binding for the enumeration in [_SupertypeCollector].**
+      // Every declaration form Dart has that can name a supertype, in one corpus: if a
+      // sixth is added to the language, or one of the five stops being visited, this
+      // fails rather than going quiet.
+      test('the supertype collector sees every declaration form Dart has', () {
+        final declared = engineDeclarations({
+          'forms.dart':
+              'class AsClass implements LlmEngine {}\n'
+              'class AsExtends extends AsClass {}\n'
+              'mixin AsMixin on AsClass {}\n'
+              'enum AsEnum implements LlmEngine { one }\n'
+              'extension type AsExtensionType(int v) implements LlmEngine {}\n'
+              'mixin _Body {}\n'
+              'class AsAlias = AsClass with _Body;\n'
+              'class AsAliasImplements = Object with _Body implements LlmEngine;\n',
+        }).map((d) => d.$2).toSet();
+
+        expect(declared, {
+          'AsClass',
+          'AsExtends',
+          'AsMixin',
+          'AsEnum',
+          'AsExtensionType',
+          'AsAlias',
+          'AsAliasImplements',
+        });
+      });
     });
   });
 }
