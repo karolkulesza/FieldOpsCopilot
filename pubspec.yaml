@@ -67,6 +67,16 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   drift_dev: ^2.34.0
   build_runner: ^2.15.1
+  # Test-only, and it earns its place by ending a sequence rather than shortening
+  # it. `test/services/inference/no_fake_in_production_test.dart` guards the one
+  # property this app cannot lose — that production never answers from a fake — by
+  # reading Dart source. Four review rounds found four ways past a regex doing that
+  # job, each the case adjacent to the last: a wrapper, an export barrel, a
+  # conditional import, a directive `dart format` had wrapped. The fifth round found
+  # three more, and all of them turned on a single character inside a *comment*. A
+  # regex cannot know what a comment is; the parser does. Already present
+  # transitively via `drift_dev`; declared here because the guard imports it.
+  analyzer: ^12.1.0
   # Harness for the integration tier (Task 1.7's TC-PROV-E2E-01 onward). Lives in
   # `integration_test/`, which `flutter test` does not run, so CI stays host-only.
   integration_test:
