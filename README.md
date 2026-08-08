@@ -69,6 +69,12 @@ database to help technicians diagnose faults and produce structured repair plans
   the loop carries the conversation as text, and the transcript it appends is
   built so the model cannot forge the loop's own block markers. See _The agent
   loop_ below.
+- **`llm_golden` snapshot suite** — six scripted agent runs whose entire
+  transcript (retrieval, every prompt sent, every token returned, every tool call
+  and its payload, the event sequence and the stop reason) is committed as JSON
+  and compared byte-for-byte on every CI run. Catches the regressions a property
+  test never thinks to assert: a reworded preamble, a reordered document field,
+  a fault code that stopped resolving. See _Golden transcripts_ below.
 - **Model provisioning** — download-with-progress, streaming SHA-256 verification
   against a pinned digest, atomic install into no-backup storage, and a visible
   "model ready" state on the home screen, with the trigger to fetch and verify.
@@ -1571,6 +1577,87 @@ TC-AGENT-E2E-01 is **written but not yet run**: it needs the demo device and the
 2.6GB artifact, and it skips with an actionable reason without them. Its result
 is not recorded anywhere as a measurement until it has run.
 
+## Golden transcripts
+
+Six scripted agent runs, each snapshotted whole into
+`test/golden/snapshots/<scenario>.json` and compared byte-for-byte on every CI
+run. The suite lives in `test/golden/` and splits three ways: the scenarios
+(`llm_golden_test.dart`), the serializer (`transcript_snapshot.dart`) and the
+comparator (`golden_file.dart`).
+
+Only the **model** is faked. Retrieval, prompt compilation, the loop, the guard,
+the registry and the database are the real ones, over the real seeded asset — so
+a golden is a statement about the whole vertical slice rather than about one
+class.
+
+### What a golden buys that a property test does not
+
+Tasks 1.2–1.9 assert *properties*: this prompt contains that marker, that payload
+reached the next turn. A golden asserts the **whole artefact**, which is the only
+assertion that notices a change nobody thought to write a property about — a
+reworded preamble, a reordered document field, an extra blank line between
+transcript blocks, a fault code that stopped resolving, a tool payload that
+gained a key. Every one of those changes the string a 2.6GB model is asked to
+reason about, and none of them fails a single other test in this repo.
+
+### The six scenarios
+
+| Scenario | What it pins |
+|---|---|
+| `e102_native_tool_call` | The spec's §5.2 walkthrough: code resolved structurally, one document compiled, a native tool call, the real stock figure in the second prompt. |
+| `e305_degraded_text_call` | The guard's text path, a name the model misspelled and the guard canonicalised, a zero-stock payload, and `escapeQuotes` over 1.2's hostile inquiry. |
+| `no_manual_match` | Retrieval empty → the no-match notice → no tool called. |
+| `iteration_cap` | Four turns with a *different* SKU each time, so the cap is what stops it rather than the repeat short circuit. Records the widest prompt `maxTurns` permits. |
+| `recovery_ladder` | A guard refusal, then a `missing_parameter` from the registry, then a good call, then the answer — exactly `maxTurns` turns *and* an answer. |
+| `unknown_tool_repeated` | An unresolvable name reaching `dispatch` as `unknown_tool` (not a guard failure), then the same call replayed rather than re-executed. |
+
+### Why the snapshots look the way they do
+
+Four rules, each a decision rather than a formatting preference:
+
+1. **Multi-line strings are stored as arrays of lines.** A grounded prompt is
+   ~1600 characters over ~15 lines; as one JSON string a one-word change to the
+   preamble produces a diff nobody can read. Splitting on `\n` is lossless and
+   makes the diff line-precise.
+2. **The files are 7-bit ASCII.** `jsonEncode` passes U+0085, U+2028, U+2029 and
+   U+007F through raw, and two of those are Unicode *mandatory* line breaks — so
+   a golden could otherwise hold a character that editors and diff tools treat as
+   a newline while the harness's own line count does not. They are re-escaped as
+   `\uXXXX`, which keeps the file valid JSON and lossless (asserted, not argued).
+3. **Nothing environmental is recorded** — no timestamps, no temp paths, no
+   durations. `ToolFailure.cause` is deliberately absent: it quotes the database
+   file path, which is a fresh temp directory every run.
+4. **`Set`-typed retrieval hits are sorted.** They iterate in insertion order
+   today, but that is a property of `LinkedHashSet` rather than of the type.
+
+### Regenerating
+
+```bash
+UPDATE_GOLDENS=1 flutter test test/golden
+```
+
+Two properties of that flag matter more than the convenience. A rewrite that
+**changes** a file still fails the test, so a CI job with the flag set by
+accident cannot turn a real regression green — it can only be green when the flag
+changed nothing. And the diff is printed in the rewrite report too: a regenerated
+golden nobody read is the same problem as a golden nobody wrote.
+
+### What this suite cannot do
+
+* **It cannot notice a field the serializer never recorded.** Deleting a key from
+  the serializer breaks all six goldens at once — the committed files *are* the
+  regression guard for its completeness — but adding a field to `AgentTurn` and
+  forgetting to serialise it is invisible. Flutter has no mirrors, so there is no
+  mechanical guard; the mitigation is that `transcript_snapshot.dart` lists what
+  it deliberately leaves out.
+* **It cannot tell a good transcript from a bad one.** A golden says "this is what
+  the code does", never "this is what the code should do" — which is why each
+  scenario carries semantic assertions beside the byte comparison. Without them a
+  serializer that emitted `{}` would keep all six green forever.
+* **It is not a model evaluation, and it is not a device test.** The run is
+  deterministic only because `FakeLlmEngine` is; a golden over the device engine
+  would be a flake generator.
+
 ## Getting started
 
 Requires the Flutter SDK (stable channel, Dart 3.12+). iOS 16.0+ / a 64-bit
@@ -1596,7 +1683,7 @@ Tests are split into two tiers:
 - **Unit tier** (`test/`) — pure Dart, deterministic, runs in CI on every commit
   (engine fakes, database, FTS, seeding, retrieval routing and prompt
   compilation, the agent tool registry, the tool-call guard, the agent loop,
-  model provisioning, widget tests). The HTTP
+  the golden transcript suite, model provisioning, widget tests). The HTTP
   transport is covered against a loopback `HttpServer` rather than a mock, because
   the behaviour worth testing is HTTP behaviour: redirect hops, `Content-Length`
   vs. chunked, and which requests carry the access token. The seeding suite reads
@@ -1608,7 +1695,13 @@ Tests are split into two tiers:
   the bundled manual stopped producing them. The compiler's remaining groups —
   layout, the document cap, and the untrusted-inquiry defence — deliberately use
   hand-built entries, because what they assert is the compiler's own formatting
-  rather than anything about the corpus.
+  rather than anything about the corpus. The **golden** suite is the strongest
+  version of the same rule: it drives the real router, compiler, loop, guard and
+  registry over the shipped asset and snapshots the whole transcript, so a change
+  to the bundled manual, to bm25 ranking or to the prompt template all surface as
+  a readable diff rather than as nothing. Regenerate with
+  `UPDATE_GOLDENS=1 flutter test test/golden`; see _Golden transcripts_ above for
+  what the flag deliberately will not let you do.
 - **Integration tier** (`integration_test/`) — on-device runs against real
   backends. `flutter test` does not pick this directory up, so CI stays host-only.
   Both suites **skip** with an actionable message unless the model defines above are
