@@ -72,8 +72,8 @@ Map<String, Object?> transcriptSnapshot({
   'inquiry': retrieval.rawQuery,
   'retrieval': {
     'entryIds': retrieval.entryIds,
-    'codeHitIds': _sorted(retrieval.codeHitIds),
-    'ftsHitIds': _sorted(retrieval.ftsHitIds),
+    'codeHitIds': sortedHits(retrieval.codeHitIds),
+    'ftsHitIds': sortedHits(retrieval.ftsHitIds),
     'resolvedCodes': retrieval.resolvedCodes,
     'unresolvedCodes': retrieval.unresolvedCodes,
     'searchedTerms': retrieval.searchedTerms,
@@ -170,7 +170,15 @@ Map<String, Object?> _event(AgentEvent event) => switch (event) {
 /// through [transcriptSnapshot] would test the caller.
 List<String> lines(String text) => text.split('\n');
 
-List<String> _sorted(Iterable<String> values) => values.toList()..sort();
+/// [values] in a defined order, for the `Set`-typed retrieval hits.
+///
+/// Public for the same reason [lines] is: what it buys is a property (a snapshot
+/// cannot depend on `LinkedHashSet`'s insertion order), and no committed scenario
+/// currently retrieves two hits in an order that differs from sorted — so this is
+/// the only place the property can be bound. Bound by
+/// `golden_harness_test.dart`'s 'set-typed retrieval hits are sorted, not
+/// insertion-ordered', which builds the disagreeing case by hand.
+List<String> sortedHits(Iterable<String> values) => values.toList()..sort();
 
 /// The exact bytes a golden file holds: two-space-indented JSON, ASCII only,
 /// one trailing newline.
