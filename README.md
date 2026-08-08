@@ -1642,6 +1642,37 @@ accident cannot turn a real regression green — it can only be green when the f
 changed nothing. And the diff is printed in the rewrite report too: a regenerated
 golden nobody read is the same problem as a golden nobody wrote.
 
+### What mutation testing changed
+
+**44 mutations, 0 survivors** — 25 against the serializer, 14 against the
+comparator, and 5 against the committed snapshots themselves. That last group is
+the most direct evidence this task can produce, and it exists because 1.10 ships
+no `lib/` code: its production artefacts are the harness *and the goldens*, so
+tampering with a golden's stock figure, its turn count, its rejection reason, a
+line of its grounded prompt or its trailing newline is a mutation like any other.
+Every one of the five failed a test. A golden that can be edited with the suite
+still green is decoration.
+
+Three properties had **correct code and nothing holding it there**, all found
+while designing the mutation set rather than by review:
+
+* **The `Set` sort.** No scenario retrieves two hits whose insertion order
+  differs from sorted order, so removing the sort left every test green. It is
+  now bound by a test that builds the disagreeing case by hand — which is why
+  `sortedHits` is public rather than private.
+* **`verifyGolden`'s `fail()`.** TC-GOLD-02 deliberately goes through
+  `reconcileGolden` (it needs a *value*, since a test cannot assert that a
+  failure was readable if the failure aborts it), which left the abort itself
+  unbound: deleting it made all six scenario tests pass unconditionally.
+* **The update-flag predicate.** Inline, it could only ever be exercised with
+  whatever the ambient environment held, so widening it to `value != null` stayed
+  green in a normal run. Extracted as `updateRequested(String?)` and tested
+  against eight spellings.
+
+The pattern is the one this repo keeps recording: the lines a golden suite cannot
+check are exactly the lines *of the golden suite*, and they need ordinary tests
+like anything else.
+
 ### What this suite cannot do
 
 * **It cannot notice a field the serializer never recorded.** Deleting a key from
