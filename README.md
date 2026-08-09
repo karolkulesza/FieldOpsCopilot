@@ -1688,6 +1688,19 @@ a number. The harness now names the known-flaky tests and reports a row whose
 failing set is a *subset* of them as `INCONCLUSIVE` rather than as a kill, so the
 case is detected instead of assumed away.
 
+Two more rows are refused the same way, on the same principle — a kill is a failure
+the mutation *caused*, so a row with nothing attributable to point at is not one. A
+non-zero exit that names no test at all is `INCONCLUSIVE`. And a mutation that does
+not **compile** is `COMPILE_ERROR`: no test runs, the reporter emits one
+`loading <path>` line per suite file, and those lines look exactly like failing tests
+to the harness's parser — so before this was fixed, a mutation that would have
+*survived* was recorded as killed with several pieces of apparent evidence. That is
+the strongest false confidence the harness could produce, and it was unreachable-by-
+accident rather than by design: the old detector required two substrings on one line
+that the runner prints on separate lines (review finding R3-F1). It changes none of
+the numbers above — no row in any completed run has a `loading` entry — but it was
+live for the next mutation anyone wrote.
+
 **The first version of these numbers came from a harness that could corrupt its
 own inputs, and that is the most useful thing this task learned.** It reverted the
 file it had *edited*, not the surface a mutation can *damage* — and one mutation
