@@ -1708,9 +1708,12 @@ as `KILLED`: a row about which **nothing was learned**, filed as a kill, with se
 pieces of apparent evidence. At worst that hides a mutation that would have
 *survived*; some non-compiling mutations would have been killed and were filed
 correctly by accident. Which of the two it was is exactly what cannot be known, since
-the tests that would have decided it are the ones that did not run. Nor is the captured set an enumeration of what broke: 3
-`loading` names were captured against **2** actual `Failed to load` failures, the
-extra one an unrelated suite file, so it is a reporter artefact rather than a list.
+the tests that would have decided it are the ones that did not run.
+
+Nor is the captured set an enumeration of what broke: **3** `loading` names were
+captured against **2** actual `Failed to load` failures, the extra one an unrelated
+suite file — a reporter artefact rather than a list. It is enough to *classify* the
+row, which is all the harness uses it for.
 
 The bug was unreachable-by-accident rather than by design — the old detector wanted
 two substrings on one line that the runner prints on separate lines (R3-F1). It
