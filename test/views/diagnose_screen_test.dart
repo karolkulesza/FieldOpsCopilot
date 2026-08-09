@@ -1055,6 +1055,118 @@ void main() {
       );
     });
 
+    // **The same property as R1-F1, driven by a finger instead of a `jumpTo`** —
+    // review finding **R12-F0**, reported from the device as "I could not scroll
+    // anything" while the answer streamed.
+    //
+    // R1-F1's test above scrolls with `_scroll.jumpTo(0)`. That is a *programmatic*
+    // move with no drag to dispose, so it exercises the offset guard and never the
+    // mechanism that actually failed: `jumpTo` opens with `goIdle()`, `goIdle`
+    // disposes the active drag, and every token therefore cancelled the reader's
+    // in-flight gesture before it could travel the `_followSlack` pixels that would
+    // have released the follow. The panel was not merely overruling the reader, it
+    // was unscrollable — and that presents as the app being busy, which is why it
+    // survived eleven review rounds, two device runs and a screen recording.
+    //
+    // Measured with the matched control below: the *same* 288px drag moves the
+    // offset when no tokens arrive and does not when they do. Both directions are
+    // asserted, because a fix that simply stopped following would pass the first
+    // assertion alone.
+    testWidgets('a finger can drag the panel while tokens are arriving', (
+      tester,
+    ) async {
+      Future<(double before, double afterDrag, double afterNextToken)> drag({
+        required bool tokensArrive,
+      }) async {
+        final long = List.generate(80, (i) => 'Procedure step $i.').join('\n');
+        final container = await pumpState(
+          tester,
+          job: const FieldJobState(
+            phase: FieldJobPhase.thinking,
+            inquiry: 'cabin vibrating, E-102',
+            streamedText: 'Isolate the main power bus.',
+          ),
+        );
+        await pushJob(
+          tester,
+          container,
+          FieldJobState(
+            phase: FieldJobPhase.thinking,
+            inquiry: 'cabin vibrating, E-102',
+            streamedText: long,
+          ),
+        );
+
+        final before = _panelScrollController(tester).offset;
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.byKey(DiagnoseKeys.resultPanel)),
+        );
+        await tester.pump();
+
+        var text = long;
+        for (var i = 0; i < 12; i++) {
+          // Positive dy drags the finger *down*, revealing earlier text, so a
+          // working panel moves the offset down from the bottom.
+          await gesture.moveBy(const Offset(0, 24));
+          if (tokensArrive) {
+            text = '$text\nProcedure step ${80 + i}.';
+            (container.read(fieldJobViewModelProvider.notifier)
+                    as _StubViewModel)
+                .push(
+                  FieldJobState(
+                    phase: FieldJobPhase.thinking,
+                    inquiry: 'cabin vibrating, E-102',
+                    streamedText: text,
+                  ),
+                );
+          }
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        await gesture.up();
+        await tester.pumpAndSettle();
+        final afterDrag = _panelScrollController(tester).offset;
+
+        // One more token *after* the finger lifts. This is R1-F1's own property,
+        // asserted for the first time against a scroll a reader actually performed:
+        // the drag flag is clear by now, so the offset guard alone must hold the
+        // position.
+        (container.read(fieldJobViewModelProvider.notifier) as _StubViewModel)
+            .push(
+              FieldJobState(
+                phase: FieldJobPhase.thinking,
+                inquiry: 'cabin vibrating, E-102',
+                streamedText: '$text\nProcedure step 99.',
+              ),
+            );
+        await tester.pump();
+        return (before, afterDrag, _panelScrollController(tester).offset);
+      }
+
+      final control = await drag(tokensArrive: false);
+      expect(
+        control.$2,
+        lessThan(control.$1),
+        reason: 'control: with nothing streaming, a drag must move the panel',
+      );
+
+      final streaming = await drag(tokensArrive: true);
+      expect(
+        streaming.$2,
+        lessThan(streaming.$1),
+        reason:
+            'the reader dragged 288px while tokens arrived; before R12-F0 the '
+            'offset ended pinned to maxScrollExtent because each token disposed '
+            'the drag',
+      );
+      expect(
+        streaming.$3,
+        streaming.$2,
+        reason:
+            'and the token after the finger lifted must not haul them back — '
+            'R1-F1, from a real drag rather than a jumpTo',
+      );
+    });
+
     // **The slack's value, bound in the direction that constrains it** — review
     // finding R2-F4 measured that `_followSlack = 0` survived the suite, so nothing
     // held the constant except an upper bound. A reader who nudges up by less than a

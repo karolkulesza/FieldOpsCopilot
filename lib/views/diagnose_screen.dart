@@ -332,6 +332,28 @@ class _ResultPanel extends StatefulWidget {
 class _ResultPanelState extends State<_ResultPanel> {
   final ScrollController _scroll = ScrollController();
 
+  /// Whether a finger is on the panel right now.
+  ///
+  /// **This exists because [R1-F1]'s fix closed the case its test simulates and not
+  /// the case the finding described** — review finding **R12-F0**, found on device
+  /// by a technician who reported "I could not scroll anything" while the answer
+  /// streamed, which reads as the app being busy rather than as a defect.
+  ///
+  /// The offset check below is necessary and was not sufficient. `jumpTo` begins
+  /// with `goIdle()` (`scroll_position_with_single_context.dart`), and `goIdle`
+  /// **disposes the active drag**. So every token cancelled the reader's in-flight
+  /// gesture before it could accumulate the [_followSlack] pixels that would have
+  /// released the follow — self-reinforcing, because escaping required movement the
+  /// follow kept destroying. Measured with a matched control: an identical 288px
+  /// drag moved the offset 1692 → 1404 with no tokens arriving, and 1692 → 1980
+  /// (pinned to the extent) with tokens arriving.
+  ///
+  /// R1-F1's regression test could not see it, and that is the lesson worth keeping:
+  /// it scrolls with `_scroll.jumpTo(0)`, a *programmatic* move with no drag to
+  /// dispose, so it exercises the offset guard and never the mechanism that failed.
+  /// The test now beside it drives a real [TestGesture] instead.
+  bool _readerIsDragging = false;
+
   @override
   void dispose() {
     _scroll.dispose();
@@ -383,6 +405,10 @@ class _ResultPanelState extends State<_ResultPanel> {
     if (widget.job.displayText.length <= oldWidget.job.displayText.length) {
       return;
     }
+    // A finger is down: never jump. See [_readerIsDragging] — jumping here does not
+    // merely overrule the reader, it destroys the gesture they are in the middle of,
+    // so the offset guard below can never be reached.
+    if (_readerIsDragging) return;
 
     // Nothing scrollable yet (the first tokens of a short answer) counts as at the
     // bottom, which is what makes the panel follow from the start.
@@ -415,41 +441,67 @@ class _ResultPanelState extends State<_ResultPanel> {
         color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
       ),
-      child: SingleChildScrollView(
-        controller: _scroll,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (job.retrieval != null) ...[
-              _GroundingLine(job: job),
-              const Divider(height: 20),
-            ],
-            for (final invocation in job.invocations)
-              _CompletedTool(invocation: invocation),
-            // One line per refusal, counted rather than iterated, because nothing
-            // about the individual failure is rendered. `GuardFailure.message` is
-            // written *for the model* ("call the tool again with a tool name and
-            // JSON arguments"), so it is not a sentence to show a technician — and
-            // it deliberately does not reach the screen even as a `semanticsLabel`,
-            // which would replace the readable line above with it for anyone using
-            // assistive technology.
-            for (var i = 0; i < job.rejectedCalls.length; i++)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  'The assistant sent a malformed lookup and was asked to retry.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.outline,
+      // `dragDetails != null` names the concept precisely — *a reader's* scroll, as
+      // opposed to one this panel caused — and that is the whole of its
+      // justification. **It is not load-bearing today and no test distinguishes it,
+      // which I checked by deleting it rather than by reasoning:** the suite stays
+      // green. The latch it looks like it prevents does not exist, because `jumpTo`
+      // fires `didStartScroll()` and `didEndScroll()` within one synchronous call,
+      // so the flag would be set and cleared before any token could observe it.
+      // Kept because the narrower predicate is the one that stays correct if a
+      // future scroll source starts emitting these, and recorded as unbound rather
+      // than dressed up as a guard.
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (notification is ScrollStartNotification &&
+              notification.dragDetails != null) {
+            _readerIsDragging = true;
+          } else if (notification is ScrollEndNotification) {
+            // Cleared on *any* end, including the one that follows the momentum
+            // fling after the finger lifts, so a reader who flings back to the
+            // bottom resumes following rather than being stranded.
+            _readerIsDragging = false;
+          }
+          // Not consumed: this observes, and something above may also want these.
+          return false;
+        },
+        child: SingleChildScrollView(
+          controller: _scroll,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (job.retrieval != null) ...[
+                _GroundingLine(job: job),
+                const Divider(height: 20),
+              ],
+              for (final invocation in job.invocations)
+                _CompletedTool(invocation: invocation),
+              // One line per refusal, counted rather than iterated, because nothing
+              // about the individual failure is rendered. `GuardFailure.message` is
+              // written *for the model* ("call the tool again with a tool name and
+              // JSON arguments"), so it is not a sentence to show a technician — and
+              // it deliberately does not reach the screen even as a `semanticsLabel`,
+              // which would replace the readable line above with it for anyone using
+              // assistive technology.
+              for (var i = 0; i < job.rejectedCalls.length; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    'The assistant sent a malformed lookup and was asked to retry.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.outline,
+                    ),
                   ),
                 ),
-              ),
-            if (job.activeTool != null) _ToolActivity(started: job.activeTool!),
-            if (job.invocations.isNotEmpty ||
-                job.rejectedCalls.isNotEmpty ||
-                job.activeTool != null)
-              const SizedBox(height: 12),
-            _Body(job: job),
-          ],
+              if (job.activeTool != null)
+                _ToolActivity(started: job.activeTool!),
+              if (job.invocations.isNotEmpty ||
+                  job.rejectedCalls.isNotEmpty ||
+                  job.activeTool != null)
+                const SizedBox(height: 12),
+              _Body(job: job),
+            ],
+          ),
         ),
       ),
     );
