@@ -1072,99 +1072,181 @@ void main() {
     // offset when no tokens arrive and does not when they do. Both directions are
     // asserted, because a fix that simply stopped following would pass the first
     // assertion alone.
-    testWidgets('a finger can drag the panel while tokens are arriving', (
+    // **Run under both platforms' physics, because the demo device is not the test
+    // default.** `flutter_test` reports `TargetPlatform.android`, which selects
+    // `ClampingScrollPhysics`; the iPad this ships on uses `BouncingScrollPhysics`,
+    // where a drag past the extent is allowed and settles back. Binding one and
+    // shipping the other is the same "bound at the wrong width" mistake R12-F0 was,
+    // one level over — so the platform is a parameter rather than an assumption.
+    // `variant:` rather than setting `debugDefaultTargetPlatformOverride` by hand:
+    // the binding asserts foundation debug vars are unset at the *end of the test
+    // body*, before `addTearDown` runs, so the hand-rolled version fails on its own
+    // cleanup.
+    testWidgets(
+      'a finger can drag the panel while tokens are arriving',
+      (tester) async {
+        Future<(double before, double afterDrag, double afterNextToken)> drag({
+          required bool tokensArrive,
+        }) async {
+          final long = List.generate(
+            80,
+            (i) => 'Procedure step $i.',
+          ).join('\n');
+          final container = await pumpState(
+            tester,
+            job: const FieldJobState(
+              phase: FieldJobPhase.thinking,
+              inquiry: 'cabin vibrating, E-102',
+              streamedText: 'Isolate the main power bus.',
+            ),
+          );
+          await pushJob(
+            tester,
+            container,
+            FieldJobState(
+              phase: FieldJobPhase.thinking,
+              inquiry: 'cabin vibrating, E-102',
+              streamedText: long,
+            ),
+          );
+
+          final before = _panelScrollController(tester).offset;
+          final gesture = await tester.startGesture(
+            tester.getCenter(find.byKey(DiagnoseKeys.resultPanel)),
+          );
+          await tester.pump();
+
+          var text = long;
+          for (var i = 0; i < 12; i++) {
+            // Positive dy drags the finger *down*, revealing earlier text, so a
+            // working panel moves the offset down from the bottom.
+            await gesture.moveBy(const Offset(0, 24));
+            if (tokensArrive) {
+              text = '$text\nProcedure step ${80 + i}.';
+              (container.read(fieldJobViewModelProvider.notifier)
+                      as _StubViewModel)
+                  .push(
+                    FieldJobState(
+                      phase: FieldJobPhase.thinking,
+                      inquiry: 'cabin vibrating, E-102',
+                      streamedText: text,
+                    ),
+                  );
+            }
+            await tester.pump(const Duration(milliseconds: 16));
+          }
+          await gesture.up();
+          await tester.pumpAndSettle();
+          final afterDrag = _panelScrollController(tester).offset;
+
+          // One more token *after* the finger lifts. This is R1-F1's own property,
+          // asserted for the first time against a scroll a reader actually performed:
+          // the drag flag is clear by now, so the offset guard alone must hold the
+          // position.
+          (container.read(fieldJobViewModelProvider.notifier) as _StubViewModel)
+              .push(
+                FieldJobState(
+                  phase: FieldJobPhase.thinking,
+                  inquiry: 'cabin vibrating, E-102',
+                  streamedText: '$text\nProcedure step 99.',
+                ),
+              );
+          await tester.pump();
+          return (before, afterDrag, _panelScrollController(tester).offset);
+        }
+
+        final control = await drag(tokensArrive: false);
+        expect(
+          control.$2,
+          lessThan(control.$1),
+          reason: 'control: with nothing streaming, a drag must move the panel',
+        );
+
+        final streaming = await drag(tokensArrive: true);
+        expect(
+          streaming.$2,
+          lessThan(streaming.$1),
+          reason:
+              'the reader dragged 288px while tokens arrived; before R12-F0 the '
+              'offset ended pinned to maxScrollExtent because each token disposed '
+              'the drag',
+        );
+        expect(
+          streaming.$3,
+          streaming.$2,
+          reason:
+              'and the token after the finger lifted must not haul them back — '
+              'R1-F1, from a real drag rather than a jumpTo',
+        );
+      },
+      variant: const TargetPlatformVariant({
+        TargetPlatform.android,
+        TargetPlatform.iOS,
+      }),
+    );
+
+    // **The other half of R12-F0's claim: releasing the follow must be reversible.**
+    // `_readerIsDragging` clears on any `ScrollEndNotification`, and the comment on
+    // it says a reader who returns to the bottom resumes following. Nothing bound
+    // that — `TestGesture.moveBy` defaults to `timeStamp: Duration.zero`, so no test
+    // in this file produces a ballistic scroll at all, and a flag that latched true
+    // after a fling would disable following silently and forever. That would be a
+    // worse defect than the one R12-F0 fixed.
+    testWidgets('a reader who flings back to the bottom follows again', (
       tester,
     ) async {
-      Future<(double before, double afterDrag, double afterNextToken)> drag({
-        required bool tokensArrive,
-      }) async {
-        final long = List.generate(80, (i) => 'Procedure step $i.').join('\n');
-        final container = await pumpState(
-          tester,
-          job: const FieldJobState(
-            phase: FieldJobPhase.thinking,
-            inquiry: 'cabin vibrating, E-102',
-            streamedText: 'Isolate the main power bus.',
-          ),
-        );
-        await pushJob(
-          tester,
-          container,
-          FieldJobState(
-            phase: FieldJobPhase.thinking,
-            inquiry: 'cabin vibrating, E-102',
-            streamedText: long,
-          ),
-        );
+      final long = List.generate(80, (i) => 'Procedure step $i.').join('\n');
+      final container = await pumpState(
+        tester,
+        job: const FieldJobState(
+          phase: FieldJobPhase.thinking,
+          inquiry: 'cabin vibrating, E-102',
+          streamedText: 'Isolate the main power bus.',
+        ),
+      );
+      await pushJob(
+        tester,
+        container,
+        FieldJobState(
+          phase: FieldJobPhase.thinking,
+          inquiry: 'cabin vibrating, E-102',
+          streamedText: long,
+        ),
+      );
+      final panel = find.byKey(DiagnoseKeys.resultPanel);
 
-        final before = _panelScrollController(tester).offset;
-        final gesture = await tester.startGesture(
-          tester.getCenter(find.byKey(DiagnoseKeys.resultPanel)),
-        );
-        await tester.pump();
-
-        var text = long;
-        for (var i = 0; i < 12; i++) {
-          // Positive dy drags the finger *down*, revealing earlier text, so a
-          // working panel moves the offset down from the bottom.
-          await gesture.moveBy(const Offset(0, 24));
-          if (tokensArrive) {
-            text = '$text\nProcedure step ${80 + i}.';
-            (container.read(fieldJobViewModelProvider.notifier)
-                    as _StubViewModel)
-                .push(
-                  FieldJobState(
-                    phase: FieldJobPhase.thinking,
-                    inquiry: 'cabin vibrating, E-102',
-                    streamedText: text,
-                  ),
-                );
-          }
-          await tester.pump(const Duration(milliseconds: 16));
-        }
-        await gesture.up();
-        await tester.pumpAndSettle();
-        final afterDrag = _panelScrollController(tester).offset;
-
-        // One more token *after* the finger lifts. This is R1-F1's own property,
-        // asserted for the first time against a scroll a reader actually performed:
-        // the drag flag is clear by now, so the offset guard alone must hold the
-        // position.
-        (container.read(fieldJobViewModelProvider.notifier) as _StubViewModel)
-            .push(
-              FieldJobState(
-                phase: FieldJobPhase.thinking,
-                inquiry: 'cabin vibrating, E-102',
-                streamedText: '$text\nProcedure step 99.',
-              ),
-            );
-        await tester.pump();
-        return (before, afterDrag, _panelScrollController(tester).offset);
-      }
-
-      final control = await drag(tokensArrive: false);
+      // Away from the bottom, with real velocity so the scroll goes ballistic.
+      await tester.fling(panel, const Offset(0, 400), 1000);
+      await tester.pumpAndSettle();
+      final away = _panelScrollController(tester);
       expect(
-        control.$2,
-        lessThan(control.$1),
-        reason: 'control: with nothing streaming, a drag must move the panel',
+        away.offset,
+        lessThan(away.position.maxScrollExtent),
+        reason: 'precondition: the fling left the bottom',
       );
 
-      final streaming = await drag(tokensArrive: true);
+      // And back down again.
+      await tester.fling(panel, const Offset(0, -400), 1000);
+      await tester.pumpAndSettle();
+      final back = _panelScrollController(tester);
       expect(
-        streaming.$2,
-        lessThan(streaming.$1),
-        reason:
-            'the reader dragged 288px while tokens arrived; before R12-F0 the '
-            'offset ended pinned to maxScrollExtent because each token disposed '
-            'the drag',
+        back.offset,
+        back.position.maxScrollExtent,
+        reason: 'precondition: the reader returned to the bottom',
       );
-      expect(
-        streaming.$3,
-        streaming.$2,
-        reason:
-            'and the token after the finger lifted must not haul them back — '
-            'R1-F1, from a real drag rather than a jumpTo',
+
+      // The next token must follow. If the drag flag had latched, it would not.
+      await pushJob(
+        tester,
+        container,
+        FieldJobState(
+          phase: FieldJobPhase.thinking,
+          inquiry: 'cabin vibrating, E-102',
+          streamedText: '$long\nProcedure step 80.',
+        ),
       );
+      final after = _panelScrollController(tester);
+      expect(after.offset, after.position.maxScrollExtent);
     });
 
     // **The slack's value, bound in the direction that constrains it** — review
