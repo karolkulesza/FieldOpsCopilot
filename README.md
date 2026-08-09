@@ -727,10 +727,21 @@ logs "Tools will be ignored".
 
 Each `generate()` call is one **stateless** turn: a fresh chat, no history from
 the previous call. That is what the fake does and what the golden suite depends
-on — every committed transcript's second prompt contains the first turn in full,
-because there is nowhere else for it to live. Feeding a tool *result* back for a
-second model turn is the agent loop's job (Task 1.9), and it extends the
-interface rather than quietly inheriting an accumulated conversation.
+on — every committed transcript's second prompt **begins with the first prompt
+verbatim** and appends a transcript block, because there is nowhere else for the
+conversation to live. Feeding a tool *result* back for a second model turn is the
+agent loop's job (Task 1.9), and it extends the interface rather than quietly
+inheriting an accumulated conversation.
+
+What travels in that block is *not* uniform, and two attempts at a tidier sentence
+here were both false (review finding R2-F1). "The first turn in full" is wrong:
+`e305_degraded_text_call`'s second prompt carries no `[ASSISTANT]` block at all,
+because 1.9 drops the echo whenever the guard read the turn's *text* — and that
+golden's own test asserts it. "The tool call and result travel in every case" is
+wrong too: `recovery_ladder`'s second prompt carries a `[TOOL CALL REJECTED]` block
+and neither of the others, because its first turn was a guard refusal. What every
+multi-turn golden does carry, verified over all five: the previous prompt as a
+prefix, a call **or** a rejection block, and a `[CONTINUE]` instruction.
 
 ### Measured on the demo device (iPad Air M4, iOS 26.5, 2026-06-14)
 
@@ -1666,8 +1677,16 @@ harness detects that by mtime, which sees it whether or not the write persists.
 
 Per-row counts are a reading of one run rather than an invariant: a 1.7
 provisioning test flakes occasionally under `--concurrency=8`, so a row can carry
-±1 unrelated failure. The 0-survivor result does not depend on it — a survivor is
-a row with *no* failures — but a specific count might.
+±1 unrelated failure. **And the exposure runs the opposite way from the obvious
+guess** (review finding R2-F2). A survivor is not "a row with no failures" — it is
+a row whose suite **exit code was 0**. A flake only ever *adds* a failure, so it
+cannot rescue a killed row; what it can do is **mask a survivor**, by making a
+mutation with no genuine failures exit non-zero and be reported `KILLED`. So the
+0-survivor result does depend on the flake not landing on a would-be survivor,
+which is the only direction in which this noise can change a conclusion rather than
+a number. The harness now names the known-flaky tests and reports a row whose
+failing set is a *subset* of them as `INCONCLUSIVE` rather than as a kill, so the
+case is detected instead of assumed away.
 
 **The first version of these numbers came from a harness that could corrupt its
 own inputs, and that is the most useful thing this task learned.** It reverted the
