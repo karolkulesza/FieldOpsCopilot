@@ -1712,8 +1712,7 @@ the tests that would have decided it are the ones that did not run.
 
 Nor is the captured set an enumeration of what broke: **3** `loading` names were
 captured against **2** actual `Failed to load` failures, the extra one an unrelated
-suite file — a reporter artefact rather than a list. It is enough to *classify* the
-row, which is all the harness uses it for.
+suite file — a reporter artefact rather than a list.
 
 The bug was unreachable-by-accident rather than by design — the old detector wanted
 two substrings on one line that the runner prints on separate lines (R3-F1). It
