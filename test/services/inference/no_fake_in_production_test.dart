@@ -884,9 +884,24 @@ void main() {
   // `llm_engine.dart`: outside the exemption, so nothing classified it at all.
   //
   // These two tests ask where an engine goes *to*, and that question has an answer
-  // that does not depend on a fake's name or location. **Every one of the seven
-  // demonstrated exploits ends in the same statement** — an override of
-  // `agentEngineProvider` inside `lib/`.
+  // that does not depend on a fake's name or location.
+  //
+  // **Two claims that used to stand here were false, and each was falsified by
+  // compiling the thing it said was impossible.** Kept as text because the file's
+  // history is its design:
+  //
+  // * *"Every one of the seven demonstrated exploits ends in the same statement — an
+  //   override of `agentEngineProvider`."* True of the seven at the time, false as a
+  //   rule: a scripted engine returned from `agentEngineProvider`'s **body** needs no
+  //   override anywhere, is analyze-clean, and leaves the override test green. That
+  //   one is caught by the contract sink, not by this one.
+  // * *"Every fake has to implement `LlmEngine` to be usable at all."* R9-F1
+  //   falsified it — a scripted `InferenceHost` answers through the *real*
+  //   `GemmaLlmEngine`, which is a state machine over an injected collaborator.
+  //
+  // So neither test is closed by construction on its own, and saying so is the point:
+  // the override sink catches the wiring, the contract sink catches the type, and
+  // **the two are complementary rather than each sufficient.**
   //
   // **This used to continue "and every fake has to implement `LlmEngine` to be usable
   // at all", and R9-F1 falsified it by compiling one that does not.** A scripted
@@ -1177,8 +1192,14 @@ void main() {
           // dropping `'InferenceRuntime'` from [scriptableContracts] together with
           // its approved pair is one coherent edit that left the guard green and
           // silently narrowed it back to where R9-F1 lived. Generating the corpus
-          // from the set closes that — a contract added to the set is probed
-          // automatically, and one removed fails here whatever else is edited.
+          // from the set closes **half** of that, and only half: a contract added to
+          // the set is probed automatically, so coverage cannot lag the set. A
+          // contract *removed* takes its probe with it, so this test cannot catch a
+          // narrowing and does not claim to — that is what
+          // `the guarded contract set is the whole token path` is for. An earlier
+          // version of this comment said "one removed fails here whatever else is
+          // edited", which was false and contradicted the tripwire's own comment a
+          // hundred lines above.
           File('${dir.path}/contracts.dart').writeAsStringSync(
             [
               for (final contract in scriptableContracts)
