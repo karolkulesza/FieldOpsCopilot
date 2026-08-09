@@ -2096,10 +2096,17 @@ inquiry. That figure also resolved a scare: run 3's log shows `**Repair Prure:**
 where the screen recording of the same build shows `Repair Procedure:` rendered
 correctly. A dropped token would have been a real defect in the streaming
 accumulation — but the length is identical across runs, decoding is greedy, and the
-*rendered* text is intact, so the corruption is in the **log transport**, not the
-app: the answer is emitted through a single `debugPrint` of 1401 characters, and
-`debugPrint` chunks and rate-limits long lines. Read answers off the screen, not off
-the console. Decoding is greedy, so identical output is expected from an identical
+*rendered* text is intact, so the corruption is in the **log transport below
+`debugPrint`**, not in the app. The 1401 figure is itself computed in-app from
+`job.displayText.length`, upstream of any printing, which is what makes the
+comparison sound.
+
+The stage matters and an earlier version of this paragraph got it wrong by blaming
+`debugPrint` itself: `debugPrintThrottled` wraps *only* when `wrapWidth != null` and
+this call site passes none, and its rate limiter defers **whole lines** past a 12KB
+budget rather than truncating inside one — so a contiguous four-character elision
+mid-word is not a behaviour it has. The loss happens further down, between the device
+and the console. **Read answers off the screen, not off the console.** Decoding is greedy, so identical output is expected from an identical
 prompt — which makes this evidence that the composition through the viewmodel and
 the composition in 1.9's harness build the same prompt. Equal *length* is not proof
 of equal text; it is consistent with it, which is as far as this observation goes.
