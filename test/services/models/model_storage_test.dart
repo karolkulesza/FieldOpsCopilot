@@ -46,7 +46,12 @@ void main() {
     displayName: 'STT (test fixture)',
     licensePage: 'https://example.invalid/license',
     files: [
-      for (final name in ['encoder.onnx', 'decoder.onnx', 'joiner.onnx', 'tokens.txt'])
+      for (final name in [
+        'encoder.onnx',
+        'decoder.onnx',
+        'joiner.onnx',
+        'tokens.txt',
+      ])
         ModelArtifactFile(
           fileName: name,
           downloadUri: Uri.parse('https://example.invalid/$name'),
@@ -166,30 +171,33 @@ void main() {
       }
     });
 
-    test('a stale receipt on any single file demotes the set to unverified', () async {
-      final storage = storageWith(const NoopBackupExclusion());
-      await storage.prepare();
-      final d = setDescriptor();
-      await installVerified(storage, d);
+    test(
+      'a stale receipt on any single file demotes the set to unverified',
+      () async {
+        final storage = storageWith(const NoopBackupExclusion());
+        await storage.prepare();
+        final d = setDescriptor();
+        await installVerified(storage, d);
 
-      for (final file in d.files) {
-        final receipt = storage.receiptFile(d, file);
-        final original = await receipt.readAsString();
-        // A receipt for a different pin: the bytes moved since it was written.
-        await receipt.writeAsString(
-          original.replaceFirst(file.sha256Hex, 'f' * 64),
-        );
+        for (final file in d.files) {
+          final receipt = storage.receiptFile(d, file);
+          final original = await receipt.readAsString();
+          // A receipt for a different pin: the bytes moved since it was written.
+          await receipt.writeAsString(
+            original.replaceFirst(file.sha256Hex, 'f' * 64),
+          );
 
-        expect(
-          await storage.statusOf(d),
-          ModelInstallStatus.unverified,
-          reason: '${file.fileName}\'s receipt no longer vouches',
-        );
+          expect(
+            await storage.statusOf(d),
+            ModelInstallStatus.unverified,
+            reason: '${file.fileName}\'s receipt no longer vouches',
+          );
 
-        await receipt.writeAsString(original);
-        expect(await storage.statusOf(d), ModelInstallStatus.ready);
-      }
-    });
+          await receipt.writeAsString(original);
+          expect(await storage.statusOf(d), ModelInstallStatus.ready);
+        }
+      },
+    );
   });
 
   group('legacy layout migration', () {
@@ -229,20 +237,26 @@ void main() {
       expect(storage.receiptFile(pinned).existsSync(), isTrue);
     });
 
-    test('a flat file never overwrites an install already in the new layout', () async {
-      final storage = storageWith(const NoopBackupExclusion());
-      await storage.prepare();
-      final file = descriptor.soleFile;
-      await storage.installDir(descriptor).create(recursive: true);
-      await storage.installedFile(descriptor).writeAsString('current');
-      await File(
-        '${storage.root.path}/${file.fileName}',
-      ).writeAsString('stale flat leftover');
+    test(
+      'a flat file never overwrites an install already in the new layout',
+      () async {
+        final storage = storageWith(const NoopBackupExclusion());
+        await storage.prepare();
+        final file = descriptor.soleFile;
+        await storage.installDir(descriptor).create(recursive: true);
+        await storage.installedFile(descriptor).writeAsString('current');
+        await File(
+          '${storage.root.path}/${file.fileName}',
+        ).writeAsString('stale flat leftover');
 
-      await storage.statusOf(descriptor);
+        await storage.statusOf(descriptor);
 
-      expect(await storage.installedFile(descriptor).readAsString(), 'current');
-    });
+        expect(
+          await storage.installedFile(descriptor).readAsString(),
+          'current',
+        );
+      },
+    );
   });
 
   group('receipts', () {

@@ -109,8 +109,8 @@ class ModelInstallReceipt {
 class ModelStorage {
   ModelStorage({
     required this.root,
-    BackupExclusion backupExclusion = const NoopBackupExclusion(),
-  }) : _backupExclusion = backupExclusion;
+    this._backupExclusion = const NoopBackupExclusion(),
+  });
 
   /// Opens the app's real model directory: `<application support>/models`.
   static Future<ModelStorage> openDefault() async {
@@ -138,7 +138,12 @@ class ModelStorage {
   /// every single-file call site (the LLM config, the integration tests) exact:
   /// on a multi-file model, omitting [file] throws rather than guessing.
   File installedFile(ModelDescriptor descriptor, [ModelArtifactFile? file]) =>
-      File(p.join(installDir(descriptor).path, (file ?? descriptor.soleFile).fileName));
+      File(
+        p.join(
+          installDir(descriptor).path,
+          (file ?? descriptor.soleFile).fileName,
+        ),
+      );
 
   /// Where a transfer's bytes land while downloading: a directory holding the
   /// whole set, renamed file-by-file into [installDir] only after *every* file
@@ -373,7 +378,9 @@ class ModelStorage {
           } on FileSystemException catch (error) {
             // A migration that cannot happen must not take the startup path
             // down with it — the status check then honestly reports `absent`.
-            debugPrint('legacy model layout migration failed: ${error.message}');
+            debugPrint(
+              'legacy model layout migration failed: ${error.message}',
+            );
             continue;
           }
         }
@@ -453,8 +460,7 @@ class PlatformBackupExclusion implements BackupExclusion {
   /// [mechanism] exists so tests can exercise a platform's path on any host: the
   /// unit suite runs on macOS locally and Linux in CI, and a check that silently
   /// takes a different branch per runner is not a check.
-  const PlatformBackupExclusion({BackupExclusionMechanism? mechanism})
-    : _mechanism = mechanism;
+  const PlatformBackupExclusion({this._mechanism});
 
   final BackupExclusionMechanism? _mechanism;
 

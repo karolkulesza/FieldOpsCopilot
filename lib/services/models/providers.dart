@@ -50,14 +50,15 @@ final provisionedModelDescriptorsProvider = Provider<List<ModelDescriptor>>(
 /// [ModelCatalog.byId] so an override of the list in a test overrides every
 /// per-model provider with it — the family's argument is a plain string, and a
 /// lookup that bypassed the provider graph would bypass the override too.
-final modelDescriptorProvider = Provider.family<ModelDescriptor?, String>(
-  (ref, modelId) {
-    for (final descriptor in ref.watch(provisionedModelDescriptorsProvider)) {
-      if (descriptor.id == modelId) return descriptor;
-    }
-    return null;
-  },
-);
+final modelDescriptorProvider = Provider.family<ModelDescriptor?, String>((
+  ref,
+  modelId,
+) {
+  for (final descriptor in ref.watch(provisionedModelDescriptorsProvider)) {
+    if (descriptor.id == modelId) return descriptor;
+  }
+  return null;
+});
 
 /// Access token for the model host, or `null` when none was supplied.
 ///

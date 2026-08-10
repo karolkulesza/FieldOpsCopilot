@@ -128,7 +128,7 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         modelInstallStatusProvider.overrideWith(
-          (ref) async => ModelInstallStatus.ready,
+          (ref, modelId) async => ModelInstallStatus.ready,
         ),
         seedOutcomeProvider.overrideWith((ref) async {
           if (startupError != null) throw startupError;
@@ -752,7 +752,9 @@ void main() {
       var status = ModelInstallStatus.absent;
       final container = ProviderContainer(
         overrides: [
-          modelInstallStatusProvider.overrideWith((ref) async => status),
+          modelInstallStatusProvider.overrideWith(
+            (ref, modelId) async => status,
+          ),
           seedOutcomeProvider.overrideWith(
             (ref) async =>
                 const SeedSkipped(storedRevision: 1, assetRevision: 1),
@@ -763,7 +765,9 @@ void main() {
           // so it passed on an already-ready screen and proved nothing.
           agentEngineProvider.overrideWith((ref) async {
             final installed = await ref.watch(
-              modelInstallStatusProvider.future,
+              modelInstallStatusProvider(
+                ref.watch(activeLlmDescriptorProvider).id,
+              ).future,
             );
             return installed == ModelInstallStatus.ready ? engine : null;
           }),
@@ -820,7 +824,7 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           modelInstallStatusProvider.overrideWith(
-            (ref) async => ModelInstallStatus.ready,
+            (ref, modelId) async => ModelInstallStatus.ready,
           ),
           seedOutcomeProvider.overrideWith(
             (ref) async =>
@@ -1506,7 +1510,7 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         modelInstallStatusProvider.overrideWith(
-          (ref) async => ModelInstallStatus.ready,
+          (ref, modelId) async => ModelInstallStatus.ready,
         ),
         appDatabaseProvider.overrideWith((ref) async {
           final database = DatabaseService.encrypted(
