@@ -187,7 +187,7 @@ void main() {
   });
 
   group('the backlog bound', () {
-    test('audio captured before the first listen is not lost', () async {
+    test('audio captured before the first listen reaches that listener', () async {
       // The plugin's own stream discards every buffer that arrives with no
       // listener, so this is a property of the session rather than of the input.
       final input = _ScriptedAudioInput();
@@ -199,10 +199,18 @@ void main() {
 
       final frames = <MicFrame>[];
       final done = session.frames.listen(frames.add).asFuture<void>();
+      await pumpEventQueue();
+
+      // Asserted **before** `stop`, and that is the whole point of the shape of
+      // this test. `stop` pumps too, so a version that only checked after
+      // stopping passed with the controller's `onListen` callback removed — the
+      // audio arrived, just not until the capture ended. Subscribing is what has
+      // to deliver it, because during a live capture the alternative is waiting
+      // for the next buffer.
+      expect(_flatten(frames), [1, 2, 3, 4]);
+
       await session.stop();
       await done;
-
-      expect(_flatten(frames), [1, 2, 3, 4]);
       expect(session.droppedByteCount, 0);
     });
 
