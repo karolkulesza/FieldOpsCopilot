@@ -267,13 +267,15 @@ class MicCaptureSession {
           _fail(MicCaptureFault('the microphone reported an error: $error')),
       onDone: () {
         if (!_rawClosed.isCompleted) _rawClosed.complete();
-        // Releasing the input closes the plugin's stream (`record` 7.1.1,
-        // `AudioRecorder.stop` → `_stopRecordStream`), so a `done` arriving
-        // during [stop] is the expected end and not a fault. One arriving at any
-        // other time is the microphone going away mid-capture — a revoked
-        // permission, a route change, another app taking the input — and the
-        // alternative to reporting it is a transcript that simply stops.
-        if (_stopRequested) return;
+        // A `done` arriving during [stop] is the expected end, not a fault:
+        // releasing the input closes the plugin's stream (`record` 7.1.1,
+        // `AudioRecorder.stop` → `_stopRecordStream`). [_fail] already declines
+        // once a stop is under way, so that case needs no branch here — a second
+        // guard for it would be a line no test could reach.
+        //
+        // A `done` at any other time is the microphone going away mid-capture — a
+        // revoked permission, a route change, another app taking the input — and
+        // the alternative to reporting it is a transcript that simply stops.
         _fail(
           const MicCaptureFault(
             'the microphone closed the stream unexpectedly',
