@@ -8,18 +8,29 @@
 /// and widget test resolves it, and none of them can load 2.6GB of weights — a
 /// provider that quietly became device-backed would break the host suite and, worse,
 /// would make the app try to load a model on the way to the first frame. The real
-/// engine is [deviceLlmEngineProvider], and Task 1.11 flips the app over by
-/// overriding `llmEngineProvider` with it inside a `ProviderScope` on device. Nothing
-/// upstream of the interface changes when it does.
+/// engine is [deviceLlmEngineProvider].
+///
+/// **How Task 1.11 actually flipped the app over, which is not what this paragraph
+/// used to predict.** The prediction was "override `llmEngineProvider` with
+/// [deviceLlmEngineProvider] inside a `ProviderScope`", and that override does not
+/// type-check: `llmEngineProvider` is a synchronous `Provider<LlmEngine>` and
+/// resolving the device engine means awaiting a verified model path, so the real
+/// binding is unavoidably a `Future`. The seam the app resolves is therefore
+/// [agentEngineProvider], and the difference is not only mechanical — see that
+/// provider for why it answers `null` rather than falling back to the fake.
+/// Nothing upstream of the `LlmEngine` interface changed, which was the part of
+/// the prediction that mattered.
 library;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../engines/impl/gemma_llm_engine.dart';
+import '../../engines/llm_engine.dart';
 import '../models/model_descriptor.dart';
 import '../models/model_storage.dart';
 import '../models/providers.dart';
+import '../retry_policy.dart';
 import 'inference_config.dart';
 
 /// The inference configuration for the currently installed model, or `null` when
@@ -31,17 +42,20 @@ import 'inference_config.dart';
 /// Task 1.7 exists: an engine that loads bytes nothing has hashed turns "the model is
 /// ready" into a statement about a file that happens to be at the right path, which
 /// is exactly what a half-finished download leaves behind.
-final inferenceConfigProvider = FutureProvider<InferenceConfig?>((ref) async {
-  final descriptor = ref.watch(activeModelDescriptorProvider);
-  final status = await ref.watch(modelInstallStatusProvider.future);
-  if (status != ModelInstallStatus.ready) return null;
+final inferenceConfigProvider = FutureProvider<InferenceConfig?>(
+  retry: noRetry,
+  (ref) async {
+    final descriptor = ref.watch(activeModelDescriptorProvider);
+    final status = await ref.watch(modelInstallStatusProvider.future);
+    if (status != ModelInstallStatus.ready) return null;
 
-  final storage = await ref.watch(modelStorageProvider.future);
-  return InferenceConfig(
-    modelPath: storage.installedFile(descriptor).path,
-    family: inferenceFamilyFor(descriptor.id),
-  );
-});
+    final storage = await ref.watch(modelStorageProvider.future);
+    return InferenceConfig(
+      modelPath: storage.installedFile(descriptor).path,
+      family: inferenceFamilyFor(descriptor.id),
+    );
+  },
+);
 
 /// The on-device engine for the installed model, or `null` when no verified weights
 /// are present.
@@ -50,14 +64,48 @@ final inferenceConfigProvider = FutureProvider<InferenceConfig?>((ref) async {
 /// and gigabytes of memory, so it is triggered by a deliberate user action rather
 /// than by something reading a provider. Disposal is wired here because forgetting it
 /// leaks a whole isolate holding the model.
-final deviceLlmEngineProvider = FutureProvider<GemmaLlmEngine?>((ref) async {
-  final config = await ref.watch(inferenceConfigProvider.future);
-  if (config == null) return null;
+///
+/// [noRetry] added by Task 1.11: this sits on the path to the first interactive
+/// frame, and Riverpod 3's default would hold the screen in `AsyncLoading` for
+/// around half a minute over a failure that is settled on the first attempt. See
+/// `retry_policy.dart`.
+final deviceLlmEngineProvider = FutureProvider<GemmaLlmEngine?>(
+  retry: noRetry,
+  (ref) async {
+    final config = await ref.watch(inferenceConfigProvider.future);
+    if (config == null) return null;
 
-  final engine = GemmaLlmEngine(config: config);
-  ref.onDispose(engine.dispose);
-  return engine;
-});
+    final engine = GemmaLlmEngine(config: config);
+    ref.onDispose(engine.dispose);
+    return engine;
+  },
+);
+
+/// The `LlmEngine` the demo screen runs the agent loop on: the device engine, or
+/// `null` when this device has no verified weights.
+///
+/// **It never falls back to `FakeLlmEngine`, and that is the decision worth
+/// reading.** The fallback is one line and it is tempting, because it would make
+/// the screen work everywhere. What it would actually produce is an app that
+/// answers a technician's inquiry fluently, in well-formatted prose, from a
+/// scripted list — on a machine where the model never ran. There is no failure
+/// mode of this project worse than that, because it is indistinguishable from
+/// success in a screen recording, which is the artefact this task exists to make.
+/// So `null` is a first-class answer and the screen renders it as "no verified
+/// weights on this device", with the banner above it naming the next step.
+///
+/// The fake is still exactly one line away from any test that wants it — an
+/// override of *this* provider — which is a deliberate act in a test file rather
+/// than a default nobody chose. Task 1.8's rule makes that safe: the fake enforces
+/// every contract the device engine does, at the same moment, so what passes here
+/// against the fake is not passing against a more forgiving world.
+///
+/// Interface-typed rather than `GemmaLlmEngine`-typed for the same reason: a
+/// concrete return type is a provider a fake cannot be substituted into.
+final agentEngineProvider = FutureProvider<LlmEngine?>(
+  retry: noRetry,
+  (ref) => ref.watch(deviceLlmEngineProvider.future),
+);
 
 /// Maps a catalog model id to the tool-calling dialect its weights speak.
 ///
