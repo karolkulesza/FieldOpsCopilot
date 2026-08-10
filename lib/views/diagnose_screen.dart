@@ -119,7 +119,13 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
     // every transition into `ready`: `warmUp` returns immediately when the state is
     // already `EngineLoading` or `EngineReady`, so the common path — weights
     // already present at launch — costs one early return.
-    ref.listenManual(modelInstallStatusProvider, (previous, next) {
+    // The LLM's family instance specifically (Task 2.0 made the status provider
+    // per-model): the STT set becoming ready changes nothing about the engine,
+    // and warming up on its edge would be a no-op fired for the wrong reason.
+    ref.listenManual(modelInstallStatusProvider(ref.read(activeLlmDescriptorProvider).id), (
+      previous,
+      next,
+    ) {
       // `next.value`, not the `valueOrNull` the review's suggested fix used —
       // Riverpod 3's `AsyncValue` exposes a nullable `value` and no `valueOrNull`,
       // so the suggestion as written does not compile. `ModelReadinessBanner`
