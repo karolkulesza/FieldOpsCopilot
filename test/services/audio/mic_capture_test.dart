@@ -72,22 +72,50 @@ void main() {
       },
     );
 
-    test(
-      'a microphone that refuses to open is unavailable, not denied',
-      () async {
-        final input = _ScriptedAudioInput()
-          ..startError = Exception('input in use by another app');
-        final capture = MicCapture(input: input);
+    test('a microphone that refuses to open is unavailable, not denied', () async {
+      final input = _ScriptedAudioInput()
+        ..startError = Exception('input in use by another app');
+      final capture = MicCapture(input: input);
 
-        final result = await capture.start();
+      final result = await capture.start();
 
-        expect(result, isA<MicCaptureUnavailable>());
-        expect(
-          (result as MicCaptureUnavailable).message,
-          contains('input in use by another app'),
-        );
-      },
-    );
+      expect(result, isA<MicCaptureUnavailable>());
+      expect(
+        (result as MicCaptureUnavailable).message,
+        contains('input in use by another app'),
+      );
+      // And the recorder is handed back. `watchFormat` can succeed and
+      // `startStream` fail after the platform has already taken the microphone,
+      // and a caller told "unavailable" holds no session to stop with — so
+      // without this the input stays open until `dispose`. Raised as a
+      // non-blocking note in review round 0; the first fix for it shipped with
+      // no test and a mutation emptying the cleanup survived.
+      expect(input.stopCalls, 1);
+    });
+
+    test('a cleanup failure does not mask why the microphone is unavailable', () async {
+      // The cleanup is best-effort by construction: the input may never have
+      // opened, in which case `stop` is entitled to throw. What the caller needs is
+      // the original reason, not a second failure from the tidying up.
+      //
+      // An `Exception` specifically, because the recovery is `on Exception` and
+      // not `on Object` — Task 1.5's rule, that an `Error` means the app is broken
+      // and must not be swallowed. The first draft of this test threw a
+      // `StateError` and failed, which is that convention working rather than a
+      // defect in the code.
+      final input = _ScriptedAudioInput()
+        ..startError = Exception('input in use by another app')
+        ..stopError = Exception('nothing to stop');
+      final capture = MicCapture(input: input);
+
+      final result = await capture.start();
+
+      expect(result, isA<MicCaptureUnavailable>());
+      expect(
+        (result as MicCaptureUnavailable).message,
+        contains('input in use by another app'),
+      );
+    });
   });
 
   group('frame normalisation', () {
