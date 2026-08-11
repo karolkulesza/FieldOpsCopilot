@@ -900,28 +900,25 @@ void main() {
       );
     });
 
-    test('the default actually arms, without being passed one', () async {
-      // The composition the assertion above cannot make on its own: that the
-      // constructor's default reaches the session and arms a real timer. Deliberately
-      // the slowest test in this suite — it waits out the production five seconds —
-      // and it is worth it once, because what it guards is "the watchdog runs at
-      // all" rather than any detail of how.
+    test('the default reaches the session, not just the field', () async {
+      // The composition the value assertion above cannot make on its own: that the
+      // constructor's default is what the session actually runs with.
+      //
+      // This replaces a test that waited out the real five seconds. Round 2 of
+      // review measured that one's marginal mutation coverage and found it **zero**
+      // — every edit either party constructed, including breaking this exact
+      // plumbing while leaving `MicCapture.stallTimeout` correct, is killed by the
+      // value assertion together with the millisecond-scale tests below. Five
+      // seconds on every CI run for coverage that was already there is not a trade
+      // worth making, and the reviewer had run the suite forty-six times to find
+      // that out.
       final input = _ScriptedAudioInput();
       final capture = MicCapture(input: input);
+
       final session = ((await capture.start()) as MicCaptureStarted).session;
-      Object? fault;
-      final done = Completer<void>();
-      session.frames.listen(
-        (_) {},
-        onError: (Object error) => fault = error,
-        onDone: done.complete,
-      );
 
-      input.emit([1, 2]);
-      await done.future.timeout(const Duration(seconds: 20));
-
-      expect(fault, isA<MicCaptureFault>());
-      expect(session.isCapturing, isFalse);
+      expect(session.configuredStallTimeout, const Duration(seconds: 5));
+      await session.stop();
     });
 
     test('a capture that never receives a single buffer still faults', () async {
@@ -946,8 +943,10 @@ void main() {
         onDone: done.complete,
       );
 
-      // Nothing emitted at all.
-      await done.future;
+      // Nothing emitted at all. Bounded so a broken watchdog fails in seconds
+      // rather than hanging to `flutter_test`'s 30s default — raised in review
+      // round 2, where three mutation rows spent most of their wall clock here.
+      await done.future.timeout(const Duration(seconds: 5));
 
       expect(fault, isA<MicCaptureFault>());
       expect(harness.input.stopCalls, 1);

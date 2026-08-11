@@ -148,6 +148,19 @@ class MicCaptureSession {
   final Duration? _stallTimeout;
   final Future<void> Function() _releaseInput;
 
+  /// The stall timeout this session is actually running with.
+  ///
+  /// Exists so a test can bind [MicCapture]'s *default* reaching the session
+  /// without waiting out five seconds of wall clock. Round 2 of review measured
+  /// the alternative — a test that waits the real default — and found its marginal
+  /// mutation coverage to be **zero**: the value assertion on
+  /// [MicCapture.stallTimeout] and the millisecond-scale watchdog tests already
+  /// kill every edit either party constructed, including one that breaks this
+  /// plumbing while leaving the public field reading correctly. This accessor
+  /// binds that last edge directly and costs nothing.
+  @visibleForTesting
+  Duration? get configuredStallTimeout => _stallTimeout;
+
   late final StreamController<MicFrame> _controller;
   final Queue<Uint8List> _backlog = Queue<Uint8List>();
   int _backlogBytes = 0;
