@@ -230,7 +230,10 @@ void main() {
       await pumpEventQueue();
 
       final frames = <MicFrame>[];
-      final done = session.frames.listen(frames.add).asFuture<void>();
+      final done = session.frames
+          .listen(frames.add)
+          .asFuture<void>()
+          .timeout(_faultDeadline);
       await pumpEventQueue();
 
       // Asserted **before** `stop`, and that is the whole point of the shape of
@@ -288,7 +291,10 @@ void main() {
       );
 
       final frames = <MicFrame>[];
-      final done = session.frames.listen(frames.add).asFuture<void>();
+      final done = session.frames
+          .listen(frames.add)
+          .asFuture<void>()
+          .timeout(_faultDeadline);
       await session.stop();
       await done;
 
@@ -361,7 +367,7 @@ void main() {
       subscription.resume();
       await pumpEventQueue();
       await harness.session.stop();
-      await subscription.asFuture<void>();
+      await subscription.asFuture<void>().timeout(_faultDeadline);
 
       expect(
         harness.session.droppedByteCount,
@@ -399,7 +405,7 @@ void main() {
       subscription.resume();
       await pumpEventQueue();
       await harness.session.stop();
-      await subscription.asFuture<void>();
+      await subscription.asFuture<void>().timeout(_faultDeadline);
 
       expect(frames.first.precedingGapBytes, 48);
       expect(frames.first.followsGap, isTrue);
@@ -430,7 +436,7 @@ void main() {
       subscription.resume();
       await pumpEventQueue();
       await harness.session.stop();
-      await subscription.asFuture<void>();
+      await subscription.asFuture<void>().timeout(_faultDeadline);
 
       expect(_flatten(frames), List.filled(64, 9));
       expect(harness.session.droppedByteCount, 64);
@@ -525,7 +531,10 @@ void main() {
 
       // And the running capture is genuinely untouched.
       final frames = <MicFrame>[];
-      final done = first.frames.listen(frames.add).asFuture<void>();
+      final done = first.frames
+          .listen(frames.add)
+          .asFuture<void>()
+          .timeout(_faultDeadline);
       input.emit([1, 2]);
       await first.stop();
       await done;
@@ -635,7 +644,7 @@ void main() {
       expect(frames, isEmpty, reason: 'still paused, so nothing delivered yet');
 
       subscription.resume();
-      await subscription.asFuture<void>();
+      await subscription.asFuture<void>().timeout(_faultDeadline);
 
       expect(_flatten(frames), [1, 2, 3, 4]);
     });
@@ -649,7 +658,10 @@ void main() {
       final capture = MicCapture(input: input);
       final session = ((await capture.start()) as MicCaptureStarted).session;
       final frames = <MicFrame>[];
-      final drained = session.frames.listen(frames.add).asFuture<void>();
+      final drained = session.frames
+          .listen(frames.add)
+          .asFuture<void>()
+          .timeout(_faultDeadline);
 
       input.emit([1, 2]);
       await pumpEventQueue();
@@ -1120,7 +1132,10 @@ class _Harness {
     final received = <MicFrame>[];
     Future<void>? drained;
     if (listen) {
-      drained = session.frames.listen(received.add).asFuture<void>();
+      drained = session.frames
+          .listen(received.add)
+          .asFuture<void>()
+          .timeout(_faultDeadline);
     }
     return _Harness._(
       capture: capture,
@@ -1244,7 +1259,9 @@ class _ScriptedAudioInput implements AudioInput {
   }
 }
 
-/// A bound on every wait for a fault or a stream close.
+/// A bound on every wait in this file that a broken `MicCapture` could hang: the
+/// eight waits for a fault, and the nine subscription drains that every
+/// `await harness.frames` resolves through.
 ///
 /// A test that expects a `MicCaptureFault` and does not get one must fail in
 /// seconds rather than hang to `flutter_test`'s 30s default. Review finding R3-F1:
@@ -1252,6 +1269,18 @@ class _ScriptedAudioInput implements AudioInput {
 /// measurable — the reviewer's row that broke the fault path spent most of its wall
 /// clock in the wait I had missed. Named once here so the next one cannot drift, and
 /// so `grep` over this file answers "are they all bounded?" with a single count.
+///
+/// The drains came second, and the sentence that reached for them came before they
+/// did: this doc said "every wait for a fault **or a stream close**" while the
+/// close waits were still unbounded — flagged in review round 4 as a non-blocking
+/// note, and fixed by making the claim true rather than by narrowing it, because
+/// the residue was worth removing. It is what made this file's worst-case mutation
+/// row cost minutes: an edit that stops the stream ever closing left thirteen
+/// drains waiting 30s each.
+///
+/// Bounding at subscription rather than at the await is deliberate and is not a
+/// shortcut — a stream that has not closed this long after being listened to *is*
+/// the failure, whenever the test gets round to awaiting it.
 const _faultDeadline = Duration(seconds: 5);
 
 List<int> _flatten(Iterable<MicFrame> frames) =>
