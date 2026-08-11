@@ -262,6 +262,13 @@ class MicCaptureSession {
       await _rawClosed.future.timeout(drainGrace, onTimeout: () {});
     } finally {
       _finishing = true;
+      // Hygiene, not mechanism (review finding R1-F5): `_onStalled` routes through
+      // [_fail], which declines once `_stopRequested` is set, so a timer left
+      // running would fire into a no-op and nothing observable would change.
+      // Deleting this line leaves the host suite green. What it prevents is a
+      // `Timer` outliving its session by up to `stallTimeout` — invisible here, and
+      // *not* invisible in a widget test, where `flutter_test` fails a test that
+      // ends with a pending timer. A widget is where Task 2.3 puts this.
       _stallTimer?.cancel();
       _stallTimer = null;
       await _rawSubscription?.cancel();
@@ -446,6 +453,8 @@ class MicCaptureSession {
     _pendingFault = fault;
     _stopRequested = true;
     _finishing = true;
+    // Hygiene, for the reason given in [stop]: this cannot change an outcome, only
+    // whether a `Timer` outlives the session (review finding R1-F5).
     _stallTimer?.cancel();
     _stallTimer = null;
     _rawSubscription?.cancel();
@@ -618,13 +627,37 @@ class MicCapture {
 ///
 /// The only file in the app that imports the plugin.
 ///
-/// Configuration is three fields wide and every one of them is deliberate:
+/// Configuration is four fields wide and every one of them is deliberate — three
+/// set and one deliberately left at its default:
 ///
 /// * `encoder: AudioEncoder.pcm16bits` — the only raw encoder either platform
 ///   accepts in streaming mode. `RecordConfig`'s default is `aacLc`, which
 ///   streams *encoded* frames; handing those to a PCM recogniser produces noise.
 /// * `sampleRate` / `numChannels` from [PcmAudioFormat] — the defaults are
 ///   44100 Hz stereo, neither of which the STT model wants.
+/// * `audioInterruption` is left at `RecordConfig`'s default of
+///   `AudioInterruptionMode.pause`, and **that default is what makes an
+///   interruption permanent** — which review finding R1-F6 established, because an
+///   earlier version of this list said the configuration was "three fields wide"
+///   while a fourth was quietly load-bearing. Both platforms gate resuming on
+///   `pauseResume`: iOS returns from its `.ended` handler unless
+///   `audioInterruption == pauseResume` *and* the notification carries
+///   `.shouldResume` (`RecorderSessionExtension.onAudioSessionInterruption`), and
+///   Android resumes on focus gain only
+///   `if (interruption == AudioInterruption.PAUSE_RESUME)`
+///   (`AudioRecorder`'s `onFocusGain`). So the silence
+///   [MicCapture.stallTimeout] detects is a consequence of this default, not a
+///   platform fact.
+///
+///   It stays `pause`, and the reason is stronger than the platform behaviour it is
+///   sometimes justified by — the argument is the reviewer's, in round 1. An
+///   auto-resume would restart the tap mid-utterance and **splice the stream with a
+///   gap this class cannot see**: the missing audio never enters the backlog, so
+///   nothing increments `precedingGapBytes`, and the recogniser receives a
+///   continuous-looking stream across a hole. That is precisely the invisible splice
+///   [MicFrame] exists to make impossible, arriving through the one route the gap
+///   accounting cannot cover. A capture that stops and says so is strictly better
+///   than one that resumes and lies.
 /// * `streamBufferSize` is left unset **on purpose**. The field's unit differs
 ///   between the platforms: `record_ios` 2.1.1 passes it to
 ///   `AVAudioNode.installTap` as `AVAudioFrameCount` (sample *frames*, defaulting
