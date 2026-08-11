@@ -1168,6 +1168,59 @@ void main() {
           failOnOpen: failOnOpen,
         );
 
+    test(
+      'one unconfigured member makes the whole set unprovisionable',
+      () async {
+        // A set is configured only when every file is. The broken member is the
+        // third, not the first, for the same reason TC-PROV-SET-03 breaks the
+        // joiner: a check that stops at files.first would pass here.
+        ModelDescriptor withBrokenThird({required bool missingSource}) =>
+            ModelDescriptor.fileSet(
+              id: 'stt-test',
+              displayName: 'STT (test fixture)',
+              licensePage: 'https://example.invalid/license',
+              files: [
+                for (final (i, name) in names.indexed)
+                  ModelArtifactFile(
+                    fileName: name,
+                    downloadUri: i == 2 && missingSource
+                        ? null
+                        : Uri.parse('https://example.invalid/$name'),
+                    sha256Hex: i == 2 && !missingSource
+                        ? ''
+                        : sha256.convert(bodyOf(name)).toString(),
+                  ),
+              ],
+            );
+
+        expect(
+          withBrokenThird(missingSource: true).configurationIssue,
+          ModelConfigurationIssue.missingSource,
+        );
+        expect(
+          withBrokenThird(missingSource: false).configurationIssue,
+          ModelConfigurationIssue.unpinnedHash,
+        );
+
+        // And fail-closed means *nothing* is fetched — not the three configured
+        // files either.
+        final downloader = setDownloader();
+        final provisioner = ModelProvisioner(
+          storage: storage,
+          downloader: downloader,
+        );
+        final result = await provisioner.provision(
+          withBrokenThird(missingSource: false),
+        );
+        expect(result, isA<ModelNotConfigured>());
+        expect(
+          (result as ModelNotConfigured).issue,
+          ModelConfigurationIssue.unpinnedHash,
+        );
+        expect(downloader.openCount, 0);
+      },
+    );
+
     test('a four-file set installs all-or-nothing and reports per-file '
         'artifacts', () async {
       final descriptor = setDescriptor();
