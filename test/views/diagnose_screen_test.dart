@@ -13,6 +13,7 @@ import 'package:field_ops_copilot/services/database/providers.dart';
 import 'package:field_ops_copilot/services/database/seed_data.dart';
 import 'package:field_ops_copilot/services/inference/engine_warmup_controller.dart';
 import 'package:field_ops_copilot/services/inference/providers.dart';
+import 'package:field_ops_copilot/services/models/model_descriptor.dart';
 import 'package:field_ops_copilot/services/models/model_storage.dart';
 import 'package:field_ops_copilot/services/models/providers.dart';
 import 'package:field_ops_copilot/services/rag/retrieval_router.dart';
@@ -124,11 +125,13 @@ void main() {
     FieldJobState job = const FieldJobState(),
     EngineWarmupState warmup = const EngineReady(_InertEngine()),
     Object? startupError,
+    ModelInstallStatus Function(String modelId)? installStatusOf,
   }) async {
     final container = ProviderContainer(
       overrides: [
         modelInstallStatusProvider.overrideWith(
-          (ref, modelId) async => ModelInstallStatus.ready,
+          (ref, modelId) async =>
+              installStatusOf?.call(modelId) ?? ModelInstallStatus.ready,
         ),
         seedOutcomeProvider.overrideWith((ref) async {
           if (startupError != null) throw startupError;
@@ -219,6 +222,32 @@ void main() {
       await tester.pump();
 
       expect(_button(tester).onPressed, isNotNull);
+    });
+
+    // TC-PROV-MULTI-01, the half the banner test cannot carry: a missing STT
+    // set must not disable typed input. Only the LLM's readiness gates the
+    // agent — that is the whole reason `modelInstallStatusProvider` is a
+    // family — so with the LLM ready and every other model absent, Diagnose
+    // behaves exactly as if nothing else existed.
+    testWidgets('stays enabled while the STT model is absent', (tester) async {
+      await pumpState(
+        tester,
+        installStatusOf: (modelId) => modelId == ModelCatalog.active.id
+            ? ModelInstallStatus.ready
+            : ModelInstallStatus.absent,
+      );
+
+      await tester.enterText(
+        find.byKey(DiagnoseKeys.inquiryField),
+        'cabin vibrating, E-102',
+      );
+      await tester.pump();
+
+      expect(
+        _button(tester).onPressed,
+        isNotNull,
+        reason: 'a model the agent does not run on must not gate Diagnose',
+      );
     });
 
     testWidgets('whitespace alone does not enable it', (tester) async {
