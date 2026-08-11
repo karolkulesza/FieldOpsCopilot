@@ -818,6 +818,37 @@ void main() {
 
       expect(downloader.lastToken, isNull);
     });
+
+    // R0-F3: the token is paired with the *configured* model's source. A
+    // committed-source descriptor must not carry it to its own host — in the
+    // private-mirror configuration that would ship the mirror's credential to
+    // huggingface.co.
+    test('a descriptor that opts out of the token never sends it', () async {
+      final downloader = _ScriptedDownloader(body: fixtureBytes);
+      final provisioner = ModelProvisioner(
+        storage: storage,
+        downloader: downloader,
+        authToken: 'hf_test_token',
+      );
+      final committed = ModelDescriptor(
+        id: 'committed-test',
+        displayName: 'Committed (test fixture)',
+        fileName: 'committed-test.onnx',
+        licensePage: 'https://example.invalid/license',
+        downloadUri: Uri.parse(_sourceUrl),
+        sha256Hex: fixtureDigest,
+        sendsAuthToken: false,
+      );
+
+      final result = await provisioner.provision(committed);
+
+      expect(result, isA<ModelVerified>());
+      expect(
+        downloader.lastToken,
+        isNull,
+        reason: 'the token belongs to the define-configured source only',
+      );
+    });
   });
 
   group('transfer failures', () {
@@ -912,9 +943,12 @@ void main() {
       () async {
         final descriptor = descriptorWith();
         await storage.prepare();
-        // What a killed process leaves behind: a partial staging directory
-        // under the bare suffix (an older build) and under a nonce (this one).
-        // Neither carries resumable state.
+        // What a killed process leaves behind: partial staging *directories*
+        // (this build's shape — bare-suffix and nonced), and partial staging
+        // *files* at the root, which is what a Task 1.7 build staged as. The
+        // file shape matters most (R0-F2): an upgraded device can carry a
+        // gigabyte-scale `<fileName>.part.<nonce>` that nothing but this sweep
+        // will ever touch again.
         await storage.stagingDir(descriptor).create(recursive: true);
         await File(
           '${storage.stagingDir(descriptor).path}/partial.litertlm',
@@ -923,6 +957,14 @@ void main() {
         await File(
           '${storage.stagingDir(descriptor, nonce: '999-0').path}/w.litertlm',
         ).writeAsBytes(utf8.encode('another abandoned transfer'));
+        final legacyBare = File(
+          '${storage.root.path}/${descriptor.soleFile.fileName}.part',
+        );
+        final legacyNonced = File(
+          '${storage.root.path}/${descriptor.soleFile.fileName}.part.123-4',
+        );
+        await legacyBare.writeAsBytes(utf8.encode('1.7 partial body'));
+        await legacyNonced.writeAsBytes(utf8.encode('1.7 nonced partial'));
         expect(await _stagingLeftovers(storage, descriptor), hasLength(2));
 
         final provisioner = ModelProvisioner(
@@ -942,6 +984,16 @@ void main() {
           await _stagingLeftovers(storage, descriptor),
           isEmpty,
           reason: 'abandoned transfers must be swept',
+        );
+        expect(
+          legacyBare.existsSync(),
+          isFalse,
+          reason: '1.7-shaped staging files must be swept too (R0-F2)',
+        );
+        expect(
+          legacyNonced.existsSync(),
+          isFalse,
+          reason: '1.7-shaped staging files must be swept too (R0-F2)',
         );
       },
     );

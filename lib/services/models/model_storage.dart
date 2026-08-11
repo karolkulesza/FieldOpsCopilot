@@ -175,7 +175,8 @@ class ModelStorage {
   static const String stagingSuffix = '.part';
 
   /// Deletes every staging directory for [descriptor], whatever its nonce,
-  /// except [keep].
+  /// except [keep] — plus any staging *files* a Task 1.7 build left at the
+  /// root, which nothing writes any more and nothing else would ever clean.
   ///
   /// A process killed mid-transfer leaves its `.part.<nonce>` behind with nothing
   /// to resume it, so those bytes are swept rather than accumulated — a
@@ -197,8 +198,27 @@ class ModelStorage {
     if (!await root.exists()) return;
     final prefix = '${descriptor.id}$stagingSuffix';
     await for (final entry in root.list(followLinks: false)) {
+      final name = p.basename(entry.path);
+      // Task 1.7 staged as root-level *files* named `<fileName>.part[.<nonce>]`
+      // — a shape this build no longer writes but an upgraded device can still
+      // carry, at up to 2.6GB per abandoned transfer (review finding R0-F2).
+      // They match neither the directory check nor the id-based prefix below,
+      // so they get their own sweep; `keep` never applies, because no current
+      // transfer stages as a file.
+      if (entry is File) {
+        final isLegacyStaging = descriptor.files.any(
+          (file) => name.startsWith('${file.fileName}$stagingSuffix'),
+        );
+        if (!isLegacyStaging) continue;
+        try {
+          await entry.delete();
+        } on FileSystemException {
+          continue;
+        }
+        continue;
+      }
       if (entry is! Directory) continue;
-      if (!p.basename(entry.path).startsWith(prefix)) continue;
+      if (!name.startsWith(prefix)) continue;
       if (keep != null && p.equals(entry.path, keep.path)) continue;
       try {
         await entry.delete(recursive: true);
@@ -396,6 +416,18 @@ class ModelStorage {
           } on FileSystemException catch (error) {
             debugPrint(
               'legacy model receipt migration failed: ${error.message}',
+            );
+          }
+        } else {
+          // A legacy sidecar with nothing to migrate against — its artifact is
+          // gone, or the new layout already carries a receipt. Either way no
+          // code path reads the root location again, so leaving it would be
+          // permanent clutter (raised as a non-blocking Round 0 review note).
+          try {
+            await legacyReceipt.delete();
+          } on FileSystemException catch (error) {
+            debugPrint(
+              'stale legacy model receipt not removed: ${error.message}',
             );
           }
         }

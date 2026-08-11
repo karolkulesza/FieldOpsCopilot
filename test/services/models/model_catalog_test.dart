@@ -46,6 +46,48 @@ void main() {
       );
     });
 
+    // R0-F1: the STT id is a documented catalog value an operator can pass as
+    // FIELDOPS_MODEL_ID, and before the fix it crashed every reader of
+    // `active` with a StateError out of `soleFile` — before the first frame.
+    test('a multi-file FIELDOPS_MODEL_ID falls back to the primary LLM '
+        'instead of throwing', () {
+      final active = ModelCatalog.activeFor(ModelCatalog.sttZipformerId);
+
+      expect(active.id, ModelCatalog.gemma4E2bId);
+      expect(active.files, hasLength(1));
+    });
+
+    test('an unknown FIELDOPS_MODEL_ID falls back to the primary LLM', () {
+      expect(ModelCatalog.activeFor('a-typo').id, ModelCatalog.gemma4E2bId);
+    });
+
+    test('a known single-file FIELDOPS_MODEL_ID is honoured', () {
+      expect(
+        ModelCatalog.activeFor(ModelCatalog.gemma31bId).id,
+        ModelCatalog.gemma31bId,
+      );
+    });
+
+    // R0-F3: the access token pairs with the define-configured source; the
+    // committed STT entry must decline it, the Gemma entries (including the
+    // gated 3 1B) must keep it.
+    test('only the define-configured models send the access token', () {
+      expect(
+        ModelCatalog.byId(ModelCatalog.sttZipformerId)!.sendsAuthToken,
+        isFalse,
+      );
+      expect(
+        ModelCatalog.byId(ModelCatalog.gemma4E2bId)!.sendsAuthToken,
+        isTrue,
+      );
+      expect(
+        ModelCatalog.byId(ModelCatalog.gemma31bId)!.sendsAuthToken,
+        isTrue,
+      );
+      // And the overlay must not lose the flag on its way to `active`.
+      expect(ModelCatalog.active.sendsAuthToken, isTrue);
+    });
+
     test('the provisioned list is the LLM first, then the STT set', () {
       final provisioned = ModelCatalog.provisioned;
 

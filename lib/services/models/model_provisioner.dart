@@ -238,7 +238,10 @@ final class ModelAbsent extends ModelProvisionResult {
 /// untouched (TC-PROV-SET-02). The rename pass does mean a crash *between two
 /// renames* can leave a mixed set on disk; that is not a lying state — the new
 /// files have no receipts yet, so the set reads `unverified`, and the next
-/// provision re-hashes in place, keeps what matches and re-fetches what does not.
+/// provision re-hashes in place — and if any file fails that hash, re-fetches
+/// the **whole set**, not just the hole. No per-file download skip exists;
+/// deliberate at this artifact size (43.65MB), and recorded here so the doc
+/// matches the code rather than a nicer design (R0-F4).
 ///
 /// It is also the client half of the OTA-model-delivery design in the README:
 /// the server half (bucket layout, device-capability-based selection, staged
@@ -595,7 +598,11 @@ class ModelProvisioner {
       try {
         source = await _downloader.open(
           file.downloadUri!,
-          authToken: _authToken,
+          // Only where the descriptor says the token belongs — it was supplied
+          // as a pair with the *configured* model's URI, and sending it to a
+          // committed source's host would hand the credential to a third
+          // party. See [ModelDescriptor.sendsAuthToken] (R0-F3).
+          authToken: descriptor.sendsAuthToken ? _authToken : null,
         );
       } on ModelDownloadException catch (error) {
         await _deleteStaging(staging);

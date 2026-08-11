@@ -29,6 +29,8 @@
 /// unchanged either way: a file missing a pin still provisions nothing.
 library;
 
+import 'package:flutter/foundation.dart';
+
 /// Why a descriptor cannot be provisioned as configured.
 enum ModelConfigurationIssue {
   /// At least one file of the model has no download URL.
@@ -100,6 +102,7 @@ class ModelDescriptor {
     Uri? downloadUri,
     String sha256Hex = '',
     int? approximateSizeBytes,
+    this.sendsAuthToken = true,
   }) : files = List.unmodifiable([
          ModelArtifactFile(
            fileName: fileName,
@@ -119,6 +122,7 @@ class ModelDescriptor {
     required this.displayName,
     required this.licensePage,
     required List<ModelArtifactFile> files,
+    this.sendsAuthToken = true,
   }) : files = List.unmodifiable(files) {
     if (files.isEmpty) {
       throw ArgumentError.value(files, 'files', 'a model must have files');
@@ -170,6 +174,21 @@ class ModelDescriptor {
 
   /// The files this model consists of, in download order. Never empty.
   final List<ModelArtifactFile> files;
+
+  /// Whether the build's access token (`FIELDOPS_MODEL_TOKEN`), if configured,
+  /// is sent with this model's transfers.
+  ///
+  /// The token and `FIELDOPS_MODEL_URI` arrive as a pair, supplied by one
+  /// operator action for one source — so the credential goes only where the
+  /// operator pointed it (review finding R0-F3). Under Task 1.7 that pairing
+  /// was structural (one model, one URI, one token); with committed-source
+  /// models in the catalog it has to be stated: the STT entry sets this
+  /// `false`, because attaching a token meant for, say, a private LLM mirror
+  /// to `huggingface.co` requests would hand a third party the credential —
+  /// the same leak the downloader's cross-origin redirect scoping exists to
+  /// prevent. `true` remains the default so the define-configured Gemma
+  /// entries (including the gated 3 1B fallback) keep 1.7's behavior exactly.
+  final bool sendsAuthToken;
 
   /// The single file of a single-file model.
   ///
@@ -240,6 +259,7 @@ class ModelDescriptor {
       downloadUri: downloadUri,
       sha256Hex: sha256Hex,
       approximateSizeBytes: file.approximateSizeBytes,
+      sendsAuthToken: sendsAuthToken,
     );
   }
 
@@ -335,6 +355,10 @@ abstract final class ModelCatalog {
       id: sttZipformerId,
       displayName: 'Zipformer STT (en, 20M, int8)',
       licensePage: sttRepoUrl,
+      // Committed, ungated source: `FIELDOPS_MODEL_TOKEN` was supplied for the
+      // *LLM's* URI and must not travel to this repository's host — see
+      // [ModelDescriptor.sendsAuthToken].
+      sendsAuthToken: false,
       // All four measured 2026-08-10: sizes and SHA-256 pins from the HuggingFace
       // `paths-info` API (the LFS object id *is* the content SHA-256), and
       // `tokens.txt` — a non-LFS file the API carries no digest for — downloaded
@@ -402,8 +426,30 @@ abstract final class ModelCatalog {
   /// throwing at startup: a typo in a `--dart-define` should surface as a
   /// readable "not configured" state in the UI, not a crash before the first
   /// frame.
-  static ModelDescriptor get active =>
-      resolve(_catalog[_configuredId] ?? _catalog[gemma4E2bId]!);
+  static ModelDescriptor get active => activeFor(_configuredId);
+
+  /// [active] for an explicit id — the seam that lets a test reach the
+  /// fallback rules, since `String.fromEnvironment` cannot be varied at test
+  /// time.
+  ///
+  /// A **multi-file** catalog id falls back exactly like an unknown one, and
+  /// this is a rule rather than an accident (review finding R0-F1): the active
+  /// model is the *LLM*, its source and hash arrive as the one-URI/one-hash
+  /// `--dart-define` triple, and [resolve] → [ModelDescriptor.withSource] is
+  /// only coherent against exactly one file. Before Task 2.0 every entry was
+  /// single-file so any known id was safe; the STT set made
+  /// `FIELDOPS_MODEL_ID=stt-zipformer-en-20m` a value an operator can
+  /// plausibly pass, and without this rule it threw a `StateError` out of
+  /// `soleFile` in every reader of [active] — a crash before the first frame,
+  /// which is precisely what the fallback exists to prevent.
+  @visibleForTesting
+  static ModelDescriptor activeFor(String configuredId) {
+    final configured = _catalog[configuredId];
+    final llm = configured != null && configured.files.length == 1
+        ? configured
+        : _catalog[gemma4E2bId]!;
+    return resolve(llm);
+  }
 
   /// Every model this build provisions and the readiness UI reports on: the
   /// active LLM plus the committed-config STT model.
