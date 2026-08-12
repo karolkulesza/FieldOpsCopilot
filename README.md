@@ -2840,9 +2840,9 @@ failure.
 
 ### What the mutation pass found
 
-**37 targeted mutations, 37 killed, 0 survived, 0 aborted**, run with
-`--concurrency=1` against `test/services/audio` and `test/engines` (baseline 267
-passing, 5 skipped).
+**39 targeted mutations, 39 killed, 0 survived, 0 aborted** — and every killed row
+**confirmed by the test its `expect` names** — run with `--concurrency=1` against
+`test/services/audio` and `test/engines` (baseline 276 passing, 5 skipped).
 
 The pass was **re-run after review round 1, not before it** — 1.6's rule, and 2.1's
 row is blunter about why: six of its fifteen findings were claims or values introduced
@@ -2889,6 +2889,30 @@ refuses duplicate labels and duplicate edits, verifies each edit actually change
 the source before believing a survivor, and re-checks the whole tracked surface by
 `st_mtime_ns` after every row — each of those guards is one that an earlier task's
 harness lacked and paid for (1.5, 1.6, 1.9, 1.10, 2.1 respectively).
+
+**The harness checks its own claims, and that check found three things — all of them
+in the round-1 fixes, twenty minutes old.** Review round 1 noted that "killed" did not
+establish *which* test held a property, because the harness only kept the last six
+failure lines. It now compares each row's `expect` against the tests that actually
+failed, and the first run of that check reported three survivors and three mismatches:
+
+* **`if (!begun) return;` in `release` was dead** — every path reaching it had
+  `begun == true`, because the only way it could be false was a begin that threw, which
+  returns earlier. Deleted rather than kept as decoration (1.4's rule).
+* **`if (!settled) begun = true;` changed nothing observable** — after that cancel
+  `_transcribing` is false, so no later `release` reads `begun` again. Removed.
+* **One row measured the mutation rather than the suite** — it inserted a statement
+  immediately before a `return`, so it changed nothing. 1.9's recorded shape, where a
+  survivor reads as "untested" when it means "this edit does nothing". Dropped.
+
+**And the checker itself was wrong twice before it was right**, which is the part worth
+carrying. It first read failing test names out of `flutter test`'s `Failing tests:`
+block — which the default reporter **truncates** ("… and 14 more"), Task 1.4's recorded
+instrument defect verbatim — so it flagged killed rows as mismatches. Rewritten to read
+the expanded reporter's `[E]` lines, it then matched nothing at all, because this suite
+always reports 5 skips and the pattern required the pass and fail counters to be
+adjacent. A checker that cannot parse its input reports on itself. The pattern is now
+unit-checked against four sample lines before it is trusted.
 
 Its collateral detector printed six `mtime changed` notes, and they are an artifact
 of the harness rather than damage: the revert is `git checkout -- .`, which rewrites
