@@ -79,6 +79,7 @@ class SttConfig {
     this.tailPadding = defaultTailPadding,
     this.maxGapBridge = defaultMaxGapBridge,
     this.debug = false,
+    this.nativeLibraryPath,
   });
 
   /// Builds a config for a Task 2.0 install directory (`…/models/<id>/`).
@@ -152,6 +153,24 @@ class SttConfig {
   /// Whether the native library logs. Off, because it logs per decode step.
   final bool debug;
 
+  /// Directory the native sherpa library is loaded from, or `null` for the
+  /// platform default.
+  ///
+  /// **Production always leaves this null**, and on iOS and Android that is the
+  /// only value that works: the library ships inside the app bundle and
+  /// `DynamicLibrary.open` finds it by name. It is on the config — rather than
+  /// only on `SherpaRecognizerRuntime`, where it started — because the worker
+  /// builds its own runtime after the isolate hop, so a path that lives only on
+  /// the host side cannot reach it. Without it the whole-stack path (engine →
+  /// isolate → real weights) is untestable anywhere except a device, since macOS
+  /// cannot resolve `SherpaOnnxC.framework/SherpaOnnxC` by bare name and the
+  /// worker's `dlopen` fails before anything else runs.
+  ///
+  /// It is deliberately *not* a general "load the library from anywhere" feature:
+  /// it is the same seam `SherpaRecognizerRuntime.nativeLibraryPath` already was,
+  /// carried across the boundary that separated it from its only user.
+  final String? nativeLibraryPath;
+
   /// Two threads.
   ///
   /// One decode step of this model over 100ms of audio measured 86ms for the whole
@@ -190,6 +209,7 @@ class SttConfig {
     Duration? tailPadding,
     Duration? maxGapBridge,
     bool? debug,
+    String? nativeLibraryPath,
   }) => SttConfig(
     files: files ?? this.files,
     format: format ?? this.format,
@@ -201,6 +221,7 @@ class SttConfig {
     tailPadding: tailPadding ?? this.tailPadding,
     maxGapBridge: maxGapBridge ?? this.maxGapBridge,
     debug: debug ?? this.debug,
+    nativeLibraryPath: nativeLibraryPath ?? this.nativeLibraryPath,
   );
 
   Map<String, Object?> toWire() => {
@@ -214,6 +235,7 @@ class SttConfig {
     'tailPaddingMs': tailPadding.inMilliseconds,
     'maxGapBridgeMs': maxGapBridge.inMilliseconds,
     'debug': debug,
+    'nativeLibraryPath': nativeLibraryPath,
   };
 
   /// Rebuilds a config from [wire].
@@ -251,6 +273,10 @@ class SttConfig {
         milliseconds: _int(wire['maxGapBridgeMs'], 'maxGapBridgeMs'),
       ),
       debug: _bool(wire['debug'], 'debug'),
+      nativeLibraryPath: _optionalString(
+        wire['nativeLibraryPath'],
+        'nativeLibraryPath',
+      ),
     );
   }
 
@@ -279,6 +305,20 @@ class SttConfig {
     if (raw is double) return raw;
     if (raw is int) return raw.toDouble();
     throw FormatException('stt config: $field is not a number ($raw)');
+  }
+
+  /// A string field that is allowed to be absent.
+  ///
+  /// Null and a non-null non-string are different failures: the first is the
+  /// documented "use the platform default", the second is a protocol bug. An
+  /// *empty* string is refused rather than treated as null — it would reach
+  /// `dlopen` as a relative path and fail somewhere much less legible.
+  static String? _optionalString(Object? raw, String field) {
+    if (raw == null) return null;
+    if (raw is String && raw.isNotEmpty) return raw;
+    throw FormatException(
+      'stt config: $field is not a non-empty string ($raw)',
+    );
   }
 
   static bool _bool(Object? raw, String field) {
