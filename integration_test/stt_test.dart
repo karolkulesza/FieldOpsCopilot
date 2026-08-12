@@ -124,9 +124,36 @@ void main() {
       expect(text, contains('error'));
       expect(last.isFinal, isTrue);
 
-      // The stream ends with a final, and the partials that preceded it were
-      // fewer than the frames — the filter in `_drain` doing its job.
-      expect(transcripts.length, lessThan(frames.length));
+      // **The bound the filter's deletion actually crosses — review finding R0-F2.**
+      // This was `lessThan(frames.length)` under a comment claiming it showed the
+      // filter working. It does not: a chunk emits nothing until decoding begins, so
+      // the count is structurally under the frame count whatever `_drain` does, and
+      // the host suite proved it by deleting the filter and staying green at 101 → 90.
+      // Half the frame count separates 25 from 90 and nothing else sits near it.
+      //
+      // Corrected here specifically because this is the AC still owed on hardware:
+      // fixing it now costs nothing, and fixing it after a device run costs the run.
+      expect(
+        transcripts.length,
+        lessThan(frames.length ~/ 2),
+        reason:
+            'measured 25 of 101 on the host with the filter and 90 of 101 without '
+            'it; a count above half the frames means it is not filtering',
+      );
+
+      // The property itself, which is what the host suite asserts: no partial repeats
+      // its predecessor within a segment. A final legitimately restates the
+      // hypothesis it is committing, so finals are excluded.
+      for (var i = 1; i < transcripts.length; i++) {
+        final previous = transcripts[i - 1];
+        final current = transcripts[i];
+        if (previous.segment != current.segment || current.isFinal) continue;
+        expect(
+          current.rawText,
+          isNot(previous.rawText),
+          reason: 'partial $i repeats its predecessor verbatim',
+        );
+      }
 
       // `102` is supplied by normalisation, because the model's vocabulary has no
       // digit tokens at all. Asserting the *raw* text lacks it is what makes that

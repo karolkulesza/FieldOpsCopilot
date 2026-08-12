@@ -161,12 +161,57 @@ void main() {
       }
     });
 
-    test('a single letter in front of two digit words still resolves', () {
-      // The residue, bounded rather than eliminated and written down as such: the
-      // article "a" is a single letter. The bound is the router's — a candidate that
-      // resolves to no row lands in `unresolved` and the text survives in the
-      // residual, so the cost is one wasted lookup rather than a wrong answer.
-      expect(normalizeSpokenDigits('A ONE TWO'), 'A 12');
+    // **The residue, pinned at the width it has — review finding R1-F2.** This group
+    // used to be one line asserting `A ONE TWO` → `A 12`, which described the leak as
+    // a curiosity about the article "a". Measured, it is a class: the approximation
+    // idiom of the measurement register this app is used in, the *other* single-letter
+    // English word, and the two-letter hazard surviving at run length three.
+    //
+    // These are pinned as *current behaviour*, not as desired behaviour. They are kept
+    // on a bound rather than a hope — `RetrievalRouter` verifies every candidate by
+    // lookup, so one resolving to no row costs a lookup and not an answer — and they
+    // are here so a future narrowing cannot widen the residue unnoticed, and so nobody
+    // has to rediscover the class by accident.
+    const residue = {
+      'THERE WAS A FOUR FIVE SECOND DELAY': 'THERE WAS A 45 SECOND DELAY',
+      'I SAW A TWO THREE MILLIMETRE GAP': 'I SAW A 23 MILLIMETRE GAP',
+      'MOVE IT A ONE TWO INCHES': 'MOVE IT A 12 INCHES',
+      'A ONE TWO': 'A 12',
+      // `I` is a single-letter English word too, and the earlier write-up named only
+      // `A`.
+      'I FOUR TWO': 'I 42',
+      // The two-letter narrowing is closed at run length two and *not* at three —
+      // raising the unprefixed floor to 3 admits exactly these.
+      'NO ONE TWO THREE OF THEM WORK': 'NO 123 OF THEM WORK',
+      'IS O ONE TWO OF THE DOORS': 'IS 012 OF THE DOORS',
+    };
+
+    for (final entry in residue.entries) {
+      test('residue: "${entry.key}" normalises to "${entry.value}"', () {
+        expect(normalizeSpokenDigits(entry.key), entry.value);
+      });
+    }
+
+    test('the residue does manufacture candidates, and that is recorded', () {
+      // Asserted rather than hoped: each of these produces a `faultCodePattern`
+      // candidate that did not exist before normalisation. If a future rule closes
+      // one, this fails and the docs get corrected with it.
+      for (final input in residue.keys) {
+        expect(
+          RetrievalRouter.faultCodePattern.hasMatch(input),
+          isFalse,
+          reason: '"$input" has no code before normalisation',
+        );
+        expect(
+          RetrievalRouter.faultCodePattern.hasMatch(
+            normalizeSpokenDigits(input),
+          ),
+          isTrue,
+          reason:
+              '"$input" is known residue — it does produce a candidate, which is '
+              'bounded by the router resolving it to nothing, not prevented',
+        );
+      }
     });
   });
 

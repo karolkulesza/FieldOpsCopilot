@@ -153,9 +153,12 @@ void main() {
 
       expect(ready.sampleRate, 16000);
       expect(ready.loadMillis, greaterThan(0));
-      // Generous, because this is a claim about the handshake completing rather
-      // than about a number: the host measured 466–471ms, and an assertion tight
-      // enough to pin that would fail on a slower disk for no useful reason.
+      // Generous, because this is a claim about the handshake completing rather than
+      // about a number. The measurement and the command that produced it live on
+      // `SherpaRecognizerRuntime.load` — deliberately in one place, and this comment
+      // used to carry a second, staler copy of it (R0-F11) two lines above the `print`
+      // that emits the real figure. An assertion tight enough to pin a load time would
+      // fail on a slower disk for no useful reason.
       expect(ready.loadMillis, lessThan(30000));
       // ignore: avoid_print
       print('[live] load ${ready.loadMillis}ms');

@@ -83,16 +83,41 @@ const int minimumDigitRun = 3;
 /// its designator, which `faultCodePattern`'s `\d{2,4}` accepts and which this corpus
 /// could plausibly grow.
 ///
-/// **One letter, not the one-or-two the router allows**, and that asymmetry is the
-/// point: `NO`, `IS`, `AT`, `IN` and `OF` are all two-letter English words, and it was
-/// exactly a two-letter word in front of a two-word run that produced `NO-12` and
-/// `IS-01`. A standalone single letter in dictated speech is a designator far more
-/// often than it is prose — the counter-example is the article "a", which is why
-/// `A ONE TWO` still becomes `A 12`. That residue is bounded rather than eliminated,
-/// and the bound is `RetrievalRouter`'s: a candidate that resolves to no row lands in
-/// `unresolved` and the text survives in the residual, so the cost is one wasted
-/// lookup rather than a wrong answer. It is written down here because "narrowed" is
-/// not "closed".
+/// **One letter, not the one-or-two the router allows.** `NO`, `IS`, `AT`, `IN` and
+/// `OF` are all two-letter English words, and it was a two-letter word in front of a
+/// two-word run that produced `NO-12` and `IS-01`.
+///
+/// **What remains, stated at the width it has — review finding R1-F2.** An earlier
+/// version of this paragraph described the residue as one artificial input ("the
+/// counter-example is the article 'a', which is why `A ONE TWO` still becomes
+/// `A 12`"). Measured, it is a *class*, and it is the approximation idiom of the
+/// measurement register this app is actually used in — every one of these
+/// manufactures a candidate that did not exist before normalisation:
+///
+/// ```
+/// THERE WAS A FOUR FIVE SECOND DELAY  →  … A 45 SECOND DELAY    → A-45
+/// I SAW A TWO THREE MILLIMETRE GAP    →  … A 23 MILLIMETRE GAP  → A-23
+/// MOVE IT A ONE TWO INCHES            →  … A 12 INCHES          → A-12
+/// I FOUR TWO                          →  I 42                   → I-42
+/// ```
+///
+/// **`I` is a single-letter English word too**, and the earlier write-up named only
+/// `A`. And the two-letter hazard above is closed only at run length **2** — raising
+/// the floor did not close it at 3:
+///
+/// ```
+/// NO ONE TWO THREE OF THEM WORK  →  NO 123 OF THEM WORK  → NO-123
+/// IS O ONE TWO OF THE DOORS      →  IS 012 OF THE DOORS  → IS-012
+/// ```
+///
+/// This is kept rather than chased, and the reason is a bound rather than a hope:
+/// `RetrievalRouter` verifies every candidate by lookup, so one that resolves to no
+/// row lands in `unresolved` and the text survives in the residual — the cost is a
+/// wasted lookup, not a wrong answer. R0-F3's actual harm (a *silent* skip of the
+/// structured lookup, and codes fabricated from bare `OH TWO`) is gone. What is not
+/// acceptable is describing this as one funny input, so the cases above are pinned in
+/// `spoken_digits_test.dart`'s residue group and a future narrowing cannot widen it
+/// unnoticed.
 const int minimumPrefixedDigitRun = 2;
 
 /// Rewrites runs of spoken digit words in [transcript] as digit strings.
