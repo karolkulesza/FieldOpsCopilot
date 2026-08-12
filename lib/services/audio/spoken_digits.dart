@@ -154,8 +154,9 @@ List<_Token> _tokenize(String text) {
   bool? buffering;
 
   void flush() {
-    if (buffering == null) return;
-    tokens.add(_Token(buffer.toString(), isWord: buffering!));
+    final kind = buffering;
+    if (kind == null) return;
+    tokens.add(_Token(buffer.toString(), isWord: kind));
     buffer.clear();
   }
 

@@ -4,34 +4,14 @@ import 'dart:collection';
 import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 
+import 'mic_frame.dart';
 import 'pcm_audio_format.dart';
 
-/// One buffer of captured audio, plus what was lost immediately before it.
-///
-/// [precedingGapBytes] is why this is a class and not a bare `Uint8List`. The
-/// capture backlog is bounded (see [MicCapture.maxBacklogBytes]), so a consumer
-/// that stalls loses audio — and audio lost *silently* is the worst outcome
-/// available here: a streaming recogniser fed a spliced stream returns a fluent,
-/// well-formed transcript of a sentence nobody said. Attaching the gap to the
-/// frame that follows it puts the fact in the consumer's hands at the moment it
-/// becomes relevant, rather than in a counter someone has to remember to read.
-class MicFrame {
-  const MicFrame({required this.bytes, this.precedingGapBytes = 0});
-
-  /// Signed 16-bit little-endian samples, a whole number of frames (see
-  /// [PcmAudioFormat.bytesPerFrame]). Never empty.
-  final Uint8List bytes;
-
-  /// Bytes of audio dropped between the previous [MicFrame] and this one, or 0
-  /// when the stream is continuous.
-  final int precedingGapBytes;
-
-  /// Whether audio was lost immediately before this frame.
-  bool get followsGap => precedingGapBytes > 0;
-
-  @override
-  String toString() => 'MicFrame(${bytes.length}B, gap: ${precedingGapBytes}B)';
-}
+// Task 2.2 moved `MicFrame` to its own file so `lib/engines/` can name it without
+// importing this one (which imports `package:record`). Re-exported so every
+// existing `import 'mic_capture.dart'` still sees it — the type did not move as
+// far as a caller is concerned.
+export 'mic_frame.dart' show MicFrame;
 
 /// The microphone stopped being usable part-way through a capture.
 ///

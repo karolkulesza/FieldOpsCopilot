@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'dart:typed_data';
+
+import 'package:field_ops_copilot/services/audio/mic_frame.dart';
 import 'package:field_ops_copilot/engines/fakes/fake_llm_engine.dart';
 import 'package:field_ops_copilot/engines/fakes/fake_platform_telemetry.dart';
 import 'package:field_ops_copilot/engines/fakes/fake_stt_engine.dart';
@@ -184,11 +187,66 @@ void main() {
       );
       await engine.initialize();
 
-      final audio = Stream<Uint8List>.fromIterable([Uint8List(4)]);
+      // `Stream<MicFrame>` since Task 2.2 widened the interface — the gap the
+      // capture reports has to be able to reach the recogniser.
+      final audio = Stream<MicFrame>.fromIterable([
+        MicFrame(bytes: Uint8List(4)),
+      ]);
       final results = await engine.transcribe(audio).toList();
 
       expect(results.single.text, 'E-102 error');
       expect(results.single.isFinal, isTrue);
+    });
+
+    test('rawText defaults to text when a backend does no post-processing', () {
+      const transcript = SttTranscript('E-102 error');
+      expect(transcript.rawText, 'E-102 error');
+      expect(transcript.segment, 0);
+    });
+
+    test('refuses a second concurrent transcription', () async {
+      final engine = FakeSttEngine();
+      await engine.initialize();
+
+      // Never-closing, so the first transcription is still in flight. The real
+      // engine refuses this because one `OnlineStream` exists per recogniser; the
+      // fake refuses it so a caller cannot be written against a tolerance the
+      // device does not have.
+      final first = engine.transcribe(StreamController<MicFrame>().stream);
+      first.listen(null);
+      await pumpEventQueue();
+
+      expect(
+        () => engine.transcribe(const Stream<MicFrame>.empty()),
+        throwsStateError,
+      );
+    });
+
+    test('refuses use after disposal, and refuses to be revived', () async {
+      final engine = FakeSttEngine();
+      await engine.initialize();
+      await engine.dispose();
+
+      expect(engine.isReady, isFalse);
+      expect(
+        () => engine.transcribe(const Stream<MicFrame>.empty()),
+        throwsStateError,
+      );
+      expect(engine.initialize, throwsStateError);
+    });
+
+    test('a completed transcription releases the in-flight guard', () async {
+      final engine = FakeSttEngine();
+      await engine.initialize();
+
+      await engine
+          .transcribe(
+            Stream<MicFrame>.fromIterable([MicFrame(bytes: Uint8List(2))]),
+          )
+          .toList();
+      // If the guard leaked, this would throw — which is the failure mode a
+      // `finally` exists to prevent and the one nothing would otherwise catch.
+      await engine.transcribe(const Stream<MicFrame>.empty()).toList();
     });
   });
 
