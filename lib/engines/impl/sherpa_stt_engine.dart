@@ -143,26 +143,36 @@ class SherpaSttEngine implements SttEngine {
       _transcribing = false;
       if (!cancelSession) return;
 
+      final pending = beginning;
+      if (pending == null) {
+        // Unreachable, and said so rather than dressed as a guard: `release` is only
+        // reached with `cancelSession: true` after `onListen` published the begin, and
+        // a stream nobody listened to never takes `_transcribing`, so the early return
+        // above already covered it. The check exists because Dart requires one to use
+        // `pending` below.
+        return;
+      }
+
       // A cancel that arrived mid-`beginSession` has to wait for the session it is
       // cancelling to exist. Awaiting the same future the opener awaits is safe in
-      // either resume order: whichever runs second sees `begun` already settled.
-      final pending = beginning;
-      if (pending != null && !begun) {
+      // either resume order: whichever runs second finds the work already done.
+      if (!begun) {
         try {
           await pending;
-          begun = true;
         } on Object {
-          // The begin failed, so there is no session to cancel — the same
-          // conclusion the `begun` guard below reaches, arrived at without
-          // pretending the failure did not happen.
+          // **The guard that a failed begin is not cancelled.** It has no session, and
+          // cancelling one that was never opened would replace the real failure with a
+          // second, less informative one.
+          //
+          // This used to be followed by a separate `if (!begun) return;`. Mutation
+          // testing after round 1 showed that line was **dead** — every path reaching
+          // it had `begun == true`, because the only way it could be false was a begin
+          // that threw, which returns here. Deleted rather than kept as decoration
+          // (1.4's rule), and `M15` now targets this `return`, which is where the
+          // property actually lives.
           return;
         }
       }
-
-      // Guarded by `begun`: a `beginSession` that failed has no session to cancel,
-      // and cancelling one that was never opened would replace the real failure with
-      // a second, less informative one.
-      if (!begun) return;
       begun = false;
       try {
         await _host.cancelSession();
@@ -262,10 +272,12 @@ class SherpaSttEngine implements SttEngine {
       beginning = begin;
       try {
         await begin;
-        // Not set when the stream has already settled: a cancel that resumed first
-        // has by then cancelled the session and cleared this, and re-raising it would
-        // leave the flag claiming a session that is gone.
-        if (!settled) begun = true;
+        // Unconditional. An earlier version guarded this with `if (!settled)`, on the
+        // theory that a cancel which resumed first had already cleared the flag — but
+        // mutation testing found the guard **changed nothing observable**: after that
+        // cancel, `_transcribing` is false, so every later `release` returns at its
+        // first line and nothing reads `begun` again. Removed rather than maintained.
+        begun = true;
       } on Object catch (error, stack) {
         await fail(error, stack);
         return;
