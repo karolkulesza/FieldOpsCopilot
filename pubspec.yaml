@@ -102,6 +102,17 @@ flutter:
 
   assets:
     - assets/elevator_manual_seed.json
+    # Task 2.2's recorded utterance, bundled so `integration_test/stt_test.dart`
+    # can read it. An integration test runs *inside the app* on the device, and the
+    # app cannot reach the repository's `test/` directory — so a fixture that is
+    # not an asset is a fixture the device AC cannot use, which is how TC-MIC-01
+    # ended up unrunnable without hardware in the room.
+    #
+    # The cost is stated rather than hidden: 322KB of the release bundle for a test
+    # fixture. It is declared from `test/fixtures/` rather than copied into
+    # `assets/`, so there is exactly one file and the host suite and the device
+    # suite cannot drift onto different audio.
+    - test/fixtures/e102_utterance.wav
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
