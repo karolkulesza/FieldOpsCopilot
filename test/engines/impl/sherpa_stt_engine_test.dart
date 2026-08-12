@@ -499,6 +499,34 @@ void main() {
       );
     });
 
+    test('a beginSession that throws synchronously is reported, not lost', () async {
+      // **Review finding R2-F1, and the test that was missing when it happened.**
+      // R1-F1's fix hoisted the `beginSession()` call out of the `try` that caught it,
+      // so a *synchronous* throw escaped to the zone handler: no error on the stream,
+      // the stream never completing, and `_transcribing` never cleared — the engine
+      // wedged for life. Every host in this suite was `async` before now, so nothing
+      // could reach it.
+      //
+      // It matters beyond the regression: `SherpaSttEngine` takes any `SttHost` — that
+      // seam is the class doc's own argument — and `SttHost.beginSession` is declared
+      // `Future<void>` with nothing obliging an implementation to be `async`.
+      final host = _SyncThrowBeginHost();
+      final engine = SherpaSttEngine(config: config, host: host);
+      await engine.initialize();
+
+      await expectLater(
+        engine.transcribe(const Stream<MicFrame>.empty()).toList(),
+        throwsA(isA<SttFailure>()),
+        reason: 'the failure has to reach the consumer, not the zone handler',
+      );
+      expect(host.calls, ['start', 'begin']);
+      // And the slot is released, which is what "wedged for life" cost.
+      expect(
+        () => engine.transcribe(const Stream<MicFrame>.empty()),
+        returnsNormally,
+      );
+    });
+
     test('a begin that fails during the cancel window is not cancelled', () async {
       // The other half, and the reason `release` cannot simply set `begun` before
       // awaiting: a begin that *failed* has no session, so cancelling it would replace
@@ -614,6 +642,19 @@ class _RetryableHost extends ScriptedHost {
     started++;
     if (shouldFail()) throw const SttFailure('scripted load failure');
     return const SttReady(loadMillis: 1, sampleRate: 16000);
+  }
+}
+
+/// A host whose `beginSession` throws **synchronously** rather than returning a
+/// rejected future.
+///
+/// Deliberately not `async`: that keyword is exactly what would convert the throw into
+/// a rejected future and make this host unable to reproduce R2-F1.
+class _SyncThrowBeginHost extends ScriptedHost {
+  @override
+  Future<void> beginSession() {
+    calls.add('begin');
+    throw const SttFailure('synchronous begin failure');
   }
 }
 
