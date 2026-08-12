@@ -85,7 +85,7 @@ void main() {
       );
       final verified = result as ModelVerified;
 
-      expect(verified.sha256Hex, descriptor.sha256Hex);
+      expect(verified.sha256Hex, descriptor.soleFile.sha256Hex);
       expect(verified.file.path, storage.installedFile(descriptor).path);
       expect(await verified.file.length(), verified.sizeBytes);
       expect(verified.source, ModelVerificationSource.download);
@@ -143,7 +143,7 @@ String _describeFailure(
   ModelVerified() => 'verified',
   ModelCorrupt(:final actualSha256Hex, :final origin) =>
     '${origin.name} bytes hashed to $actualSha256Hex, expected '
-        '${descriptor.sha256Hex} — re-check FIELDOPS_MODEL_SHA256 against the '
+        '${descriptor.soleFile.sha256Hex} — re-check FIELDOPS_MODEL_SHA256 against the '
         'exact revision downloaded',
   ModelDownloadFailed(:final message, :final statusCode) =>
     'download failed${statusCode == null ? '' : ' ($statusCode)'}: $message',

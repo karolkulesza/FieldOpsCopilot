@@ -8,27 +8,58 @@ import '../../services/models/model_storage.dart';
 import '../../services/models/providers.dart';
 
 /// Shows whether verified model weights are present on this device, and offers the
-/// one action that can change it.
+/// one action that can change it — one row per provisioned model.
 ///
 /// This exists because of a demo-day failure mode, not for decoration: a
 /// first-run download of 2.6GB over venue Wi-Fi is a coin flip, so the model is
 /// pre-installed and the app has to make "are the weights actually here, and did
-/// they verify?" visible *before* someone taps Diagnose. The four states below
-/// are exactly the four answers the provisioner can give.
+/// they verify?" visible *before* someone taps Diagnose. The states below
+/// are exactly the answers the provisioner can give.
 ///
-/// Task 1.8 added the trigger underneath it. Note what the button deliberately does
-/// *not* do: it does not come back after a download whose bytes failed the pinned
-/// digest. That is a configuration error, a retry moves the same gigabytes and fails
-/// the same way, and `ModelProvisioningController` is where that rule lives.
+/// Task 2.0 turned the single banner into a **column of independent rows**, one
+/// per entry in [provisionedModelDescriptorsProvider]. Independent is the
+/// load-bearing word: each row watches its own family instance of the status and
+/// provisioning providers, so the STT set being absent renders as one warning row
+/// while the LLM's row — and everything the LLM gates, Diagnose included — is
+/// untouched (TC-PROV-MULTI-01).
+///
+/// Task 1.8 added the trigger underneath each row. Note what the button
+/// deliberately does *not* do: it does not come back after a download whose bytes
+/// failed the pinned digest. That is a configuration error, a retry moves the same
+/// gigabytes and fails the same way, and `ModelProvisioningController` is where
+/// that rule lives.
 class ModelReadinessBanner extends ConsumerWidget {
   const ModelReadinessBanner({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final descriptors = ref.watch(provisionedModelDescriptorsProvider);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < descriptors.length; i++) ...[
+          if (i > 0) const SizedBox(height: 12),
+          _ModelRow(descriptor: descriptors[i]),
+        ],
+      ],
+    );
+  }
+}
+
+/// Readiness and provisioning for one model — Task 1.7's whole banner, scoped to
+/// a descriptor.
+class _ModelRow extends ConsumerWidget {
+  const _ModelRow({required this.descriptor});
+
+  final ModelDescriptor descriptor;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final descriptor = ref.watch(activeModelDescriptorProvider);
-    final status = ref.watch(modelInstallStatusProvider);
-    final provisioning = ref.watch(modelProvisioningControllerProvider);
+    final status = ref.watch(modelInstallStatusProvider(descriptor.id));
+    final provisioning = ref.watch(
+      modelProvisioningControllerProvider(descriptor.id),
+    );
 
     final display = status.when(
       loading: () => const _Display(
@@ -102,8 +133,8 @@ class ModelReadinessBanner extends ConsumerWidget {
       icon: Icons.pending_outlined,
       label: 'Model needs verification',
       detail:
-          'Weights are present but unverified — run provisioning to hash '
-          'them against the pinned SHA-256.',
+          '${descriptor.displayName} — weights are present but unverified; '
+          'run provisioning to hash them against the pinned SHA-256.',
       tone: _Tone.warning,
     ),
     // "Absent" splits in two, because the operator's next action is completely
@@ -135,7 +166,7 @@ class ModelReadinessBanner extends ConsumerWidget {
   };
 }
 
-/// The action half of the banner: a trigger, a progress bar, or a reason.
+/// The action half of a row: a trigger, a progress bar, or a reason.
 ///
 /// Renders nothing at all in the common cases — weights ready, or a build that is not
 /// configured to fetch anything — because an inert button next to "Model ready" is
@@ -161,6 +192,11 @@ class _ProvisioningSection extends ConsumerWidget {
 
     if (provisioning is ProvisioningRunning) {
       final running = provisioning as ProvisioningRunning;
+      // "file 2 of 4" earns its place only on a set; on a single-file model it
+      // would be noise that is always "1 of 1".
+      final fileAnnotation = running.fileCount > 1
+          ? ' (file ${running.fileIndex} of ${running.fileCount})'
+          : '';
       return Padding(
         padding: const EdgeInsets.only(top: 12),
         child: Column(
@@ -174,10 +210,11 @@ class _ProvisioningSection extends ConsumerWidget {
             Text(switch (running.phase) {
               ModelProvisionPhase.downloading =>
                 running.fraction == null
-                    ? 'Downloading weights…'
-                    : 'Downloading weights — '
+                    ? 'Downloading weights$fileAnnotation…'
+                    : 'Downloading weights$fileAnnotation — '
                           '${(running.fraction! * 100).floor()}%',
-              ModelProvisionPhase.verifying => 'Verifying SHA-256…',
+              ModelProvisionPhase.verifying =>
+                'Verifying SHA-256$fileAnnotation…',
             }, style: theme.textTheme.bodySmall),
           ],
         ),
@@ -214,7 +251,11 @@ class _ProvisioningSection extends ConsumerWidget {
               padding: const EdgeInsets.only(top: 8),
               child: FilledButton.tonalIcon(
                 onPressed: () => ref
-                    .read(modelProvisioningControllerProvider.notifier)
+                    .read(
+                      modelProvisioningControllerProvider(
+                        descriptor.id,
+                      ).notifier,
+                    )
                     .provision(),
                 icon: const Icon(Icons.download),
                 // The two labels are different work: one fetches gigabytes, the other

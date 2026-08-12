@@ -4,6 +4,7 @@ import 'package:field_ops_copilot/services/database/database_initializer.dart';
 import 'package:field_ops_copilot/services/database/database_service.dart';
 import 'package:field_ops_copilot/services/database/providers.dart';
 import 'package:field_ops_copilot/services/database/seed_data.dart';
+import 'package:field_ops_copilot/services/models/model_descriptor.dart';
 import 'package:field_ops_copilot/services/models/providers.dart';
 import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -237,7 +238,9 @@ void main() {
         addTearDown(container.dispose);
 
         await expectLater(
-          container.read(modelInstallStatusProvider.future),
+          container.read(
+            modelInstallStatusProvider(ModelCatalog.active.id).future,
+          ),
           throwsA(isA<MissingPluginException>()),
         );
         expect(storageBuilds, 1);
