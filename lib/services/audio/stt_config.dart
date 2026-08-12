@@ -123,17 +123,33 @@ class SttConfig {
 
   /// Silence appended after the last real audio, before the input is closed.
   ///
-  /// **Measured, not guessed.** Running this model over the unpadded fixture on
-  /// the macOS host produced `IS VIBRATING EWAIN O` and stopped: the final words
-  /// never appeared. A streaming zipformer decodes with right context (this
-  /// artifact's own ONNX metadata reports `decode_chunk_len=32`, `T=39`), and
-  /// `inputFinished()` does *not* synthesise the frames the encoder is still
-  /// waiting for — it only stops the stream accepting more. Re-running with 0.8s
-  /// of trailing silence produced `… O TWO ERROR`.
+  /// A streaming zipformer decodes with right context (this artifact's own ONNX
+  /// metadata reports `decode_chunk_len=32`, `T=39`), and `inputFinished()` does
+  /// *not* synthesise the frames the encoder is still waiting for — it only stops the
+  /// stream accepting more. So without this the last word of an utterance is dropped
+  /// silently, which is the same defect Task 2.1 found in its own `stop()` and for a
+  /// completely different reason.
   ///
-  /// So this is not padding for tidiness: without it the last word of every
-  /// utterance is dropped, silently, which is the same defect Task 2.1 found in
-  /// its own `stop()` and for a completely different reason.
+  /// **Measured — and measured at a narrower width than an earlier version of this
+  /// comment claimed, which is why the claim is stated with its scope attached.** That
+  /// version said the padding was worth 0.8s because an unpadded run "produced
+  /// `IS VIBRATING EWAIN O` and stopped". Review finding **R0-F4** re-ran both
+  /// configurations over the committed fixture and got **identical** transcripts, with
+  /// neither quoted string reproducible in either — the fixture ends in 0.8s of
+  /// silence of its own, so this padding had nothing left to add to it.
+  ///
+  /// What holds is the live-microphone case: audio that ends **at** the last word,
+  /// which is what `MicCapture.stop()` produces when the technician releases the
+  /// button. Reproducible, over the fixture with its trailing silence stripped
+  /// (`sherpa_recognizer_live_test.dart`, `flutter test … --dart-define=FIELDOPS_STT_MODEL_DIR=…`):
+  ///
+  /// ```
+  /// unpadded  "… THE FALK CODE IS E ONE OH TWO PLEASE"
+  /// padded    "… THE FALK CODE IS E ONE OH TWO PLEASE ADVISE"
+  /// ```
+  ///
+  /// Exactly one word, and it is the last one. That test asserts the *difference*
+  /// rather than the padded run alone, so deleting the padding fails it.
   final Duration tailPadding;
 
   /// Most silence that will be inserted to stand in for dropped audio.
@@ -153,22 +169,37 @@ class SttConfig {
   /// Whether the native library logs. Off, because it logs per decode step.
   final bool debug;
 
-  /// Directory the native sherpa library is loaded from, or `null` for the
-  /// platform default.
+  /// Root the plugin composes its per-platform library path **under**, or `null` for
+  /// the platform default.
   ///
-  /// **Production always leaves this null**, and on iOS and Android that is the
-  /// only value that works: the library ships inside the app bundle and
-  /// `DynamicLibrary.open` finds it by name. It is on the config — rather than
-  /// only on `SherpaRecognizerRuntime`, where it started — because the worker
-  /// builds its own runtime after the isolate hop, so a path that lives only on
-  /// the host side cannot reach it. Without it the whole-stack path (engine →
-  /// isolate → real weights) is untestable anywhere except a device, since macOS
-  /// cannot resolve `SherpaOnnxC.framework/SherpaOnnxC` by bare name and the
-  /// worker's `dlopen` fails before anything else runs.
+  /// **Not "the directory the library is in" — review finding R0-F8.** Read in
+  /// `sherpa_onnx-1.13.5/lib/src/init_native.dart`, the plugin appends a different
+  /// suffix per platform, so on macOS the library sits five directories below the
+  /// value passed:
   ///
-  /// It is deliberately *not* a general "load the library from anywhere" feature:
-  /// it is the same seam `SherpaRecognizerRuntime.nativeLibraryPath` already was,
-  /// carried across the boundary that separated it from its only user.
+  /// ```
+  /// macOS   $path/sherpa_onnx_macos/SherpaOnnxC.xcframework/macos-arm64_x86_64/SherpaOnnxC.framework/SherpaOnnxC
+  /// Android $path/libsherpa-onnx-c-api.so
+  /// iOS     ignored — the iOS branch returns the bare-name open whatever `path` is
+  /// ```
+  ///
+  /// **Production always leaves this null.** On Android that is the only value that
+  /// works (the bare `libsherpa-onnx-c-api.so` resolves from the app's lib
+  /// directory); on iOS it is the only value that *means* anything, since the
+  /// parameter is discarded there. An earlier version of this comment said "on iOS and
+  /// Android that is the only value that works", which was true of Android and false
+  /// of iOS for that second reason.
+  ///
+  /// It is on the config — rather than only on `SherpaRecognizerRuntime`, where it
+  /// started — because the worker builds its own runtime after the isolate hop, so a
+  /// path that lives only on the host side cannot reach it. Without it the whole-stack
+  /// path (engine → isolate → real weights) is untestable anywhere except a device,
+  /// since macOS cannot resolve the framework by bare name and the worker's `dlopen`
+  /// fails before anything else runs.
+  ///
+  /// It is deliberately *not* a general "load the library from anywhere" feature: it
+  /// is the same seam `SherpaRecognizerRuntime.nativeLibraryPath` already was, carried
+  /// across the boundary that separated it from its only user.
   final String? nativeLibraryPath;
 
   /// Two threads.
@@ -188,12 +219,12 @@ class SttConfig {
   /// long for a pause between words.
   static const double defaultTrailingSilenceSeconds = 1.2;
 
-  /// 0.8 seconds — the value the host measurement in [tailPadding] used.
+  /// 0.8 seconds — the value [tailPadding]'s measurement used.
   ///
-  /// Recorded as "the padding that was observed to work", not as a minimum: the
-  /// experiment that produced it compared 0.8s against *none*, so the shortest
-  /// sufficient padding is unmeasured. It costs 0.8s of silent decoding at the end
-  /// of a capture, which at this model's speed is single-digit milliseconds.
+  /// Recorded as "the padding that was observed to recover the last word", not as a
+  /// minimum: the experiment compared 0.8s against *none*, so the shortest sufficient
+  /// padding is unmeasured. It costs 0.8s of silent decoding at the end of a capture,
+  /// which at this model's speed is single-digit milliseconds.
   static const Duration defaultTailPadding = Duration(milliseconds: 800);
 
   /// 3 seconds.

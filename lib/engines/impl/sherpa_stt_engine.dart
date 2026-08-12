@@ -91,7 +91,6 @@ class SherpaSttEngine implements SttEngine {
     if (_transcribing) {
       throw StateError('a transcription is already in flight');
     }
-    _transcribing = true;
     return _transcribe(frames);
   }
 
@@ -202,6 +201,31 @@ class SherpaSttEngine implements SttEngine {
     }
 
     out.onListen = () async {
+      // **The in-flight slot is taken here, not in [transcribe] — review finding
+      // R0-F6.** Taking it at the call site meant a stream that was built and never
+      // listened to held it forever: nothing leaks on the worker (no session was ever
+      // opened), but the engine refuses every later `transcribe` until it is disposed,
+      // recoverable only by rebuilding the provider graph.
+      //
+      // This is a deliberate divergence from `IsolateInferenceHost.generate`, which
+      // sends its request eagerly and says why — "that is what actually happens on
+      // device: asking for a turn starts the decode". The asymmetry is real and the
+      // reason is that the two costs are opposite. A generation turn *has already
+      // begun* on the accelerator, so the events must be buffered for a late
+      // listener; a recognition session has nothing to begin until audio arrives, so
+      // there is nothing to lose by waiting and a wedged engine to gain by not.
+      if (_transcribing) {
+        // Only reachable when two streams were built before either was listened to;
+        // the synchronous refusal in [transcribe] covers the ordinary case. Reported
+        // on the stream rather than thrown, because `onListen` has no caller to throw
+        // at.
+        settled = true;
+        out.addError(StateError('a transcription is already in flight'));
+        await out.close();
+        return;
+      }
+      _transcribing = true;
+
       try {
         await _host.beginSession();
         begun = true;

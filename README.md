@@ -2590,7 +2590,7 @@ that runs to completion on the calling thread**, read in
 `sherpa_onnx-1.13.5/lib/src/`:
 
 - `OnlineRecognizer(config)` is a *constructor* that loads three ONNX graphs —
-  456–773ms measured on the macOS host.
+  337–773ms over nine runs here, 371–476ms over four on the reviewer's host.
 - `decode(stream)` runs the encoder, decoder and joiner.
 - `acceptWaveform` allocates native memory and copies the samples into it.
 
@@ -2660,11 +2660,39 @@ returning a plausible answer grounded in whatever bm25 ranked first. Task 1.9's
 device run already recorded how reachable that is: stop words match, so almost any
 English sentence is a full-text hit.
 
-`spoken_digits.dart` rewrites runs of digit words as digits. The floor is **two**
-consecutive digit words, which is Task 1.4's floor for Task 1.4's reason one step
-earlier: `ONE`, `TWO`, `FOUR` and `O` are ordinary English, and rewriting "one of
-the guide shoes is loose" would corrupt the very inquiry the retrieval path then
-runs on. English says "one oh two" only when spelling something out.
+`spoken_digits.dart` rewrites runs of digit words as digits. The floor is **three**
+consecutive digit words, or **two** when a single-letter designator immediately
+precedes them (`B THREE FOUR` → `B 34`).
+
+It was two flat, justified by "a run of two or more is not prose — English says 'one
+oh two' only when spelling something out", and **review finding R0-F3 refuted that by
+running the shipped function**:
+
+```
+OH TWO OF THEM ARE LOOSE   →  02 OF THEM ARE LOOSE
+NO ONE TWO WEEKS AGO       →  NO 12 WEEKS AGO
+O ONE OF THE DOORS JAMMED  →  01 OF THE DOORS JAMMED
+```
+
+And the harm was *worse* than the one the floor existed to prevent, not milder.
+`faultCodePattern` takes a **one or two letter** prefix, so a short English word in
+front of a false positive manufactures a code candidate — measured through the real
+pattern, `IS O ONE OF THE GUIDE SHOES` → `IS-01` and `NO ONE TWO WEEKS AGO` →
+`NO-12`. So the step written to stop a dictated inquiry *silently skipping* the
+structured lookup was instead making it run that lookup on a code nobody said.
+
+Three is the corpus's own shape rather than a guess: every fault code in the seed
+asset is `E-\d{3}`. The single-letter exception is deliberately **narrower than the
+router's** `[A-Za-z]{1,2}`, because `NO`, `IS`, `AT`, `IN` and `OF` are all two-letter
+English words and it was exactly a two-letter word in front of a two-word run that
+produced those candidates. The residue is bounded rather than eliminated and is
+written down as such: the article "a" is a single letter, so `A ONE TWO` still becomes
+`A 12` — and the bound is the router's own, since a candidate resolving to no row
+lands in `unresolved` and the text survives in the residual, costing one wasted
+lookup rather than a wrong answer.
+
+The original hazard is still covered: `ONE`, `TWO`, `FOUR` and `O` are ordinary
+English, and "one of the guide shoes is loose" survives intact.
 
 The result is `E 102`, deliberately **not** joined into `E-102`:
 `faultCodePattern` already spans the space, so a hyphen would change how the
@@ -2747,7 +2775,7 @@ weights → recorded fixture, on macOS arm64:
 
 | | |
 |---|---|
-| recognizer load | 456–773ms over four runs |
+| recognizer load | 337–773ms over nine runs (371–476ms on a second host) |
 | frames in / transcripts out | 101 / 25 |
 | final transcript | `U K THE CABIN IS VIBRATING BADLY IN THE PANEL IS SHOWING AN ERROR THE FALK CODE IS E 102 PLEASE ADVISE` |
 

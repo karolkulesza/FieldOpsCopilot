@@ -77,7 +77,7 @@ void main() {
       );
 
       // A handshake bound rather than a performance target. The host measured
-      // 456–773ms; 30s is loose enough that a slow first read off flash cannot make
+      // 337–773ms; 30s is loose enough that a slow first read off flash cannot make
       // this flaky, and tight enough that a wedged handshake fails instead of
       // hanging until the harness times out.
       expect(watch.elapsedMilliseconds, lessThan(30000));

@@ -23,6 +23,12 @@ void main() {
         tailPadding: Duration(milliseconds: 111),
         maxGapBridge: Duration(milliseconds: 222),
         debug: true,
+        // Review finding R0-F5: this was the one field left at its default, so the
+        // comment below was false about it — and two mutations proved it, both
+        // surviving 244 green tests: `toWire` sending `null` (which destroys the
+        // field's entire reason for existing, carrying the path across the isolate
+        // hop) and `_optionalString` accepting `''`.
+        nativeLibraryPath: '/opt/sherpa-root',
       );
 
       // Every value here differs from its default, so a field the codec forgets
@@ -43,6 +49,16 @@ void main() {
       expect(restored.tailPadding, const Duration(milliseconds: 111));
       expect(restored.maxGapBridge, const Duration(milliseconds: 222));
       expect(restored.debug, isTrue);
+      expect(restored.nativeLibraryPath, '/opt/sherpa-root');
+    });
+
+    test('a null nativeLibraryPath survives as null, not as an empty string', () {
+      // The documented "use the platform default", and the only value production
+      // ever passes — so it has to round-trip as itself rather than as something
+      // `dlopen` would treat as a relative path.
+      const original = SttConfig(files: files);
+      expect(original.nativeLibraryPath, isNull);
+      expect(SttConfig.fromWire(original.toWire()).nativeLibraryPath, isNull);
     });
 
     test('an int where a double is expected is accepted', () {
@@ -98,6 +114,23 @@ void main() {
     test('a non-numeric trailingSilenceSeconds', () {
       expect(
         () => SttConfig.fromWire(wireWith('trailingSilenceSeconds', 'long')),
+        throwsFormatException,
+      );
+    });
+
+    test('an empty nativeLibraryPath — refused rather than read as null', () {
+      // The branch that had a three-sentence doc paragraph and no test (R0-F5). An
+      // empty string is not "use the platform default": it reaches `dlopen` as a
+      // relative path and fails somewhere far less legible than here.
+      expect(
+        () => SttConfig.fromWire(wireWith('nativeLibraryPath', '')),
+        throwsFormatException,
+      );
+    });
+
+    test('a non-string nativeLibraryPath is refused', () {
+      expect(
+        () => SttConfig.fromWire(wireWith('nativeLibraryPath', 7)),
         throwsFormatException,
       );
     });

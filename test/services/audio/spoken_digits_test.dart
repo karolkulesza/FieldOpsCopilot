@@ -36,9 +36,43 @@ void main() {
       expect(normalizeSpokenDigits('THE O RING'), 'THE O RING');
     });
 
-    test('a run of exactly the floor is rewritten', () {
-      expect(minimumDigitRun, 2);
-      expect(normalizeSpokenDigits('LEVEL TWO ONE'), 'LEVEL 21');
+    test('a run of exactly the unprefixed floor is rewritten', () {
+      expect(minimumDigitRun, 3);
+      expect(normalizeSpokenDigits('LEVEL TWO ONE FIVE'), 'LEVEL 215');
+    });
+
+    test('one word short of the unprefixed floor is left alone', () {
+      // `LEVEL TWO ONE` used to become `LEVEL 21`. It no longer does, and the reason
+      // is R0-F3: a two-word run with an ordinary English word in front of it is
+      // where the fabricated codes came from.
+      expect(normalizeSpokenDigits('LEVEL TWO ONE'), 'LEVEL TWO ONE');
+    });
+
+    test('a single-letter designator lowers the floor to two', () {
+      expect(minimumPrefixedDigitRun, 2);
+      expect(normalizeSpokenDigits('B THREE FOUR'), 'B 34');
+      expect(normalizeSpokenDigits('E OH ONE'), 'E 01');
+    });
+
+    test('a two-letter word does not lower the floor', () {
+      // The asymmetry with `faultCodePattern`'s `[A-Za-z]{1,2}` is deliberate: `NO`,
+      // `IS`, `AT`, `IN` and `OF` are all two-letter English words, and it was
+      // exactly a two-letter word in front of a two-word run that produced `NO-12`.
+      expect(
+        normalizeSpokenDigits('NO ONE TWO WEEKS AGO'),
+        'NO ONE TWO WEEKS AGO',
+      );
+      expect(
+        normalizeSpokenDigits('IS O ONE OF THE DOORS'),
+        'IS O ONE OF THE DOORS',
+      );
+    });
+
+    test('a designator separated by punctuation does not lower the floor', () {
+      // `precededBySingleLetter` walks back over whitespace only: a comma between a
+      // letter and its digits is a list, not a code.
+      expect(normalizeSpokenDigits('E, ONE TWO'), 'E, ONE TWO');
+      expect(normalizeSpokenDigits('E   ONE TWO'), 'E   12');
     });
 
     test('whitespace and punctuation outside a run survive verbatim', () {
@@ -63,7 +97,10 @@ void main() {
     });
 
     test('the run ends at the first non-digit word', () {
-      expect(normalizeSpokenDigits('ONE TWO PLEASE THREE'), '12 PLEASE THREE');
+      expect(
+        normalizeSpokenDigits('ONE TWO FIVE PLEASE THREE'),
+        '125 PLEASE THREE',
+      );
     });
 
     test('is case-insensitive on input and leaves other casing alone', () {
@@ -80,6 +117,76 @@ void main() {
         normalizeSpokenDigits(measuredTranscript.split(' IS E ').first),
         measuredTranscript.split(' IS E ').first,
       );
+    });
+  });
+
+  group('the false positives that refuted the old rule (R0-F3)', () {
+    // Every input here came from the reviewer running the *shipped* function, and
+    // every one of them produced digits under the old floor of two. Two of them then
+    // produced a fault-code candidate through Task 1.4's real pattern — which is
+    // strictly worse than the harm the floor existed to prevent, because it turns
+    // "silently skips the structured lookup" into "runs the structured lookup on a
+    // code nobody said".
+    const wasRewritten = {
+      'OH TWO OF THEM ARE LOOSE': '02 OF THEM ARE LOOSE',
+      'OH ONE MORE THING': '01 MORE THING',
+      'NO ONE TWO WEEKS AGO': 'NO 12 WEEKS AGO',
+      'O ONE OF THE DOORS JAMMED': '01 OF THE DOORS JAMMED',
+      'IS O ONE OF THE DOORS JAMMED': 'IS 01 OF THE DOORS JAMMED',
+      'THE DOOR IS O ONE OF THE GUIDE SHOES':
+          'THE DOOR IS 01 OF THE GUIDE SHOES',
+    };
+
+    for (final entry in wasRewritten.entries) {
+      test('"${entry.key}" survives verbatim', () {
+        expect(
+          normalizeSpokenDigits(entry.key),
+          entry.key,
+          reason: 'under the old floor of two this became "${entry.value}"',
+        );
+      });
+    }
+
+    test('none of them produces a fault-code candidate any more', () {
+      // The half that actually caused harm. `IS-01` and `NO-12` were real candidates
+      // the router would have spent a lookup on.
+      for (final input in wasRewritten.keys) {
+        expect(
+          RetrievalRouter.faultCodePattern.hasMatch(
+            normalizeSpokenDigits(input),
+          ),
+          isFalse,
+          reason: '"$input" must not manufacture a code',
+        );
+      }
+    });
+
+    test('a single letter in front of two digit words still resolves', () {
+      // The residue, bounded rather than eliminated and written down as such: the
+      // article "a" is a single letter. The bound is the router's — a candidate that
+      // resolves to no row lands in `unresolved` and the text survives in the
+      // residual, so the cost is one wasted lookup rather than a wrong answer.
+      expect(normalizeSpokenDigits('A ONE TWO'), 'A 12');
+    });
+  });
+
+  group('nothing inside an accepted run is deleted (R0-F7)', () {
+    // The doc says everything outside an accepted run survives verbatim. It used to
+    // say "everything", and these three inputs were the counter-examples: a run
+    // swallowed the separators between its digit words whatever they were.
+    test('a digit already in the text is not swallowed', () {
+      expect(normalizeSpokenDigits('ONE 5 TWO'), 'ONE 5 TWO');
+      expect(normalizeSpokenDigits('E ONE 5 TWO'), 'E ONE 5 TWO');
+    });
+
+    test('sentence punctuation between digit words is not swallowed', () {
+      expect(normalizeSpokenDigits('TWO. OH.'), 'TWO. OH.');
+      expect(normalizeSpokenDigits('ONE, TWO'), 'ONE, TWO');
+      expect(normalizeSpokenDigits('E ONE, OH, TWO'), 'E ONE, OH, TWO');
+    });
+
+    test('a run still spans ordinary whitespace, including newlines', () {
+      expect(normalizeSpokenDigits('E ONE\n OH\tTWO'), 'E 102');
     });
   });
 

@@ -48,26 +48,64 @@ const Map<String, String> spokenDigitWords = {
   'NINE': '9',
 };
 
-/// Shortest run of digit words that is treated as a number.
+/// Shortest run of digit words that is treated as a number **on its own**.
 ///
-/// **Two, and it is the same floor Task 1.4 chose for the same reason.**
-/// `faultCodePattern` requires `\d{2,4}` because a one- or two-letter word
-/// followed by a *single* digit is overwhelmingly prose — "torque to 8 Nm" is the
-/// example that file records. Here the equivalent hazard is one step earlier and
-/// much more likely: `ONE`, `TWO`, `FOUR` and `O` are ordinary English words, and
-/// rewriting "one of the guide shoes is loose" into "1 of the guide shoes"
-/// would corrupt the inquiry that the whole retrieval path then runs on.
+/// **Three, raised from two by review finding R0-F3, and the earlier value came with
+/// a false justification.** The comment here used to end "A run of two or more is not
+/// prose. English says 'one oh two' only when spelling something out." The reviewer
+/// ran the shipped function and refuted it in four inputs:
 ///
-/// A run of two or more is not prose. English says "one oh two" only when
-/// spelling something out.
-const int minimumDigitRun = 2;
+/// ```
+/// OH TWO OF THEM ARE LOOSE   →  02 OF THEM ARE LOOSE
+/// OH ONE MORE THING          →  01 MORE THING
+/// NO ONE TWO WEEKS AGO       →  NO 12 WEEKS AGO
+/// O ONE OF THE DOORS JAMMED  →  01 OF THE DOORS JAMMED
+/// ```
+///
+/// And the harm was **worse than the one the floor was chosen to prevent**, not
+/// milder. `faultCodePattern` is `\b([A-Za-z]{1,2})[\s…]?(\d{2,4})\b` — a *one or
+/// two letter* prefix — so any short English word in front of a false-positive run
+/// manufactures a code candidate: `IS O ONE OF THE GUIDE SHOES` → `IS-01`,
+/// `NO ONE TWO WEEKS AGO` → `NO-12`. So the step written to stop a dictated inquiry
+/// *silently skipping* the structured lookup was instead making it run that lookup on
+/// a code nobody said. [minimumPrefixedDigitRun] is the other half of the fix.
+///
+/// Three is the corpus's own shape rather than a guess: every fault code in
+/// `assets/elevator_manual_seed.json` is `E-\d{3}` (`E-102`, `E-204`, `E-305`), so a
+/// spelled-out code is three digit words. It leaves the original hazard covered —
+/// `ONE`, `TWO`, `FOUR` and `O` are ordinary English and "one of the guide shoes is
+/// loose" must survive intact — while no longer inventing codes out of `OH TWO`.
+const int minimumDigitRun = 3;
+
+/// Shortest run accepted when a **single-letter** token immediately precedes it.
+///
+/// Two, so `B THREE FOUR` still reads as `B 34` — a two-digit code spelled out after
+/// its designator, which `faultCodePattern`'s `\d{2,4}` accepts and which this corpus
+/// could plausibly grow.
+///
+/// **One letter, not the one-or-two the router allows**, and that asymmetry is the
+/// point: `NO`, `IS`, `AT`, `IN` and `OF` are all two-letter English words, and it was
+/// exactly a two-letter word in front of a two-word run that produced `NO-12` and
+/// `IS-01`. A standalone single letter in dictated speech is a designator far more
+/// often than it is prose — the counter-example is the article "a", which is why
+/// `A ONE TWO` still becomes `A 12`. That residue is bounded rather than eliminated,
+/// and the bound is `RetrievalRouter`'s: a candidate that resolves to no row lands in
+/// `unresolved` and the text survives in the residual, so the cost is one wasted
+/// lookup rather than a wrong answer. It is written down here because "narrowed" is
+/// not "closed".
+const int minimumPrefixedDigitRun = 2;
 
 /// Rewrites runs of spoken digit words in [transcript] as digit strings.
 ///
-/// Runs shorter than [minimumDigitRun] are left as words. Everything that is not a
-/// digit word — including the whitespace between tokens — is preserved verbatim,
-/// so the result is the recogniser's transcript with substitutions applied rather
-/// than a re-rendering of it.
+/// A run is rewritten when it is at least [minimumDigitRun] words long, or at least
+/// [minimumPrefixedDigitRun] when a single-letter designator immediately precedes it.
+/// Shorter runs are left as words.
+///
+/// Everything **outside an accepted run** is preserved verbatim, whitespace included,
+/// so the result is the recogniser's transcript with substitutions applied rather than
+/// a re-rendering of it. Inside an accepted run only whitespace separates the digit
+/// words — a run stops at any other separator (review finding R0-F7), so there is
+/// nothing else in it to lose.
 ///
 /// ```
 /// AN ERROR THE FALK CODE IS E ONE OH TWO PLEASE ADVISE
@@ -85,6 +123,19 @@ String normalizeSpokenDigits(String transcript) {
 
   final tokens = _tokenize(transcript);
   final out = StringBuffer();
+
+  /// Whether the last word emitted before [index] was a single letter.
+  ///
+  /// Walks back over separators only, so `E   ONE` counts and `E, ONE` does not —
+  /// a comma between a designator and its digits is a list, not a code.
+  bool precededBySingleLetter(int index) {
+    for (var back = index - 1; back >= 0; back--) {
+      final previous = tokens[back];
+      if (previous.isWord) return previous.text.length == 1;
+      if (previous.text.trim().isNotEmpty) return false;
+    }
+    return false;
+  }
 
   var i = 0;
   while (i < tokens.length) {
@@ -108,6 +159,13 @@ String normalizeSpokenDigits(String transcript) {
         if (run.isEmpty) break;
         if (scan + 1 >= tokens.length) break;
         if (!_isDigitWord(tokens[scan + 1])) break;
+        // **Whitespace only** — review finding R0-F7. A separator carrying anything
+        // else is not whitespace between the digits of one number, and swallowing it
+        // deleted content the doc promised to preserve: `ONE 5 TWO` became `12` and
+        // `TWO. OH.` became `20.`. Ending the run here keeps "everything outside an
+        // accepted run survives verbatim" true by making the run stop at the thing
+        // that would otherwise be lost.
+        if (candidate.text.trim().isNotEmpty) break;
         run.add(candidate);
         scan++;
         continue;
@@ -118,7 +176,10 @@ String normalizeSpokenDigits(String transcript) {
     }
 
     final digitWords = run.where((t) => t.isWord).toList();
-    if (digitWords.length >= minimumDigitRun) {
+    final floor = precededBySingleLetter(i)
+        ? minimumPrefixedDigitRun
+        : minimumDigitRun;
+    if (digitWords.length >= floor) {
       for (final word in digitWords) {
         out.write(spokenDigitWords[word.text.toUpperCase()]!);
       }
