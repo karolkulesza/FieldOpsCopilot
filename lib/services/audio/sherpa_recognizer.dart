@@ -127,20 +127,22 @@ class SherpaRecognizerRuntime implements SttRecognizerRuntime {
 
   /// Builds the recogniser, synchronously, on this isolate.
   ///
-  /// **Load is 337–773 ms**, measured over nine runs on this machine (an Apple-silicon
-  /// macOS host) plus 371–476 ms over four runs on the reviewer's, both with:
+  /// **Load is 359–530 ms, median 384**, over ten consecutive runs on this host
+  /// (Apple-silicon macOS), against 371–476 ms over four runs on the reviewer's:
   ///
   /// ```sh
   /// flutter test test/services/audio/sherpa_recognizer_live_test.dart \
   ///   --dart-define=FIELDOPS_STT_MODEL_DIR=… --dart-define=FIELDOPS_SHERPA_LIB=…
   /// ```
   ///
-  /// **One figure with its command beside it — review finding R0-F11.** Two ranges
-  /// for one quantity were in circulation: `466–471ms` in two source comments and
-  /// `456–773ms` in the README, with no command recorded against either, and the
-  /// narrow band was a much tighter claim than the runs behind it could support.
-  /// The spread is real and mostly first-read-off-flash, which is why it is quoted
-  /// as a range across hosts rather than as a number.
+  /// **One figure with its command beside it — review finding R0-F11.** Two ranges for
+  /// one quantity were in circulation, `466–471ms` in two source comments and
+  /// `456–773ms` in the README, neither with a command recorded and the narrow band a
+  /// far tighter claim than its runs could support. Individual runs during development
+  /// reached 773 ms, but those were taken while other suites were running; the ten
+  /// above are consecutive and unloaded, which is why the range is quoted with how it
+  /// was produced rather than as a bare number. The spread within it is dominated by
+  /// the first read of 43MB off flash.
   @override
   Future<SttReady> load(SttConfig config) async {
     if (_recognizer != null) {

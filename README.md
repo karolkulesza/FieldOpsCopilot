@@ -2590,7 +2590,8 @@ that runs to completion on the calling thread**, read in
 `sherpa_onnx-1.13.5/lib/src/`:
 
 - `OnlineRecognizer(config)` is a *constructor* that loads three ONNX graphs —
-  337–773ms over nine runs here, 371–476ms over four on the reviewer's host.
+  359–530ms (median 384) over ten consecutive runs here, 371–476ms over four on the
+  reviewer's host.
 - `decode(stream)` runs the encoder, decoder and joiner.
 - `acceptWaveform` allocates native memory and copies the samples into it.
 
@@ -2775,7 +2776,7 @@ weights → recorded fixture, on macOS arm64:
 
 | | |
 |---|---|
-| recognizer load | 337–773ms over nine runs (371–476ms on a second host) |
+| recognizer load | 359–530ms, median 384, over ten consecutive runs (371–476ms on a second host) |
 | frames in / transcripts out | 101 / 25 |
 | final transcript | `U K THE CABIN IS VIBRATING BADLY IN THE PANEL IS SHOWING AN ERROR THE FALK CODE IS E 102 PLEASE ADVISE` |
 
@@ -2811,14 +2812,25 @@ failure.
 
 ### What the mutation pass found
 
-24 targeted mutations over the load-bearing logic this task added, run with
-`--concurrency=1` against `test/services/audio` and `test/engines` (baseline 244
-passing, 5 skipped): **24 killed, 0 survived, 0 aborted.**
+**37 targeted mutations, 37 killed, 0 survived, 0 aborted**, run with
+`--concurrency=1` against `test/services/audio` and `test/engines` (baseline 267
+passing, 5 skipped).
 
-A focused set rather than a 1.6-style full sweep, chosen the way Task 2.0 chose
-its ten — one mutation per decision that would fail *silently* if it were wrong.
-The ones worth naming, because each is a claim made elsewhere in this section and
-these are what hold it:
+The pass was **re-run after review round 1, not before it** — 1.6's rule, and 2.1's
+row is blunter about why: six of its fifteen findings were claims or values introduced
+in a *fixing* round with nothing holding them, and the only one caught before handback
+was the one whose mutation was run after the fix. Two rows had gone stale against the
+changed source and were repaired rather than dropped (`M04` keyed to
+`minimumDigitRun = 2`, which R0-F3 raised to 3; `M22` keyed to the `await drain()` that
+R0-F1's rewrite deleted — its *property* survives, so the row now breaks the emission
+ordering directly and a new test binds it). Thirteen rows were added over the code the
+fixes introduced, including **the reviewer's own two surviving mutations** (`N08`,
+`N09`), kept as rows so that regression cannot return quietly.
+
+A focused set rather than a 1.6-style full sweep, chosen the way Task 2.0 chose its
+ten — one mutation per decision that would fail *silently* if it were wrong. The ones
+worth naming, because each is a claim made elsewhere in this section and these are what
+hold it:
 
 | mutation | what it would break silently |
 |---|---|
@@ -2836,7 +2848,13 @@ these are what hold it:
 | `rawText` normalised too | the model's actual output becomes unobservable |
 | `_loading ??=` → `=` | two concurrent loads, two recognisers resident |
 | fake revives after dispose | the host suite tests a more forgiving world than the device |
-| fake stops draining the audio | the fake's ordering stops matching the real engine's |
+| fake emits on the first frame | the fake's ordering stops matching the real engine's |
+| the digit floor back to 2 | the six fabricated fault codes R0-F3 found return |
+| a two-letter word counts as a designator | `NO-12` and `IS-01` come back |
+| the run swallows non-whitespace again | `ONE 5 TWO` → `12`, deleting content |
+| `toWire` drops `nativeLibraryPath` | the field's whole purpose — crossing the hop — is void |
+| the slot taken at the call site again | an unlistened stream wedges the engine until disposal |
+| the fake's `onCancel` stops releasing | R0-F1's deadlock returns as a leak |
 
 The harness refuses a dirty baseline, asserts the match count on every edit,
 refuses duplicate labels and duplicate edits, verifies each edit actually changes
