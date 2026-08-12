@@ -2781,6 +2781,48 @@ The transcript is imperfect and deliberately quoted with its warts (`U K` for
 sprint plan, and pinning the whole string would turn a library upgrade into a
 failure.
 
+### What the mutation pass found
+
+24 targeted mutations over the load-bearing logic this task added, run with
+`--concurrency=1` against `test/services/audio` and `test/engines` (baseline 244
+passing, 5 skipped): **24 killed, 0 survived, 0 aborted.**
+
+A focused set rather than a 1.6-style full sweep, chosen the way Task 2.0 chose
+its ten — one mutation per decision that would fail *silently* if it were wrong.
+The ones worth naming, because each is a claim made elsewhere in this section and
+these are what hold it:
+
+| mutation | what it would break silently |
+|---|---|
+| `int16FullScale` 32768 → 32767 | the most negative sample leaves `[-1, 1]` |
+| `Endian.little` → `Endian.big` | every sample decodes to noise |
+| `minimumDigitRun` 2 → 1 | "one of the guide shoes" becomes "1 of the guide shoes" |
+| drop `'O': '0'` | the commonest spoken form of this corpus's codes stops resolving |
+| bridge the gap **after** the audio | the pause moves past the words it separated |
+| remove the gap cap | a 40-second dropout allocates 40 seconds of silence |
+| pad **after** `finishSession` | the padding is discarded and the last word is lost |
+| `defaultTailPadding` → zero | same, everywhere, by default |
+| remove `subscription.pause()` | back-pressure gone; the port queue grows unbounded |
+| `cancelSession: true` → `false` on cancel | a leaked native stream after every abandoned dictation |
+| normalise finals only | digits appear all at once, reading as a rewrite |
+| `rawText` normalised too | the model's actual output becomes unobservable |
+| `_loading ??=` → `=` | two concurrent loads, two recognisers resident |
+| fake revives after dispose | the host suite tests a more forgiving world than the device |
+| fake stops draining the audio | the fake's ordering stops matching the real engine's |
+
+The harness refuses a dirty baseline, asserts the match count on every edit,
+refuses duplicate labels and duplicate edits, verifies each edit actually changes
+the source before believing a survivor, and re-checks the whole tracked surface by
+`st_mtime_ns` after every row — each of those guards is one that an earlier task's
+harness lacked and paid for (1.5, 1.6, 1.9, 1.10, 2.1 respectively).
+
+Its collateral detector printed six `mtime changed` notes, and they are an artifact
+of the harness rather than damage: the revert is `git checkout -- .`, which rewrites
+the mutated file and so moves its mtime, and the check excludes only the *current*
+row's file — so the first row to use a different file reports its predecessor's.
+Said here rather than left as an unexplained line in a log, because an unexplained
+note is indistinguishable from a real one.
+
 ### Not wired into the app
 
 `sttEngineProvider` still binds `FakeSttEngine`, exactly as Tasks 1.3–1.10 shipped
