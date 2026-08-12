@@ -2980,7 +2980,15 @@ screen recording.
 
 ### Owed on a device
 
-⚠️ **TC-STT-INIT-01 and TC-STT-STRM-01 have not run on hardware.**
+✅ **Both ACs passed on the demo iPad (Air M4 / iOS 26.5), 3/3, on 2026-07-12** — load 430ms (worker 249ms) from an `absent` install, then 101 frames → 25 transcripts in 391ms with a transcript **byte-identical to the host run**.
+
+**They failed on the first attempt, on a defect no host test could see**, which is the clearest justification this task has for the device tier existing. `IsolateSttHost._teardown` completed `_workerLost` with an error on a *clean* shutdown; `IntegrationTestWidgetsFlutterBinding` reported that as an unhandled error and failed all three tests **after their bodies had passed**. My first fix was also wrong — a real `onError` handler instead of `ignore()`, which the device rejected identically — and the design answer was that the completion was never needed at all, because `_gate` serialises requests so a clean teardown has no racer to release. Every host suite was green throughout, *including* the whole-stack live run that spawns a real isolate, loads the real weights and disposes the engine.
+
+Still device-unverified: **more than one utterance through the endpointer** (the fixture is one segment, one final), the gap bridge against a real dropped buffer, and the `recognizerLost` distinction.
+
+The original owed-run text is kept below, because what it says about *why* the device tier matters is exactly what the run then demonstrated.
+
+⚠️ **TC-STT-INIT-01 and TC-STT-STRM-01 had not run on hardware.**
 `integration_test/stt_test.dart` is written and needs no defines; it provisions the
 43.65MB set first if it is absent.
 
