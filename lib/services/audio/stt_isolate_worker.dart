@@ -95,12 +95,10 @@ class IsolateSttHost implements SttHost {
 
   static Completer<Never> _lostWorkerCompleter() {
     final completer = Completer<Never>();
-    // Completing with an error and no listener is an unhandled async error, and
-    // the common case has no listener: an app that never starts the recogniser
-    // still disposes the engine on the way out. `ignore()` suppresses only the
-    // unhandled-error report; racers still receive the error normally. Copied
-    // deliberately from `IsolateInferenceHost`, where the same omission reported
-    // a crash on every clean teardown.
+    // Belt to `_teardown`'s braces. Nothing *should* complete this without a racer
+    // attached — see `_teardown`, which deliberately does not — but a future
+    // completed with an error and no listener is an unhandled async error, and on the
+    // integration-test binding an unhandled error fails whatever test is running.
     completer.future.ignore();
     return completer;
   }
@@ -238,9 +236,31 @@ class IsolateSttHost implements SttHost {
     _isolate = null;
     _lifecycle?.close();
     _lifecycle = null;
-    if (!_workerLost.isCompleted) {
-      _workerLost.completeError(const SttFailure('stt host shut down'));
-    }
+
+    // **Deliberately does not complete `_workerLost`, and that is a device finding.**
+    // This used to be `_workerLost.completeError(SttFailure('stt host shut down'))`,
+    // copied from `IsolateInferenceHost` along with the `ignore()` meant to keep it
+    // quiet. On the iPad it was **not** quiet: disposing an engine that had
+    // successfully started threw that failure as an unhandled error out of this
+    // method, and `IntegrationTestWidgetsFlutterBinding` failed all three STT ACs on
+    // it — *after their bodies had passed*. Attaching a real `onError` handler to the
+    // completer did not help either; the report happens at the completion itself.
+    //
+    // The design answer is that the completion was never needed here. `_workerLost`
+    // exists to release a request racing a worker that **died** — that is
+    // `_onWorkerLifecycleEvent`'s job, and it still does it. A *clean* teardown has no
+    // racer to release: `_gate` serialises every request, so the shutdown above queued
+    // behind whatever was in flight and that request has already been answered. And if
+    // the worker was wedged, the `.timeout(shutdownGrace)` has already given up on it.
+    // So there was nobody to notify, and notifying nobody with an error is exactly
+    // what the binding objects to.
+    //
+    // `start()` installs a fresh completer, so a later attempt never inherits this
+    // one.
+    //
+    // Only hardware said so: every host test passed, including the whole-stack live
+    // run that starts a real isolate, loads the real weights and disposes the engine.
+    // That is the clearest example this task produced of what the device tier is *for*.
     // Cleared so a retry is not refused by its predecessor's failure: after a
     // teardown there is no worker to be dead, and `start()` installs a fresh
     // `_workerLost`.
