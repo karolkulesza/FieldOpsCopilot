@@ -2920,6 +2920,15 @@ review finding **R2-F3** caught this paragraph claiming it while the committed h
 none — the check had only ever run in a shell — which is the same shape as the prose
 findings above, aimed at the instrument instead of the code.
 
+Two further tightenings came from round 2's notes. A row whose `expect` names several
+tests now needs **all** of them in the failure list rather than any one, and each row
+records *which* failing tests confirmed it, so a reader can see whether the confirming
+test covers the mutated file at all. What string matching cannot settle is whether a
+confirming test failed *because of* the mutation or merely as collateral — the reviewer
+demonstrated a row reaching CONFIRMED off pure collateral — so the confirming names are
+recorded rather than asserted, which is what let that audit be done by hand across all
+forty rows.
+
 Its collateral detector printed six `mtime changed` notes, and they are an artifact
 of the harness rather than damage: the revert is `git checkout -- .`, which rewrites
 the mutated file and so moves its mtime, and the check excludes only the *current*
