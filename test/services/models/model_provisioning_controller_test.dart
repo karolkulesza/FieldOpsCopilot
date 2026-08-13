@@ -54,7 +54,7 @@ void main() {
     );
     final container = ProviderContainer(
       overrides: [
-        activeModelDescriptorProvider.overrideWithValue(descriptor),
+        provisionedModelDescriptorsProvider.overrideWithValue([descriptor]),
         modelStorageProvider.overrideWith((ref) async => storage),
         modelProvisionerProvider.overrideWith((ref) async => provisioner),
       ],
@@ -73,12 +73,14 @@ void main() {
   test('a verified download reports success with the installed size', () async {
     final container = containerFor(body: [1, 2, 3, 4], pinnedHash: goodHash);
     final controller = container.read(
-      modelProvisioningControllerProvider.notifier,
+      modelProvisioningControllerProvider('test-model').notifier,
     );
 
     await controller.provision();
 
-    final state = container.read(modelProvisioningControllerProvider);
+    final state = container.read(
+      modelProvisioningControllerProvider('test-model'),
+    );
     expect(state, isA<ProvisioningSucceeded>());
     expect((state as ProvisioningSucceeded).sizeBytes, 4);
     expect(state.source, ModelVerificationSource.download);
@@ -89,12 +91,12 @@ void main() {
     // controller that never reported progress would look identical to a stalled one.
     final container = containerFor(body: [1, 2, 3, 4], pinnedHash: goodHash);
     final controller = container.read(
-      modelProvisioningControllerProvider.notifier,
+      modelProvisioningControllerProvider('test-model').notifier,
     );
 
     final seen = <ModelProvisioningState>[];
     container.listen(
-      modelProvisioningControllerProvider,
+      modelProvisioningControllerProvider('test-model'),
       (_, next) => seen.add(next),
       fireImmediately: true,
     );
@@ -108,13 +110,13 @@ void main() {
   test('a download that fails its digest is not retryable', () async {
     final container = containerFor(body: [1, 2, 3, 4], pinnedHash: wrongHash);
     final controller = container.read(
-      modelProvisioningControllerProvider.notifier,
+      modelProvisioningControllerProvider('test-model').notifier,
     );
 
     await controller.provision();
 
     final state =
-        container.read(modelProvisioningControllerProvider)
+        container.read(modelProvisioningControllerProvider('test-model'))
             as ProvisioningFailed;
     expect(state.retryable, isFalse);
     // The message has to point at the configuration, because that is what is wrong:
@@ -145,7 +147,7 @@ void main() {
     );
     final container = ProviderContainer(
       overrides: [
-        activeModelDescriptorProvider.overrideWithValue(descriptor),
+        provisionedModelDescriptorsProvider.overrideWithValue([descriptor]),
         modelStorageProvider.overrideWith((ref) async => storage),
         modelProvisionerProvider.overrideWith((ref) async => provisioner),
       ],
@@ -154,7 +156,7 @@ void main() {
     addTearDown(provisioner.dispose);
 
     final controller = container.read(
-      modelProvisioningControllerProvider.notifier,
+      modelProvisioningControllerProvider('test-model').notifier,
     );
     await controller.provision();
     expect(downloader.openCount, 1);
@@ -167,7 +169,7 @@ void main() {
       reason: 'the second attempt must not reach the network',
     );
     expect(
-      (container.read(modelProvisioningControllerProvider)
+      (container.read(modelProvisioningControllerProvider('test-model'))
               as ProvisioningFailed)
           .message,
       contains('same way'),
@@ -193,7 +195,7 @@ void main() {
     );
     final container = ProviderContainer(
       overrides: [
-        activeModelDescriptorProvider.overrideWith((ref) => descriptor),
+        provisionedModelDescriptorsProvider.overrideWith((ref) => [descriptor]),
         modelStorageProvider.overrideWith((ref) async => storage),
         modelProvisionerProvider.overrideWith((ref) async => provisioner),
       ],
@@ -202,23 +204,23 @@ void main() {
     addTearDown(provisioner.dispose);
 
     final controller = container.read(
-      modelProvisioningControllerProvider.notifier,
+      modelProvisioningControllerProvider('test-model').notifier,
     );
     await controller.provision();
     expect(downloader.openCount, 1);
 
     // The operator fixes the define and relaunches into the same session state.
     descriptor = descriptor.withSource(
-      downloadUri: descriptor.downloadUri,
+      downloadUri: descriptor.soleFile.downloadUri,
       sha256Hex: goodHash,
     );
-    container.invalidate(activeModelDescriptorProvider);
+    container.invalidate(provisionedModelDescriptorsProvider);
 
     await controller.provision();
 
     expect(downloader.openCount, 2);
     expect(
-      container.read(modelProvisioningControllerProvider),
+      container.read(modelProvisioningControllerProvider('test-model')),
       isA<ProvisioningSucceeded>(),
     );
   });
@@ -232,13 +234,13 @@ void main() {
       failure: const ModelDownloadException('connection reset'),
     );
     final controller = container.read(
-      modelProvisioningControllerProvider.notifier,
+      modelProvisioningControllerProvider('test-model').notifier,
     );
 
     await controller.provision();
 
     final state =
-        container.read(modelProvisioningControllerProvider)
+        container.read(modelProvisioningControllerProvider('test-model'))
             as ProvisioningFailed;
     expect(state.retryable, isTrue);
     expect(state.message, contains('connection reset'));
@@ -264,7 +266,7 @@ void main() {
     );
     final container = ProviderContainer(
       overrides: [
-        activeModelDescriptorProvider.overrideWithValue(descriptor),
+        provisionedModelDescriptorsProvider.overrideWithValue([descriptor]),
         modelStorageProvider.overrideWith((ref) async => storage),
         modelProvisionerProvider.overrideWith((ref) async => provisioner),
       ],
@@ -273,11 +275,11 @@ void main() {
     addTearDown(provisioner.dispose);
 
     final controller = container.read(
-      modelProvisioningControllerProvider.notifier,
+      modelProvisioningControllerProvider('test-model').notifier,
     );
     await controller.provision();
     expect(
-      container.read(modelProvisioningControllerProvider),
+      container.read(modelProvisioningControllerProvider('test-model')),
       isA<ProvisioningFailed>(),
     );
 
@@ -285,7 +287,7 @@ void main() {
     await controller.provision();
 
     expect(
-      container.read(modelProvisioningControllerProvider),
+      container.read(modelProvisioningControllerProvider('test-model')),
       isA<ProvisioningSucceeded>(),
     );
   });
@@ -295,7 +297,7 @@ void main() {
     () async {
       final storage = ModelStorage(root: root);
       final downloader = _FakeDownloader(body: const [1]);
-      const descriptor = ModelDescriptor(
+      final descriptor = ModelDescriptor(
         id: 'test-model',
         displayName: 'Test model',
         fileName: 'test-model.litertlm',
@@ -307,7 +309,7 @@ void main() {
       );
       final container = ProviderContainer(
         overrides: [
-          activeModelDescriptorProvider.overrideWithValue(descriptor),
+          provisionedModelDescriptorsProvider.overrideWithValue([descriptor]),
           modelStorageProvider.overrideWith((ref) async => storage),
           modelProvisionerProvider.overrideWith((ref) async => provisioner),
         ],
@@ -316,11 +318,11 @@ void main() {
       addTearDown(provisioner.dispose);
 
       await container
-          .read(modelProvisioningControllerProvider.notifier)
+          .read(modelProvisioningControllerProvider('test-model').notifier)
           .provision();
 
       final state =
-          container.read(modelProvisioningControllerProvider)
+          container.read(modelProvisioningControllerProvider('test-model'))
               as ProvisioningFailed;
       expect(state.message, contains('FIELDOPS_MODEL_URI'));
       // Nothing to retry until a build input changes.
@@ -358,7 +360,7 @@ void main() {
     );
     final container = ProviderContainer(
       overrides: [
-        activeModelDescriptorProvider.overrideWithValue(descriptor),
+        provisionedModelDescriptorsProvider.overrideWithValue([descriptor]),
         modelStorageProvider.overrideWith((ref) async => storage),
         modelProvisionerProvider.overrideWith((ref) async => provisioner),
       ],
@@ -367,11 +369,14 @@ void main() {
     addTearDown(provisioner.dispose);
 
     final controller = container.read(
-      modelProvisioningControllerProvider.notifier,
+      modelProvisioningControllerProvider('test-model').notifier,
     );
 
     var runningTransitions = 0;
-    container.listen(modelProvisioningControllerProvider, (_, next) {
+    container.listen(modelProvisioningControllerProvider('test-model'), (
+      _,
+      next,
+    ) {
       if (next is ProvisioningRunning) runningTransitions++;
     });
 
@@ -388,7 +393,7 @@ void main() {
     // depends on machine load is worse than no test.
     await downloader.opened.timeout(const Duration(seconds: 10));
     expect(
-      container.read(modelProvisioningControllerProvider),
+      container.read(modelProvisioningControllerProvider('test-model')),
       isA<ProvisioningRunning>(),
     );
     final transitionsBeforeSecondTap = runningTransitions;
@@ -413,7 +418,7 @@ void main() {
     await first;
 
     expect(
-      container.read(modelProvisioningControllerProvider),
+      container.read(modelProvisioningControllerProvider('test-model')),
       isA<ProvisioningSucceeded>(),
       reason: 'the refused tap must not have disturbed the running transfer',
     );
@@ -440,7 +445,7 @@ void main() {
     );
     final container = ProviderContainer(
       overrides: [
-        activeModelDescriptorProvider.overrideWithValue(descriptor),
+        provisionedModelDescriptorsProvider.overrideWithValue([descriptor]),
         modelStorageProvider.overrideWith((ref) async => storage),
         modelProvisionerProvider.overrideWith((ref) async => provisioner),
       ],
@@ -449,14 +454,14 @@ void main() {
     addTearDown(provisioner.dispose);
 
     final controller = container.read(
-      modelProvisioningControllerProvider.notifier,
+      modelProvisioningControllerProvider('test-model').notifier,
     );
     await controller.provision();
     await controller.provision();
 
     expect(downloader.openCount, 1);
     expect(
-      container.read(modelProvisioningControllerProvider),
+      container.read(modelProvisioningControllerProvider('test-model')),
       isA<ProvisioningSucceeded>(),
     );
   });

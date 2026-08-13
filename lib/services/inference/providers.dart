@@ -45,8 +45,13 @@ import 'inference_config.dart';
 final inferenceConfigProvider = FutureProvider<InferenceConfig?>(
   retry: noRetry,
   (ref) async {
-    final descriptor = ref.watch(activeModelDescriptorProvider);
-    final status = await ref.watch(modelInstallStatusProvider.future);
+    final descriptor = ref.watch(activeLlmDescriptorProvider);
+    // The *LLM's* family instance, and only that one: the STT set has its own
+    // readiness, and an absent STT model must not stop the agent from loading
+    // (TC-PROV-MULTI-01).
+    final status = await ref.watch(
+      modelInstallStatusProvider(descriptor.id).future,
+    );
     if (status != ModelInstallStatus.ready) return null;
 
     final storage = await ref.watch(modelStorageProvider.future);

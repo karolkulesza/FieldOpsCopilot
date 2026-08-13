@@ -151,6 +151,7 @@ void main() {
       () async {
         final descriptor = descriptorWith();
         await storage.prepare();
+        await storage.installDir(descriptor).create(recursive: true);
         await storage.installedFile(descriptor).writeAsBytes(fixtureBytes);
 
         final downloader = _ScriptedDownloader(body: fixtureBytes);
@@ -176,6 +177,7 @@ void main() {
     test('a side-loaded file that does not match the pin is deleted', () async {
       final descriptor = descriptorWith();
       await storage.prepare();
+      await storage.installDir(descriptor).create(recursive: true);
       await storage
           .installedFile(descriptor)
           .writeAsBytes(utf8.encode('truncated copy'));
@@ -270,13 +272,18 @@ void main() {
     });
 
     test('a truncated-looking hash is not accepted as a pin', () {
-      expect(descriptorWith(sha256Hex: 'abc123').hasPinnedHash, isFalse);
       expect(
-        descriptorWith(sha256Hex: fixtureDigest.toUpperCase()).hasPinnedHash,
+        descriptorWith(sha256Hex: 'abc123').soleFile.hasPinnedHash,
+        isFalse,
+      );
+      expect(
+        descriptorWith(
+          sha256Hex: fixtureDigest.toUpperCase(),
+        ).soleFile.hasPinnedHash,
         isFalse,
         reason: 'callers normalize with ModelDescriptor.normalizeHash first',
       );
-      expect(descriptorWith().hasPinnedHash, isTrue);
+      expect(descriptorWith().soleFile.hasPinnedHash, isTrue);
     });
 
     test('normalizeHash accepts what the shasum tools actually print', () {
@@ -292,10 +299,11 @@ void main() {
 
     test('catalog resolution overlays the build-time source and hash', () {
       final base = ModelCatalog.byId(ModelCatalog.gemma4E2bId)!;
-      // Shipped catalog entries carry no URL and no hash: both are deployment
-      // inputs, so the artifact is unprovisionable until they are supplied.
-      expect(base.downloadUri, isNull);
-      expect(base.hasPinnedHash, isFalse);
+      // Shipped Gemma catalog entries carry no URL and no hash: both are
+      // deployment inputs, so the artifact is unprovisionable until they are
+      // supplied.
+      expect(base.soleFile.downloadUri, isNull);
+      expect(base.soleFile.hasPinnedHash, isFalse);
       expect(base.configurationIssue, ModelConfigurationIssue.missingSource);
 
       final resolved = ModelCatalog.resolve(
@@ -304,14 +312,14 @@ void main() {
         sha256Hex: fixtureDigest.toUpperCase(),
       );
       expect(
-        resolved.downloadUri,
+        resolved.soleFile.downloadUri,
         Uri.parse('https://example.invalid/gemma.litertlm'),
       );
-      expect(resolved.sha256Hex, fixtureDigest);
+      expect(resolved.soleFile.sha256Hex, fixtureDigest);
       expect(resolved.configurationIssue, isNull);
       // Identity and layout survive the overlay.
       expect(resolved.id, base.id);
-      expect(resolved.fileName, base.fileName);
+      expect(resolved.soleFile.fileName, base.soleFile.fileName);
     });
   });
 
@@ -483,7 +491,9 @@ void main() {
       await storage.prepare();
       // A directory sitting where the artifact belongs makes the atomic rename
       // fail — the stand-in for a full disk or a permissions change.
-      await Directory(storage.installedFile(descriptor).path).create();
+      await Directory(
+        storage.installedFile(descriptor).path,
+      ).create(recursive: true);
 
       final provisioner = ModelProvisioner(
         storage: storage,
@@ -695,6 +705,7 @@ void main() {
       () async {
         final descriptor = descriptorWith();
         await storage.prepare();
+        await storage.installDir(descriptor).create(recursive: true);
         await storage
             .installedFile(descriptor)
             .writeAsBytes(utf8.encode('rotted bytes'));
@@ -763,6 +774,7 @@ void main() {
       () async {
         final descriptor = descriptorWith();
         await storage.prepare();
+        await storage.installDir(descriptor).create(recursive: true);
         await storage.installedFile(descriptor).writeAsBytes(fixtureBytes);
         // Same digest and size, different model id — e.g. a renamed catalog entry.
         await storage
@@ -805,6 +817,37 @@ void main() {
       await provisioner.provision(descriptorWith());
 
       expect(downloader.lastToken, isNull);
+    });
+
+    // R0-F3: the token is paired with the *configured* model's source. A
+    // committed-source descriptor must not carry it to its own host — in the
+    // private-mirror configuration that would ship the mirror's credential to
+    // huggingface.co.
+    test('a descriptor that opts out of the token never sends it', () async {
+      final downloader = _ScriptedDownloader(body: fixtureBytes);
+      final provisioner = ModelProvisioner(
+        storage: storage,
+        downloader: downloader,
+        authToken: 'hf_test_token',
+      );
+      final committed = ModelDescriptor(
+        id: 'committed-test',
+        displayName: 'Committed (test fixture)',
+        fileName: 'committed-test.onnx',
+        licensePage: 'https://example.invalid/license',
+        downloadUri: Uri.parse(_sourceUrl),
+        sha256Hex: fixtureDigest,
+        sendsAuthToken: false,
+      );
+
+      final result = await provisioner.provision(committed);
+
+      expect(result, isA<ModelVerified>());
+      expect(
+        downloader.lastToken,
+        isNull,
+        reason: 'the token belongs to the define-configured source only',
+      );
     });
   });
 
@@ -900,15 +943,28 @@ void main() {
       () async {
         final descriptor = descriptorWith();
         await storage.prepare();
-        // What a killed process leaves behind: a partial body under the bare
-        // suffix (an older build) and under a nonce (this one). Neither carries
-        // resumable state.
-        await storage
-            .stagingFile(descriptor)
-            .writeAsBytes(utf8.encode('leftover partial body'));
-        await storage
-            .stagingFile(descriptor, nonce: '999-0')
-            .writeAsBytes(utf8.encode('another abandoned transfer'));
+        // What a killed process leaves behind: partial staging *directories*
+        // (this build's shape — bare-suffix and nonced), and partial staging
+        // *files* at the root, which is what a Task 1.7 build staged as. The
+        // file shape matters most (R0-F2): an upgraded device can carry a
+        // gigabyte-scale `<fileName>.part.<nonce>` that nothing but this sweep
+        // will ever touch again.
+        await storage.stagingDir(descriptor).create(recursive: true);
+        await File(
+          '${storage.stagingDir(descriptor).path}/partial.litertlm',
+        ).writeAsBytes(utf8.encode('leftover partial body'));
+        await storage.stagingDir(descriptor, nonce: '999-0').create();
+        await File(
+          '${storage.stagingDir(descriptor, nonce: '999-0').path}/w.litertlm',
+        ).writeAsBytes(utf8.encode('another abandoned transfer'));
+        final legacyBare = File(
+          '${storage.root.path}/${descriptor.soleFile.fileName}.part',
+        );
+        final legacyNonced = File(
+          '${storage.root.path}/${descriptor.soleFile.fileName}.part.123-4',
+        );
+        await legacyBare.writeAsBytes(utf8.encode('1.7 partial body'));
+        await legacyNonced.writeAsBytes(utf8.encode('1.7 nonced partial'));
         expect(await _stagingLeftovers(storage, descriptor), hasLength(2));
 
         final provisioner = ModelProvisioner(
@@ -928,6 +984,16 @@ void main() {
           await _stagingLeftovers(storage, descriptor),
           isEmpty,
           reason: 'abandoned transfers must be swept',
+        );
+        expect(
+          legacyBare.existsSync(),
+          isFalse,
+          reason: '1.7-shaped staging files must be swept too (R0-F2)',
+        );
+        expect(
+          legacyNonced.existsSync(),
+          isFalse,
+          reason: '1.7-shaped staging files must be swept too (R0-F2)',
         );
       },
     );
@@ -1008,6 +1074,7 @@ void main() {
       () async {
         final descriptor = descriptorWith();
         await storage.prepare();
+        await storage.installDir(descriptor).create(recursive: true);
         await storage.installedFile(descriptor).writeAsBytes(fixtureBytes);
 
         final provisioner = ModelProvisioner(
@@ -1077,6 +1144,7 @@ void main() {
       () async {
         final descriptor = descriptorWith();
         await storage.prepare();
+        await storage.installDir(descriptor).create(recursive: true);
         await storage.installedFile(descriptor).writeAsBytes(fixtureBytes);
         await storage.receiptFile(descriptor).writeAsString('{not json');
 
@@ -1114,6 +1182,325 @@ void main() {
       },
     );
   });
+
+  group('file sets (Task 2.0)', () {
+    /// Deterministic per-file bodies, so any file's pin can be computed or
+    /// deliberately broken independently of its set-mates.
+    Uint8List bodyOf(String name) =>
+        Uint8List.fromList(utf8.encode('bytes of $name ' * (name.length + 1)));
+
+    const names = ['encoder.onnx', 'decoder.onnx', 'joiner.onnx', 'tokens.txt'];
+
+    ModelDescriptor setDescriptor({
+      Map<String, String> pinOverrides = const {},
+    }) => ModelDescriptor.fileSet(
+      id: 'stt-test',
+      displayName: 'STT (test fixture)',
+      licensePage: 'https://example.invalid/license',
+      files: [
+        for (final name in names)
+          ModelArtifactFile(
+            fileName: name,
+            downloadUri: Uri.parse('https://example.invalid/$name'),
+            sha256Hex:
+                pinOverrides[name] ?? sha256.convert(bodyOf(name)).toString(),
+            approximateSizeBytes: bodyOf(name).length,
+          ),
+      ],
+    );
+
+    _SetDownloader setDownloader({int? failOnOpen, String? serveInsteadOf}) =>
+        _SetDownloader(
+          bodies: {
+            for (final name in names)
+              'https://example.invalid/$name': serveInsteadOf == name
+                  ? Uint8List.fromList(utf8.encode('rolled revision'))
+                  : bodyOf(name),
+          },
+          failOnOpen: failOnOpen,
+        );
+
+    test(
+      'one unconfigured member makes the whole set unprovisionable',
+      () async {
+        // A set is configured only when every file is. The broken member is the
+        // third, not the first, for the same reason TC-PROV-SET-03 breaks the
+        // joiner: a check that stops at files.first would pass here.
+        ModelDescriptor withBrokenThird({required bool missingSource}) =>
+            ModelDescriptor.fileSet(
+              id: 'stt-test',
+              displayName: 'STT (test fixture)',
+              licensePage: 'https://example.invalid/license',
+              files: [
+                for (final (i, name) in names.indexed)
+                  ModelArtifactFile(
+                    fileName: name,
+                    downloadUri: i == 2 && missingSource
+                        ? null
+                        : Uri.parse('https://example.invalid/$name'),
+                    sha256Hex: i == 2 && !missingSource
+                        ? ''
+                        : sha256.convert(bodyOf(name)).toString(),
+                  ),
+              ],
+            );
+
+        expect(
+          withBrokenThird(missingSource: true).configurationIssue,
+          ModelConfigurationIssue.missingSource,
+        );
+        expect(
+          withBrokenThird(missingSource: false).configurationIssue,
+          ModelConfigurationIssue.unpinnedHash,
+        );
+
+        // And fail-closed means *nothing* is fetched — not the three configured
+        // files either.
+        final downloader = setDownloader();
+        final provisioner = ModelProvisioner(
+          storage: storage,
+          downloader: downloader,
+        );
+        final result = await provisioner.provision(
+          withBrokenThird(missingSource: false),
+        );
+        expect(result, isA<ModelNotConfigured>());
+        expect(
+          (result as ModelNotConfigured).issue,
+          ModelConfigurationIssue.unpinnedHash,
+        );
+        expect(downloader.openCount, 0);
+      },
+    );
+
+    test('a four-file set installs all-or-nothing and reports per-file '
+        'artifacts', () async {
+      final descriptor = setDescriptor();
+      final downloader = setDownloader();
+      final provisioner = ModelProvisioner(
+        storage: storage,
+        downloader: downloader,
+      );
+
+      final result = await provisioner.provision(descriptor);
+
+      expect(result, isA<ModelVerified>());
+      final verified = result as ModelVerified;
+      expect(verified.artifacts, hasLength(4));
+      expect(verified.artifacts.map((a) => a.fileName), names);
+      expect(
+        verified.sizeBytes,
+        names.map((n) => bodyOf(n).length).fold(0, (a, b) => a + b),
+      );
+      for (final file in descriptor.files) {
+        expect(
+          await storage.installedFile(descriptor, file).readAsBytes(),
+          bodyOf(file.fileName),
+        );
+      }
+      expect(await storage.statusOf(descriptor), ModelInstallStatus.ready);
+      expect(await _stagingLeftovers(storage, descriptor), isEmpty);
+    });
+
+    // TC-PROV-SET-01, end to end: the readiness the storage tests pin per file
+    // is restored by a real provision after a file goes missing.
+    test(
+      'a deleted set member takes readiness down and provision restores it',
+      () async {
+        final descriptor = setDescriptor();
+        final provisioner = ModelProvisioner(
+          storage: storage,
+          downloader: setDownloader(),
+        );
+        expect(await provisioner.provision(descriptor), isA<ModelVerified>());
+
+        await storage
+            .installedFile(descriptor, descriptor.files[2])
+            .delete(); // the joiner
+        expect(await storage.statusOf(descriptor), ModelInstallStatus.absent);
+
+        expect(await provisioner.provision(descriptor), isA<ModelVerified>());
+        expect(await storage.statusOf(descriptor), ModelInstallStatus.ready);
+      },
+    );
+
+    // TC-PROV-SET-02: transfer fails on file 3 of 4 → nothing installed.
+    test('a transfer that dies on file 3 of 4 installs nothing', () async {
+      final descriptor = setDescriptor();
+      final downloader = setDownloader(failOnOpen: 3);
+      final provisioner = ModelProvisioner(
+        storage: storage,
+        downloader: downloader,
+      );
+
+      final result = await provisioner.provision(descriptor);
+
+      expect(result, isA<ModelDownloadFailed>());
+      expect((result as ModelDownloadFailed).fileName, 'joiner.onnx');
+      expect(result.message, contains('joiner.onnx'));
+      // Files 1 and 2 transferred fine — and still nothing may exist at the
+      // install path, or an engine could load half a model.
+      expect(downloader.openCount, 3);
+      expect(storage.installDir(descriptor).existsSync(), isFalse);
+      expect(await _stagingLeftovers(storage, descriptor), isEmpty);
+      expect(await storage.statusOf(descriptor), ModelInstallStatus.absent);
+    });
+
+    // TC-PROV-SET-02, second half: "previous install (if any) intact".
+    test(
+      'a failed replacing transfer leaves the previous install untouched',
+      () async {
+        // A set installed and verified under today's pins…
+        final descriptor = setDescriptor();
+        final provisioner = ModelProvisioner(
+          storage: storage,
+          downloader: setDownloader(),
+        );
+        expect(await provisioner.provision(descriptor), isA<ModelVerified>());
+
+        // …then every pin moves to a new revision, and the transfer for it dies
+        // on file 3. The old files must survive: an offline device keeps the
+        // only weights it has. The source genuinely serves the new revision —
+        // files 1 and 2 arrive and hash correctly — so what kills this transfer
+        // is transport, not a pin mismatch.
+        final moved = setDescriptor(
+          pinOverrides: {
+            for (final name in names)
+              name: sha256
+                  .convert(utf8.encode('revision 2 of $name'))
+                  .toString(),
+          },
+        );
+        final failing = ModelProvisioner(
+          storage: storage,
+          downloader: _SetDownloader(
+            bodies: {
+              for (final name in names)
+                'https://example.invalid/$name': Uint8List.fromList(
+                  utf8.encode('revision 2 of $name'),
+                ),
+            },
+            failOnOpen: 3,
+          ),
+        );
+
+        final result = await failing.provision(moved);
+
+        expect(result, isA<ModelDownloadFailed>());
+        for (final file in descriptor.files) {
+          expect(
+            await storage.installedFile(descriptor, file).readAsBytes(),
+            bodyOf(file.fileName),
+            reason: '${file.fileName} must survive the failed replacement',
+          );
+        }
+        // Not loadable as the new revision, but present: `unverified`, the state
+        // that re-hashes rather than re-downloads on the next attempt.
+        expect(await storage.statusOf(moved), ModelInstallStatus.unverified);
+      },
+    );
+
+    // TC-PROV-SET-03: a wrong pin on *any* file fails closed. The joiner is
+    // file 3, so a hash check applied only to the first file would pass — the
+    // AC names that trap explicitly.
+    test(
+      'a wrong pin on the third file fails closed with nothing installed',
+      () async {
+        final descriptor = setDescriptor(
+          pinOverrides: {'joiner.onnx': wrongDigest},
+        );
+        final downloader = setDownloader();
+        final provisioner = ModelProvisioner(
+          storage: storage,
+          downloader: downloader,
+        );
+
+        final result = await provisioner.provision(descriptor);
+
+        expect(result, isA<ModelCorrupt>());
+        final corrupt = result as ModelCorrupt;
+        expect(corrupt.fileName, 'joiner.onnx');
+        expect(corrupt.expectedSha256Hex, wrongDigest);
+        expect(
+          corrupt.actualSha256Hex,
+          sha256.convert(bodyOf('joiner.onnx')).toString(),
+        );
+        expect(corrupt.origin, ModelByteOrigin.download);
+        expect(corrupt.quarantined, isTrue);
+        // Failed at file 3: the pin is checked per file as each transfer ends,
+        // not once after the whole set.
+        expect(downloader.openCount, 3);
+        expect(storage.installDir(descriptor).existsSync(), isFalse);
+        expect(await _stagingLeftovers(storage, descriptor), isEmpty);
+        expect(await storage.statusOf(descriptor), ModelInstallStatus.absent);
+      },
+    );
+
+    test(
+      'a side-loaded complete set verifies in place without the network',
+      () async {
+        final descriptor = setDescriptor();
+        await storage.prepare();
+        await storage.installDir(descriptor).create(recursive: true);
+        for (final file in descriptor.files) {
+          await storage
+              .installedFile(descriptor, file)
+              .writeAsBytes(bodyOf(file.fileName));
+        }
+        final downloader = setDownloader();
+        final provisioner = ModelProvisioner(
+          storage: storage,
+          downloader: downloader,
+        );
+
+        final result = await provisioner.provision(descriptor);
+
+        expect(result, isA<ModelVerified>());
+        expect(
+          (result as ModelVerified).source,
+          ModelVerificationSource.existingFile,
+        );
+        expect(downloader.openCount, 0);
+        expect(await storage.statusOf(descriptor), ModelInstallStatus.ready);
+      },
+    );
+
+    test('progress aggregates across the set with file positions', () async {
+      final descriptor = setDescriptor();
+      final provisioner = ModelProvisioner(
+        storage: storage,
+        downloader: setDownloader(),
+      );
+
+      final samples = <ModelProvisionProgress>[];
+      final result = await provisioner.provision(
+        descriptor,
+        onProgress: samples.add,
+      );
+
+      expect(result, isA<ModelVerified>());
+      expect(samples, isNotEmpty);
+      final totalSize = names
+          .map((n) => bodyOf(n).length)
+          .fold(0, (a, b) => a + b);
+      // Every sample describes the whole set, not the file in flight.
+      for (final sample in samples) {
+        expect(sample.totalBytes, totalSize);
+        expect(sample.fileCount, 4);
+        expect(sample.fileIndex, inInclusiveRange(1, 4));
+      }
+      // Progress is cumulative: it never goes backwards when the next file
+      // starts, which is what "aggregated" actually buys the progress bar.
+      for (var i = 1; i < samples.length; i++) {
+        expect(
+          samples[i].processedBytes,
+          greaterThanOrEqualTo(samples[i - 1].processedBytes),
+        );
+      }
+      expect(samples.last.processedBytes, totalSize);
+      expect(samples.map((s) => s.fileIndex).toSet(), {1, 2, 3, 4});
+    });
+  });
 }
 
 const _sourceUrl = 'https://example.invalid/gemma.litertlm';
@@ -1125,10 +1512,10 @@ const _sourceUrl = 'https://example.invalid/gemma.litertlm';
 List<String> _nonceBatch(int count) =>
     List.generate(count, (_) => ModelProvisioner.stagingNonce());
 
-/// Every staging file left in the model directory for [descriptor], whatever its
-/// nonce.
+/// Every staging directory left in the models root for [descriptor], whatever
+/// its nonce.
 ///
-/// Asserting on `storage.stagingFile(descriptor)` alone would be checking a path
+/// Asserting on `storage.stagingDir(descriptor)` alone would be checking a path
 /// nothing writes any more — transfers stage under `.part.<nonce>` — which is
 /// exactly the "green for an unrelated reason" trap.
 Future<List<String>> _stagingLeftovers(
@@ -1136,11 +1523,11 @@ Future<List<String>> _stagingLeftovers(
   ModelDescriptor descriptor,
 ) async {
   if (!await storage.root.exists()) return const [];
-  final prefix = '${descriptor.fileName}${ModelStorage.stagingSuffix}';
+  final prefix = '${descriptor.id}${ModelStorage.stagingSuffix}';
   return storage.root
       .listSync()
-      .whereType<File>()
-      .map((f) => f.uri.pathSegments.last)
+      .whereType<Directory>()
+      .map((d) => d.uri.pathSegments.where((s) => s.isNotEmpty).last)
       .where((name) => name.startsWith(prefix))
       .toList();
 }
@@ -1219,6 +1606,52 @@ class _ScriptedDownloader implements ModelDownloader {
       if (cutoff != null && sent >= cutoff) {
         throw const SocketException.closed();
       }
+    }
+  }
+
+  @override
+  void close() {}
+}
+
+/// A [ModelDownloader] that serves a distinct body per URI — the shape a
+/// file-set transfer actually has — and can refuse the Nth open.
+class _SetDownloader implements ModelDownloader {
+  _SetDownloader({required this.bodies, this.failOnOpen});
+
+  /// Body per full URI string.
+  final Map<String, Uint8List> bodies;
+
+  /// 1-based call number of [open] that throws instead of serving, scripting
+  /// "the transfer died on file N".
+  final int? failOnOpen;
+
+  int openCount = 0;
+  final List<Uri> opened = [];
+
+  @override
+  Future<ModelByteStream> open(Uri uri, {String? authToken}) async {
+    openCount++;
+    opened.add(uri);
+    if (failOnOpen == openCount) {
+      throw const ModelDownloadException('connection reset by scripted fault');
+    }
+    final body = bodies['$uri'];
+    if (body == null) {
+      throw ModelDownloadException(
+        'no scripted body for $uri',
+        statusCode: 404,
+      );
+    }
+    return ModelByteStream(bytes: _emit(body), contentLength: body.length);
+  }
+
+  Stream<List<int>> _emit(Uint8List served) async* {
+    // Chunked like a real transport, so per-chunk progress is exercised.
+    var sent = 0;
+    while (sent < served.length) {
+      final end = (sent + 64).clamp(0, served.length);
+      yield served.sublist(sent, end);
+      sent = end;
     }
   }
 
