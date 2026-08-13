@@ -24,6 +24,13 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<!-- Task 2.1. Required, not optional: iOS terminates the process on the first
+	     AVAudioSession record activation when this key is absent, so a missing
+	     string is a crash on tapping the mic rather than a denied permission.
+	     `test/services/audio/mic_permission_declaration_test.dart` asserts it is
+	     present and non-empty. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>FieldOps Copilot transcribes your spoken fault reports on this device. Audio is processed locally and is never uploaded.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
