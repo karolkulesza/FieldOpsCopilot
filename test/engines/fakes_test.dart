@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'dart:typed_data';
+
+import 'package:field_ops_copilot/services/audio/mic_frame.dart';
 import 'package:field_ops_copilot/engines/fakes/fake_llm_engine.dart';
 import 'package:field_ops_copilot/engines/fakes/fake_platform_telemetry.dart';
 import 'package:field_ops_copilot/engines/fakes/fake_stt_engine.dart';
@@ -184,11 +187,150 @@ void main() {
       );
       await engine.initialize();
 
-      final audio = Stream<Uint8List>.fromIterable([Uint8List(4)]);
+      // `Stream<MicFrame>` since Task 2.2 widened the interface — the gap the
+      // capture reports has to be able to reach the recogniser.
+      final audio = Stream<MicFrame>.fromIterable([
+        MicFrame(bytes: Uint8List(4)),
+      ]);
       final results = await engine.transcribe(audio).toList();
 
       expect(results.single.text, 'E-102 error');
       expect(results.single.isFinal, isTrue);
+    });
+
+    test('the script is not emitted until the frame stream closes', () async {
+      // **The ordering property, and it is the fake's whole parity obligation.** The
+      // real engine cannot produce a final before `finishSession`, so a fake that
+      // emitted on the first frame would let a consumer be written against an
+      // ordering the device never produces — 1.8's rule, in the direction that is
+      // easiest to break by accident.
+      //
+      // This replaces what mutation M22 used to bind. That row deleted
+      // `await frames.drain()`, which no longer exists after the R0-F1 rewrite, so
+      // the property needed an oracle that does not depend on the old shape.
+      final engine = FakeSttEngine();
+      await engine.initialize();
+
+      final frames = StreamController<MicFrame>();
+      final seen = <SttTranscript>[];
+      engine.transcribe(frames.stream).listen(seen.add);
+
+      frames.add(MicFrame(bytes: Uint8List(320)));
+      await pumpEventQueue();
+      expect(
+        seen,
+        isEmpty,
+        reason:
+            'a frame is not the end of the utterance; closing the stream is',
+      );
+
+      await frames.close();
+      await pumpEventQueue();
+      expect(seen, hasLength(1));
+      expect(seen.single.isFinal, isTrue);
+    });
+
+    test('rawText defaults to text when a backend does no post-processing', () {
+      const transcript = SttTranscript('E-102 error');
+      expect(transcript.rawText, 'E-102 error');
+      expect(transcript.segment, 0);
+    });
+
+    test('refuses a second concurrent transcription', () async {
+      final engine = FakeSttEngine();
+      await engine.initialize();
+
+      // Never-closing, so the first transcription is still in flight. The real
+      // engine refuses this because one `OnlineStream` exists per recogniser; the
+      // fake refuses it so a caller cannot be written against a tolerance the
+      // device does not have.
+      final first = engine.transcribe(StreamController<MicFrame>().stream);
+      first.listen(null);
+      await pumpEventQueue();
+
+      expect(
+        () => engine.transcribe(const Stream<MicFrame>.empty()),
+        throwsStateError,
+      );
+    });
+
+    test('refuses use after disposal, and refuses to be revived', () async {
+      final engine = FakeSttEngine();
+      await engine.initialize();
+      await engine.dispose();
+
+      expect(engine.isReady, isFalse);
+      expect(
+        () => engine.transcribe(const Stream<MicFrame>.empty()),
+        throwsStateError,
+      );
+      expect(engine.initialize, throwsStateError);
+    });
+
+    test('cancelling mid-utterance completes, and releases', () async {
+      // **The test that was missing, and its absence is why R0-F1 was invisible.**
+      // The real engine's suite has `'when the consumer walks away mid-utterance'`;
+      // this one had no cancel test at all, so a fake that deadlocked on cancel could
+      // claim parity with the real engine in prose and nothing would disagree.
+      //
+      // The old fake was an `async*` suspended in `await frames.drain()`. Cancelling
+      // an `async*` subscription awaits the body's termination, and the body could not
+      // terminate while awaiting a stream nobody closes — so `cancel()` never
+      // completed. Bounded with a timeout, because the failure mode is a hang and an
+      // unbounded await would report it as a suite timeout thirty seconds later
+      // instead of as this assertion.
+      final engine = FakeSttEngine();
+      await engine.initialize();
+
+      final frames = StreamController<MicFrame>();
+      addTearDown(frames.close);
+      final subscription = engine.transcribe(frames.stream).listen(null);
+      frames.add(MicFrame(bytes: Uint8List(320)));
+      await pumpEventQueue();
+
+      await expectLater(
+        subscription.cancel().timeout(const Duration(seconds: 2)),
+        completes,
+        reason: 'a consumer that stops dictating must not deadlock',
+      );
+
+      // Released, not merely unblocked: the next transcription has to be accepted.
+      expect(
+        () => engine.transcribe(const Stream<MicFrame>.empty()),
+        returnsNormally,
+      );
+    });
+
+    test('a stream that is never listened to does not wedge the engine', () async {
+      // Review finding R0-F6, and it applies to both engines — the slot is taken in
+      // `onListen`, not at the call site, so a discarded stream costs nothing.
+      final engine = FakeSttEngine();
+      await engine.initialize();
+
+      engine.transcribe(const Stream<MicFrame>.empty());
+      await pumpEventQueue();
+
+      expect(
+        () => engine.transcribe(const Stream<MicFrame>.empty()),
+        returnsNormally,
+        reason:
+            'taking the in-flight slot at the call site made a discarded stream '
+            'refuse every later transcription until dispose()',
+      );
+    });
+
+    test('a completed transcription releases the in-flight guard', () async {
+      final engine = FakeSttEngine();
+      await engine.initialize();
+
+      await engine
+          .transcribe(
+            Stream<MicFrame>.fromIterable([MicFrame(bytes: Uint8List(2))]),
+          )
+          .toList();
+      // If the guard leaked, this would throw — which is the failure mode a
+      // `finally` exists to prevent and the one nothing would otherwise catch.
+      await engine.transcribe(const Stream<MicFrame>.empty()).toList();
     });
   });
 
