@@ -12,9 +12,21 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # **Pinned, not floating, and the reason is what this workflow is for.**
+      # `channel: stable` alone resolves whatever Flutter shipped most recently:
+      # runs through 2026-08-12 got 3.44.9 and were green, and on 2026-08-13 the
+      # same commits got 3.47.0 and went red on `main` — the freshness gate below
+      # firing on Google's release rather than on any drift in this repo. A gate
+      # that reports on its own toolchain moving is a gate people learn to ignore.
+      #
+      # 3.44.9 is the version every green run used and matches the local toolchain
+      # the suite is developed against. Raising it is a deliberate change with its
+      # own suite run, the way every other pinned thing here is treated — the model
+      # SHA-256s, the SQLCipher KDF iterations, the sherpa_onnx version.
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: 3.44.9
 
       - name: Install dependencies
         run: flutter pub get
