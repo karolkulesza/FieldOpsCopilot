@@ -1264,7 +1264,16 @@ void main() {
       final back = _panelScrollController(tester);
       expect(
         back.offset,
-        back.position.maxScrollExtent,
+        // `closeTo`, not equality — Task 2.3. The fling settles through a
+        // *ballistic simulation*, so where it lands is arithmetic over the
+        // panel's extent rather than a `jumpTo`, and changing the panel's height
+        // (2.3 gave the work order two fifths of the column) moved the residue
+        // from exactly 0 to 8e-13. Equality here was passing on the layout rather
+        // than on the property. The property is "the reader is back at the
+        // bottom", and the slack that governs the follow is 48 logical pixels, so
+        // a tolerance three orders of magnitude below one pixel cannot admit a
+        // reader who is not.
+        closeTo(back.position.maxScrollExtent, 0.001),
         reason: 'precondition: the reader returned to the bottom',
       );
 
