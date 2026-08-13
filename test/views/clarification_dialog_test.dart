@@ -290,15 +290,16 @@ void main() {
       expect(find.byKey(ClarificationKeys.dialog), findsNothing);
     });
 
-    // **The sequence mutation M19 exposed, and the row that exposed it was
-    // expecting something else.** M19 replaced `_present`'s state check with
-    // `true` and survived, because the tap path returns before reaching it.
-    // Working out why found this: a question answered from somewhere *other* than
-    // the dialog pops the route with `null`, and a question arriving during that
-    // pop was first rendered into the dying route and then dismissed by its close.
-    //
-    // Three assertions, because three separate things were wrong.
-    testWidgets('a question arriving while the route closes survives it', (
+    // **What mutation M19 actually established, after the fix it seemed to call
+    // for was measured and reverted.** The row expected the state check in
+    // `_present`'s tail to be load-bearing; it survived. The story that fit — a
+    // question arriving while the route animates out and being dismissed by its
+    // close — turned out to be unreachable: an instrumented trace showed
+    // `showDialog`'s future resolving in the *same frame* as the pop, with
+    // `choice: null` and nothing pending, while the route was still painting its
+    // exit. So what this asserts is the property that *is* real and was untested:
+    // a question asked straight after an outside answer opens on its own.
+    testWidgets('a question asked right after an outside answer still opens', (
       tester,
     ) async {
       final container = await pumpHost(tester);
@@ -310,7 +311,7 @@ void main() {
       form.answerClarification('12-inch mesh');
       await tester.pump();
 
-      // And the agent's next turn asks something else mid-pop.
+      // And the agent's next turn asks something else.
       form.applyPayload(const {
         RecordWorkOrderFieldsTool.recordedKey: <String, Object?>{},
         RecordWorkOrderFieldsTool.askedKey: {
@@ -321,19 +322,17 @@ void main() {
       });
       await tester.pumpAndSettle();
 
-      // 1. It was not thrown away by the closing dialog.
       expect(
         container.read(workOrderFormProvider).clarification,
         isNotNull,
-        reason: 'the close of the previous dialog dismissed the new question',
+        reason: 'the close of the previous dialog must not clear it',
       );
-      // 2. It is on screen rather than pending with nothing showing it.
       expect(find.byKey(ClarificationKeys.dialog), findsOneWidget);
       expect(
         tester.widget<Text>(find.byKey(ClarificationKeys.question)).data,
         'Which code was on the panel?',
       );
-      // 3. And the first answer still landed.
+      // And the first answer still landed.
       expect(
         container
             .read(workOrderFormProvider)
