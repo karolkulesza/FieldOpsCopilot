@@ -1,4 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Task 2.1: microphone capture for on-device dictation. A runtime
+         permission since API 23, requested by `record`'s hasPermission(); the
+         manifest entry is what makes that request possible at all — without it
+         the request is denied immediately, with no dialog and nothing for the
+         technician to fix in Settings.
+         `test/services/audio/mic_permission_declaration_test.dart` asserts it. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <!-- fullBackupContent / dataExtractionRules keep provisioned model weights
          out of backups; see the two rule files for why. fullBackupContent covers
          Android 11 and below, dataExtractionRules Android 12+, so both are
