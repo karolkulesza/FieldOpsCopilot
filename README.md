@@ -543,11 +543,49 @@ written into the source could not be validated even in principle.
 
 `FIELDOPS_MODEL_ID` selects a catalog entry (file name, documented size, license
 page). `FIELDOPS_MODEL_URI` and `FIELDOPS_MODEL_SHA256` apply to that active
-model.
+**LLM** — the STT model below needs no defines at all.
 
 > **On the token.** A `--dart-define` token is baked into the binary — fine for a
 > development or demo build, and not a shipping pattern, since anyone with the app
 > has the credential. The fleet answer is in _OTA model delivery_ below.
+
+### The second model: a committed STT file set (Task 2.0)
+
+Task 2.2 needs a **second** model resident — a streaming speech-to-text
+zipformer — and Task 2.0 extends provisioning to carry it. It differs from the
+LLM in both of the ways that shaped 1.7, and each difference is deliberate:
+
+* **It is a set of four files, not one** — served individually from the
+  repository, not as an archive, so there is no unpacking step and no
+  partial-extraction failure mode. Each file carries its own pinned SHA-256; the
+  set is `ready` only when *every* file is present and vouched for, and an
+  install that fails on file 3 of 4 installs nothing.
+* **Its source and pins are committed in the catalog**, because
+  [`csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17`](https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17)
+  is `apache-2.0` and ungated (`gated: false`, measured via the HuggingFace API,
+  2026-08-10). Gemma's URL and hash are build inputs *because that artifact is
+  licence-gated*; where the gate does not exist, committing the config is
+  strictly better — no token, no `--dart-define`, and TC-PROV-CFG-01 pins that
+  the two configuration paths stay independent.
+
+  | File | Size | SHA-256 source |
+  |---|---|---|
+  | `encoder-epoch-99-avg-1.int8.onnx` | 42.85 MB | LFS object id via `paths-info` |
+  | `decoder-epoch-99-avg-1.int8.onnx` | 0.54 MB | LFS object id via `paths-info` |
+  | `joiner-epoch-99-avg-1.int8.onnx` | 0.26 MB | LFS object id, cross-checked by hashing the served bytes |
+  | `tokens.txt` | 5 KB | non-LFS, downloaded and hashed directly |
+
+The home screen's readiness banner shows **one row per provisioned model**, each
+with its own status and its own download/verify action. The rows are independent
+on purpose: the agent runs on the LLM alone, so a missing STT set renders as one
+warning row while Diagnose stays enabled (TC-PROV-MULTI-01).
+
+**On-disk layout moved to per-model directories** —
+`models/<model id>/<file>` with a `<file>.receipt.json` sidecar each — because
+two models' files must not be able to collide. A Task 1.7 flat-layout install
+(the demo iPad's 2.59GB Gemma) is migrated by `rename` on the first status
+check: same volume, milliseconds, no re-download, and the receipt moves with its
+file so the install stays `ready` without re-hashing.
 
 ### What provisioning actually does
 
@@ -566,17 +604,26 @@ model.
    verified, so a device that cannot reach the network is never stripped of the
    only weights it has — and it is never loadable in the meantime either, because
    no receipt vouches for it.
-4. **Streams the download to a per-transfer `.part.<nonce>` staging file, hashing
-   as it writes.** The artifact is never buffered in memory and never read twice.
-   Progress is reported per chunk, and degrades to an indeterminate state when the
-   server declares no `Content-Length` instead of inventing a percentage. Every
-   request asks for `Accept-Encoding: identity` and a content-encoded response is
-   rejected by name: the pinned digest describes the artifact *as published*, so
-   an inflated body would be the wrong bytes to hash.
-5. **Installs only on a digest match**, by atomic rename — which is also the swap
-   that replaces a stale artifact. The path an engine loads from therefore only
-   ever holds a complete, verified file. Operations on one model are serialised, so
-   two overlapping calls cannot interleave into each other's files.
+4. **Streams every file of the set to a per-transfer `.part.<nonce>` staging
+   directory, hashing as it writes.** No file is ever buffered in memory or read
+   twice, and each file's digest is checked against its own pin *as its transfer
+   ends* — a wrong pin on file 3 of 4 fails there, not after the whole set.
+   Progress is aggregated across the set (with the file position, so the UI can
+   say "file 2 of 4"), and degrades to an indeterminate state when a total is
+   genuinely unknown instead of inventing a percentage. Every request asks for
+   `Accept-Encoding: identity` and a content-encoded response is rejected by
+   name: the pinned digest describes the artifact *as published*, so an inflated
+   body would be the wrong bytes to hash.
+5. **Installs only after every file's digest matches**, renaming staged files
+   into the model's directory one by one — each rename an atomic replace, each
+   file earning its receipt as it lands. The path an engine loads from therefore
+   only ever holds complete, verified files; a transfer that dies partway
+   installs nothing and leaves any previous install untouched. (A crash *between
+   two renames* can leave a mixed set on disk; the new files have no receipts
+   yet, so the set reads `unverified` and the next pass re-hashes in place —
+   never `ready` over bytes nothing vouched for.) Operations on one model are
+   serialised, so two overlapping calls cannot interleave into each other's
+   files; two *different* models do not queue behind each other.
 6. **Deletes fetched bytes that fail**, reporting the digest it actually got and
    whether the bytes came from the network or from disk. A body that does not match
    the declared `Content-Length` is reported as a *truncated* or *over-long
@@ -618,9 +665,12 @@ pinned* — so a glance before the demo is enough.
 Weights can also be side-loaded onto a device with the platform tooling (Xcode's
 device container browser; on a debuggable Android build, `adb push` followed by
 `adb shell run-as com.karolkulesza.field_ops_copilot cp …` into
-`files/models/`). A hand-copied file arrives with no receipt, so it reports
-*present but unverified* until provisioning hashes it in place — which is the
-point: bytes nobody verified are never treated as ready.
+`files/models/<model id>/` — the per-model directory, since Task 2.0). A
+hand-copied file arrives with no receipt, so it reports *present but unverified*
+until provisioning hashes it in place — which is the point: bytes nobody
+verified are never treated as ready. A file dropped at the old flat
+`files/models/` path also still works: the first status check migrates it into
+the model's directory by rename.
 
 ### OTA model delivery (designed, not built)
 
