@@ -51,6 +51,8 @@ import 'package:field_ops_copilot/services/ai/agent_loop.dart';
 import 'package:field_ops_copilot/services/ai/base_tool.dart';
 import 'package:field_ops_copilot/services/ai/tool_call_guard.dart';
 import 'package:field_ops_copilot/services/ai/tool_registry.dart';
+import 'package:field_ops_copilot/models/form_state_model.dart';
+import 'package:field_ops_copilot/services/ai/tools/record_work_order_fields_tool.dart';
 import 'package:field_ops_copilot/services/ai/tools/get_parts_inventory_tool.dart';
 import 'package:field_ops_copilot/services/database/database_initializer.dart';
 import 'package:field_ops_copilot/services/database/database_service.dart';
@@ -89,7 +91,15 @@ void main() {
       database: db,
       source: _TextSeedSource(shippedJson),
     ).ensureSeeded();
-    registry = ToolRegistry([GetPartsInventoryTool(db)]);
+    // **The production tool set, not a subset — Task 2.3.** This registry is what
+    // builds the loop's `ToolCallGuard`, so the set of known names is part of what
+    // the goldens pin: a near-miss the guard canonicalises depends on which names
+    // exist. A golden suite running one tool while the app ships two would stop
+    // being a snapshot of the artefact and become a snapshot of a fixture.
+    registry = ToolRegistry([
+      GetPartsInventoryTool(db),
+      RecordWorkOrderFieldsTool(),
+    ]);
   });
 
   tearDown(() async {
@@ -426,6 +436,80 @@ void main() {
       expect(run.result.stopReason, AgentStopReason.answered);
     });
 
+    test('form_autofill — the work order recorded and a question asked', () async {
+      // **Task 2.3's path through the same pipeline**, which is the whole reason
+      // this suite exists rather than a set of assertions: what is pinned is the
+      // *artefact* — the tool the model was declared, the arguments it sent, the
+      // payload it got back, and the exact text of the next turn's prompt with
+      // that payload embedded. An assertion would check one of those.
+      //
+      // Two turns rather than one, because a recording that is never followed by
+      // an answer is not a run a technician sees. The clarification rides on the
+      // same call as the fields, which is the shape the tool declares and the one
+      // `ClarificationHost` is built around.
+      final run = await runScenario(
+        scenario: 'form_autofill',
+        inquiry: 'cabin vibrating, E-102',
+        turns: [
+          [
+            const LlmToken('Recording what I have so far. '),
+            const LlmToolCall(
+              name: RecordWorkOrderFieldsTool.toolName,
+              arguments: {
+                formUpdatesArgument: {
+                  'fault_code': 'E-102',
+                  'required_parts': 'BRK-990-XP',
+                  'elevator_colour': 'green',
+                },
+                clarificationArgument: {
+                  'field': 'safety_checkpoints',
+                  'question': 'Which isolation did you perform?',
+                  'options': ['Breaker 4A locked out', 'Full car isolation'],
+                },
+              },
+            ),
+            const LlmDone(),
+          ],
+          [
+            const LlmToken(
+              'Replace the traction brake pad assemblies (BRK-990-XP). I have '
+              'filled in the fault code and the part; tell me which isolation '
+              'you performed and I will record it.',
+            ),
+            const LlmDone(),
+          ],
+        ],
+      );
+
+      verifyGolden(scenario: 'form_autofill', snapshot: run.snapshot);
+
+      // What the golden is supposed to be showing, and each line is a decision
+      // the tool makes rather than a restatement of the script.
+      expect(run.result.stopReason, AgentStopReason.answered);
+      final invocation = run.result.invocations.single;
+      expect(invocation.outcome, isA<ToolSuccess>());
+      final payload = invocation.outcome.payload;
+      // A refused field sits beside recorded ones — the call succeeded.
+      expect(payload[RecordWorkOrderFieldsTool.recordedKey], {
+        'fault_code': 'E-102',
+        'required_parts': 'BRK-990-XP',
+      });
+      expect(payload[RecordWorkOrderFieldsTool.refusedKey], hasLength(1));
+      expect(payload[RecordWorkOrderFieldsTool.askedKey], isNotNull);
+      // And the payload the *screen* reads is the payload the *model* was given.
+      expect(recordedFieldsOf(payload), {
+        WorkOrderField.faultCode: 'E-102',
+        WorkOrderField.requiredParts: 'BRK-990-XP',
+      });
+      expect(askedClarificationOf(payload)?.options, [
+        'Breaker 4A locked out',
+        'Full car isolation',
+      ]);
+      // The next turn carries the recording back, which is what makes the model
+      // able to say what it filled in.
+      expect(run.result.turns[1].prompt, contains('"fault_code":"E-102"'));
+    });
+
     test('every committed golden belongs to a scenario above', () async {
       // A golden nobody runs is worse than no golden: it looks like coverage,
       // never fails, and rots. Cheap to prevent, so prevented.
@@ -717,6 +801,7 @@ List<List<LlmEvent>> e102Script() => [
 final List<String> _scenarioNames = [
   'e102_native_tool_call',
   'e305_degraded_text_call',
+  'form_autofill',
   'iteration_cap',
   'no_manual_match',
   'recovery_ladder',
