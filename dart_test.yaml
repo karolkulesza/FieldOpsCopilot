@@ -1,0 +1,10 @@
+# Tags used by this package's suites.
+#
+# `live-stt` marks the one suite that loads the real sherpa-onnx native library
+# and the real 43MB streaming-zipformer weights. It skips itself unless
+# `--dart-define=FIELDOPS_STT_MODEL_DIR` points at them, so declaring the tag here
+# is only about silencing the "tag was used that wasn't specified" warning — the
+# skip, not the tag, is what keeps CI hermetic.
+tags:
+  live-stt:
+    skip: false
