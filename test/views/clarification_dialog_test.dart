@@ -290,21 +290,28 @@ void main() {
       expect(find.byKey(ClarificationKeys.dialog), findsNothing);
     });
 
-    // The host pops the route itself when a question is answered, and that pop
-    // arrives back as `null` — the same value a dismissal produces. Telling them
-    // apart is the state check in `_present`; without it, a question arriving
-    // right after an answer would be cleared before it could be asked.
-    testWidgets('answering then asking again leaves the new question up', (
+    // **The sequence mutation M19 exposed, and the row that exposed it was
+    // expecting something else.** M19 replaced `_present`'s state check with
+    // `true` and survived, because the tap path returns before reaching it.
+    // Working out why found this: a question answered from somewhere *other* than
+    // the dialog pops the route with `null`, and a question arriving during that
+    // pop was first rendered into the dying route and then dismissed by its close.
+    //
+    // Three assertions, because three separate things were wrong.
+    testWidgets('a question arriving while the route closes survives it', (
       tester,
     ) async {
       final container = await pumpHost(tester);
+      final form = container.read(workOrderFormProvider.notifier);
       ask(container);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(ClarificationKeys.option(0)));
+      // Answered from outside the dialog — the host pops with no result.
+      form.answerClarification('12-inch mesh');
       await tester.pump();
-      // Mid-pop: the agent's next turn records another question.
-      container.read(workOrderFormProvider.notifier).applyPayload(const {
+
+      // And the agent's next turn asks something else mid-pop.
+      form.applyPayload(const {
         RecordWorkOrderFieldsTool.recordedKey: <String, Object?>{},
         RecordWorkOrderFieldsTool.askedKey: {
           'field': 'fault_code',
@@ -314,12 +321,46 @@ void main() {
       });
       await tester.pumpAndSettle();
 
+      // 1. It was not thrown away by the closing dialog.
       expect(
         container.read(workOrderFormProvider).clarification,
         isNotNull,
-        reason: 'the close of the answered dialog must not clear the new one',
+        reason: 'the close of the previous dialog dismissed the new question',
       );
+      // 2. It is on screen rather than pending with nothing showing it.
       expect(find.byKey(ClarificationKeys.dialog), findsOneWidget);
+      expect(
+        tester.widget<Text>(find.byKey(ClarificationKeys.question)).data,
+        'Which code was on the panel?',
+      );
+      // 3. And the first answer still landed.
+      expect(
+        container
+            .read(workOrderFormProvider)
+            .textOf(WorkOrderField.requiredParts),
+        '12-inch mesh',
+      );
+    });
+
+    // The ordinary path through the same code: answering *with the button* pops
+    // with a choice, so the tail never reaches the dismissal branch at all.
+    testWidgets('answering with the button does not dismiss anything', (
+      tester,
+    ) async {
+      final container = await pumpHost(tester);
+      ask(container);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(ClarificationKeys.option(0)));
+      await tester.pumpAndSettle();
+
+      expect(
+        container
+            .read(workOrderFormProvider)
+            .textOf(WorkOrderField.requiredParts),
+        '12-inch mesh',
+      );
+      expect(container.read(workOrderFormProvider).clarification, isNull);
     });
   });
 }
