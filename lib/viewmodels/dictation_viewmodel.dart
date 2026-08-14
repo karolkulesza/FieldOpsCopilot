@@ -23,6 +23,7 @@
 library;
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -150,6 +151,20 @@ class DictationController extends Notifier<DictationState> {
   /// Whether the first frame of this capture has been logged.
   bool _loggedFirstFrame = false;
 
+  /// Whether speech-loud audio has been seen in this capture.
+  ///
+  /// **The measurement two rounds of guessing were missing.** The timings say when
+  /// the microphone opened and when the recogniser attached, but not when the
+  /// *technician started talking* — and without that, "the first word was lost"
+  /// cannot be told apart from "the first word was mis-heard". If onset lands
+  /// before the input opened, the audio never existed and the answer is to stop
+  /// inviting speech that early. If onset lands well after it and the word is
+  /// still wrong, nothing was lost and the answer is the model.
+  bool _loggedOnset = false;
+
+  /// Peak amplitude per frame, for the trace logged at stop.
+  final List<int> _peaks = <int>[];
+
   /// Which capture attempt is current.
   ///
   /// **A `stop()` during [DictationPhase.starting] had nothing to stop — review
@@ -210,6 +225,8 @@ class DictationController extends Notifier<DictationState> {
     final generation = ++_generation;
     _sinceTap = Stopwatch()..start();
     _loggedFirstFrame = false;
+    _loggedOnset = false;
+    _peaks.clear();
     _log('tapped');
     state = const DictationState(phase: DictationPhase.starting);
 
@@ -343,6 +360,15 @@ class DictationController extends Notifier<DictationState> {
     // back-pressure Task 2.2 relies on is untouched. One closure per frame, and
     // the body only does anything on the first.
     final frames = session.frames.map((frame) {
+      final peak = _peakOf(frame.bytes);
+      if (_peaks.length < 200) _peaks.add(peak);
+      // A 16-bit full scale is 32768; quiet room noise sits in the low hundreds
+      // and speech peaks in the thousands. 2000 is comfortably between the two and
+      // only has to be right enough to timestamp the start of a sentence.
+      if (!_loggedOnset && peak > 2000) {
+        _loggedOnset = true;
+        _log('speech onset (peak $peak)');
+      }
       if (!_loggedFirstFrame) {
         _loggedFirstFrame = true;
         _log('first audio frame (${frame.bytes.length}B)');
@@ -436,6 +462,9 @@ class DictationController extends Notifier<DictationState> {
     }
 
     _log('stop requested; dropped ${session.droppedByteCount}B so far');
+    // A compact amplitude trace, one character per ~85ms frame: `.` is silence,
+    // digits are loudness. It shows where in the capture the speech actually sat.
+    _log('energy ${_peaks.map(_bucket).join()}');
     await session.stop();
     final closed = _closed;
     if (closed != null) {
@@ -485,6 +514,24 @@ class DictationController extends Notifier<DictationState> {
   void _unavailable(int generation, String message) {
     if (!ref.mounted || _generation != generation) return;
     state = DictationState(phase: DictationPhase.unavailable, message: message);
+  }
+
+  /// Largest absolute 16-bit sample in [bytes], little-endian.
+  static int _peakOf(Uint8List bytes) {
+    final samples = Int16List.sublistView(bytes);
+    var peak = 0;
+    for (final sample in samples) {
+      final magnitude = sample < 0 ? -sample : sample;
+      if (magnitude > peak) peak = magnitude;
+    }
+    return peak;
+  }
+
+  /// One character per frame: `.` below the noise floor, `0`–`9` by loudness.
+  static String _bucket(int peak) {
+    if (peak < 500) return '.';
+    final step = (peak / 3300).clamp(0, 9).toInt();
+    return '$step';
   }
 
   /// One diagnostic line, timestamped from the tap.
