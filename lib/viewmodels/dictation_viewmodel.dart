@@ -124,6 +124,25 @@ class DictationController extends Notifier<DictationState> {
   MicCaptureSession? _session;
   StreamSubscription<SttTranscript>? _transcripts;
 
+  /// Which capture attempt is current.
+  ///
+  /// **A `stop()` during [DictationPhase.starting] had nothing to stop — review
+  /// finding R1-F1, and it is the half of R0-F1's fix that did not fire.**
+  /// `_session` is assigned at the *end* of [start], after the recogniser has
+  /// loaded (359–530ms, measured in Task 2.2), so a stop arriving during that load
+  /// returned at its first line while the start went on to open the microphone
+  /// anyway. What a technician got for typing while the recogniser loaded was a
+  /// live microphone, a status line reading "Listening", and nothing they said
+  /// reaching the field — verbatim the state [DiagnoseScreen]'s doc says stopping
+  /// exists to prevent.
+  ///
+  /// The counter is the cancellation edge a `Future` chain does not otherwise
+  /// have: [stop] bumps it, and [start] re-reads it after every `await`. A start
+  /// that finds it changed abandons its work, closing anything it opened in the
+  /// meantime — the microphone is a real resource, so "abandon" has to mean
+  /// released rather than forgotten.
+  int _generation = 0;
+
   /// Completes when the transcript stream has finished — normally or by error.
   ///
   /// **Not `StreamSubscription.asFuture`, and the difference is not stylistic:**
@@ -156,6 +175,7 @@ class DictationController extends Notifier<DictationState> {
     // A fresh line per capture. The *previous* text is kept on the screen rather
     // than here — the inquiry field already holds it, and re-appending it here
     // would double it.
+    final generation = ++_generation;
     state = const DictationState(phase: DictationPhase.starting);
 
     final SttEngine? engine;
@@ -172,22 +192,25 @@ class DictationController extends Notifier<DictationState> {
       );
       return;
     }
-    if (!ref.mounted) return;
+    if (!ref.mounted || _generation != generation) return;
 
     try {
       // Idempotent, and awaited here rather than at provider resolution: this is
-      // the deliberate action `deviceSttEngineProvider` defers the load to.
+      // the deliberate action `deviceSttEngineProvider` defers the load to. **This
+      // is the await R1-F1 lived under** — it is the long one, and until the check
+      // below a `stop()` inside it was a no-op.
       await engine.initialize();
     } on Exception catch (error) {
       _unavailable('The speech model could not be loaded: $error');
       return;
     }
-    if (!ref.mounted) return;
+    if (!ref.mounted || _generation != generation) return;
 
     final outcome = await ref.read(micCaptureProvider).start();
-    if (!ref.mounted) {
-      // The graph went away while the platform was answering. Whatever was opened
-      // has to be closed, or the microphone stays live with nobody reading it.
+    // The graph went away, or a stop landed, while the platform was answering.
+    // Whatever was opened has to be closed either way, or the microphone stays
+    // live with nobody reading it.
+    if (!ref.mounted || _generation != generation) {
       if (outcome is MicCaptureStarted) unawaited(outcome.session.stop());
       return;
     }
@@ -280,8 +303,21 @@ class DictationController extends Notifier<DictationState> {
   /// transcript arrives *after* the frames close — returning at the session's stop
   /// would hand a caller a state that is one utterance short of what was said.
   Future<void> stop() async {
+    // **Bumped before anything else, so a start still in flight abandons itself**
+    // — R1-F1. Unconditional: a bump with no start running costs nothing, and
+    // making it conditional would need exactly the "is a start in flight" state
+    // this counter *is*.
+    _generation++;
     final session = _session;
-    if (session == null) return;
+    if (session == null) {
+      // A start that has not reached its session yet. The bump above is the whole
+      // stop; what is left is the phase, which would otherwise sit on `starting`
+      // for a capture that is never going to open.
+      if (state.isActive) {
+        state = state.copyWith(phase: DictationPhase.idle);
+      }
+      return;
+    }
     await session.stop();
     // Closing the frames is what makes the engine flush, and the flush is where
     // the last utterance comes from — so the wait is on the transcript stream

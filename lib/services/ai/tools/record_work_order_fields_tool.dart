@@ -232,7 +232,19 @@ Map<WorkOrderField, String> recordedFieldsOf(Map<String, Object?> payload) {
 ///
 /// Tolerant for [recordedFieldsOf]'s reason: it runs mid-flight over whatever
 /// payload arrives, so an unrecognised shape yields nothing rather than throwing.
-/// A refusal with no message is dropped — there would be nothing to draw.
+///
+/// **An entry without both a `field` and a `message` is dropped as malformed, not
+/// as undrawable** — review finding R1-F4 caught the earlier wording ("there would
+/// be nothing to draw") describing a renderer that does not exist, since the panel
+/// draws only the count. What the pair actually is: a well-formedness bar on a
+/// payload [RecordWorkOrderFieldsTool.execute] wrote, so a `refused` list from some
+/// other tool cannot inflate a count this app presents as the model's mistakes
+/// about *this* form.
+///
+/// [RejectedFieldUpdate.reason] is resolved here and read by nothing in production
+/// today — only the length reaches the screen (note N5). It is kept because the
+/// type carries it and the tests assert it; recorded rather than left to look like
+/// coverage.
 List<RejectedFieldUpdate> refusedUpdatesOf(Map<String, Object?> payload) {
   final refused = payload[RecordWorkOrderFieldsTool.refusedKey];
   if (refused is! List) return const [];
