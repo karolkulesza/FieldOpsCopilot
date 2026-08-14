@@ -124,6 +124,19 @@ class DictationController extends Notifier<DictationState> {
   MicCaptureSession? _session;
   StreamSubscription<SttTranscript>? _transcripts;
 
+  /// Wall-clock from the microphone tap, for the device diagnostics below.
+  ///
+  /// **This exists because a hypothesis about *where* leading audio is lost was
+  /// wrong once already.** Reasoning said the recogniser's load was the gap;
+  /// moving the microphone ahead of it did not fix the report, so the next answer
+  /// has to come from timings taken on the device rather than from a second
+  /// reading of the same code. Cheap enough to leave in: one `Stopwatch` and a
+  /// handful of `debugPrint`s per capture, none of them per frame except the first.
+  Stopwatch? _sinceTap;
+
+  /// Whether the first frame of this capture has been logged.
+  bool _loggedFirstFrame = false;
+
   /// Which capture attempt is current.
   ///
   /// **A `stop()` during [DictationPhase.starting] had nothing to stop — review
@@ -182,6 +195,9 @@ class DictationController extends Notifier<DictationState> {
     // than here — the inquiry field already holds it, and re-appending it here
     // would double it.
     final generation = ++_generation;
+    _sinceTap = Stopwatch()..start();
+    _loggedFirstFrame = false;
+    _log('tapped');
     state = const DictationState(phase: DictationPhase.starting);
 
     // **Step 1 — is there anything to transcribe?** Cheap: the install-status
@@ -259,6 +275,10 @@ class DictationController extends Notifier<DictationState> {
     // Held from here on, so a `stop()` during the load below has a session to
     // close rather than only a generation to bump.
     _session = session;
+    // **The number that separates "never captured" from "captured and dropped".**
+    // Everything after this point is the app's responsibility; everything before
+    // it is the platform's.
+    _log('microphone open');
 
     // **Step 3 — load the recogniser while the microphone fills the backlog.**
     // This is the await R1-F1 lived under, and it is still the long one; what has
@@ -276,10 +296,13 @@ class DictationController extends Notifier<DictationState> {
       return;
     }
 
+    _log('recogniser loaded');
+
     // **Step 4 — attach.** The backlog replays from the first frame captured in
     // step 2, so the recogniser hears the whole utterance including whatever was
     // said while it was loading.
     _listen(engine, session);
+    _log('attached');
     state = state.copyWith(phase: DictationPhase.listening);
   }
 
@@ -300,8 +323,19 @@ class DictationController extends Notifier<DictationState> {
     // here, is how a dictation is meant to end.
     final closed = Completer<void>();
     _closed = closed;
+    // `map` rather than a change to `MicCaptureSession`: it preserves the
+    // single-subscription contract and propagates pause/resume, so the
+    // back-pressure Task 2.2 relies on is untouched. One closure per frame, and
+    // the body only does anything on the first.
+    final frames = session.frames.map((frame) {
+      if (!_loggedFirstFrame) {
+        _loggedFirstFrame = true;
+        _log('first audio frame (${frame.bytes.length}B)');
+      }
+      return frame;
+    });
     _transcripts = engine
-        .transcribe(session.frames)
+        .transcribe(frames)
         .listen(
           _onTranscript,
           onError: _onError,
@@ -322,6 +356,10 @@ class DictationController extends Notifier<DictationState> {
 
   void _onTranscript(SttTranscript transcript) {
     if (!ref.mounted) return;
+    _log(
+      'transcript seg=${transcript.segment} '
+      'final=${transcript.isFinal} raw="${transcript.rawText}"',
+    );
     if (!transcript.isFinal) {
       state = state.copyWith(partial: transcript.text);
       return;
@@ -377,6 +415,7 @@ class DictationController extends Notifier<DictationState> {
       return;
     }
 
+    _log('stop requested; dropped ${session.droppedByteCount}B so far');
     await session.stop();
     final closed = _closed;
     if (closed != null) {
@@ -426,6 +465,16 @@ class DictationController extends Notifier<DictationState> {
   void _unavailable(int generation, String message) {
     if (!ref.mounted || _generation != generation) return;
     state = DictationState(phase: DictationPhase.unavailable, message: message);
+  }
+
+  /// One diagnostic line, timestamped from the tap.
+  ///
+  /// `debugPrint` rather than a logger: it is what every other device
+  /// investigation in this repo uses, and 1.11 recorded that the log transport
+  /// below it can corrupt long lines — so these are kept short and the
+  /// authoritative reading is still what the screen shows.
+  void _log(String message) {
+    debugPrint('[Dictation ${_sinceTap?.elapsedMilliseconds ?? 0}ms] $message');
   }
 
   Future<void> _teardown() async {
