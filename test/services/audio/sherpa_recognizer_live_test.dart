@@ -309,6 +309,46 @@ void main() {
       );
     });
 
+    // And the same claim through the shipped path rather than through a hand-built
+    // input: `SttConfig.primer` carrying the committed asset, fed by
+    // `beginSession`, with the caller passing only the technician's own audio.
+    //
+    // The test above proves the *remedy* works. This one proves the *wiring* does,
+    // which is a different thing and the one that can rot: a primer dropped on the
+    // isolate wire, a `reset` that stops closing the primer's segment, an asset
+    // that fails to load and falls back to `null` — every one of those leaves a
+    // build that transcribes fine except for the first word of every session,
+    // which is exactly the defect nobody noticed for three rounds.
+    test('the shipped primer fixes it, through the config the app builds', () async {
+      final target = readWav('test/fixtures/cabin_vibrating.wav').pcm;
+      final primed = config.copyWith(
+        primer: File('assets/audio/stt_primer.pcm').readAsBytesSync(),
+      );
+
+      final transcript = await _run(primed, sherpaLib, target, pad: true);
+
+      // ignore: avoid_print
+      print('[live] via SttConfig.primer "$transcript"');
+
+      expect(
+        transcript.toUpperCase(),
+        contains('CABIN'),
+        reason:
+            'the technician said "cabin vibrating" and the device answered "IN '
+            'VIBRATING"; this is that sentence, through the config the app '
+            'actually builds',
+      );
+      expect(
+        transcript.toUpperCase(),
+        isNot(contains('ELEVATOR')),
+        reason:
+            'the primer is speech and it must not reach the transcript — if a '
+            'word from the warm-up clip appears here, `_prime` has stopped '
+            'closing its own segment and the technician sees a sentence nobody '
+            'said',
+      );
+    });
+
     test(
       'the model emits no digits, and normalisation is what supplies them',
       () async {
