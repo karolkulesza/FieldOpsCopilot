@@ -48,6 +48,21 @@ void main() {
 
   DictationController controllerOf(ProviderContainer c) =>
       c.read(dictationControllerProvider.notifier);
+
+  /// Starts a capture and lets one frame arrive, which is what a real microphone
+  /// does the moment it is open.
+  ///
+  /// **`DictationPhase.listening` now means "audio is arriving"** rather than "the
+  /// input was asked for" — the demo device takes 1227ms to open one, and a
+  /// technician talking over that window loses the start of their sentence. So a
+  /// scripted input that never delivers a frame can no longer reach `listening`,
+  /// and that is right: neither can a real microphone that never delivers one.
+  Future<void> startListening(ProviderContainer c) async {
+    await controllerOf(c).start();
+    input.emit(List<int>.filled(320, 1));
+    await pumpEventQueue();
+  }
+
   DictationState stateOf(ProviderContainer c) =>
       c.read(dictationControllerProvider);
 
@@ -119,7 +134,7 @@ void main() {
     test('starting opens the microphone and loads the model', () async {
       final c = container();
 
-      await controllerOf(c).start();
+      await startListening(c);
 
       expect(stateOf(c).phase, DictationPhase.listening);
       expect(engine.initializeCalls, 1);
@@ -129,7 +144,7 @@ void main() {
 
     test('a partial shows immediately and is replaced by the next', () async {
       final c = container();
-      await controllerOf(c).start();
+      await startListening(c);
 
       await engine.push(const SttTranscript('THE CABIN IS'));
       expect(stateOf(c).text, 'THE CABIN IS');
@@ -144,7 +159,7 @@ void main() {
 
     test('a final commits its utterance and clears the partial', () async {
       final c = container();
-      await controllerOf(c).start();
+      await startListening(c);
 
       await engine.push(const SttTranscript('THE CABIN IS VIBRATING'));
       await engine.push(
@@ -185,7 +200,7 @@ void main() {
 
     test('a partial trails the committed utterances', () async {
       final c = container();
-      await controllerOf(c).start();
+      await startListening(c);
 
       await engine.push(
         const SttTranscript('THE CABIN IS VIBRATING', isFinal: true),
@@ -219,7 +234,7 @@ void main() {
     // an empty leading segment) must not produce a leading space or a crash.
     test('a segment gap does not leave a blank in the line', () async {
       final c = container();
-      await controllerOf(c).start();
+      await startListening(c);
 
       await engine.push(
         const SttTranscript('E 102', isFinal: true, segment: 2),
@@ -231,7 +246,7 @@ void main() {
 
     test('a second start while listening is refused, not restarted', () async {
       final c = container();
-      await controllerOf(c).start();
+      await startListening(c);
 
       await controllerOf(c).start();
 
@@ -293,7 +308,7 @@ void main() {
       await pumpEventQueue();
 
       engine.initializeGate = null;
-      await controllerOf(c).start();
+      await startListening(c);
 
       expect(stateOf(c).phase, DictationPhase.listening);
       // Two, not one: the cancelled start opened the input and gave it back, and
@@ -379,6 +394,53 @@ void main() {
         expect(bytes, 480);
       },
     );
+
+    // **The device measurement that made `listening` mean something.** On the demo
+    // iPad `MicCapture.start()` takes **1227ms** to return and the recogniser load
+    // after it is 458ms — so for over a second after the tap there is no input at
+    // all, and a technician who starts talking loses the front of the sentence.
+    // That is what survived the first fix: moving the microphone ahead of the
+    // model load recovered 458ms of a 1685ms gap and the report did not change.
+    test('the phase says listening only once audio is arriving', () async {
+      final c = container();
+
+      await controllerOf(c).start();
+
+      // The whole start chain has completed — engine resolved, input open,
+      // recogniser loaded, stream attached — and it is still not listening,
+      // because nothing has been heard.
+      expect(input.startStreamCalls, 1);
+      expect(
+        stateOf(c).phase,
+        DictationPhase.starting,
+        reason:
+            'attaching is not hearing; claiming otherwise is what invites a '
+            'technician to talk into an input that is not delivering yet',
+      );
+
+      input.emit(List<int>.filled(320, 1));
+      await pumpEventQueue();
+
+      expect(stateOf(c).phase, DictationPhase.listening);
+    });
+
+    // And the state it must not get stuck in: an input that opens and never
+    // delivers is faulted by `MicCapture.stallTimeout`, not left on `starting`
+    // for ever. Bound here because the phase change created the possibility.
+    test('an input that never delivers is not left on starting', () async {
+      final c = container();
+      await controllerOf(c).start();
+      expect(stateOf(c).phase, DictationPhase.starting);
+
+      // The watchdog's own suite owns the timing; what matters here is that the
+      // fault reaches the phase rather than stranding it.
+      await engine.crash(
+        const MicCaptureFault('the microphone delivered no audio'),
+      );
+
+      expect(stateOf(c).phase, DictationPhase.failed);
+      expect(stateOf(c).message, contains('no audio'));
+    });
 
     // **Review finding R2-F1, and the reachable row of it.** R1-F1's counter was
     // read on the way *forward*, after each await — but three of `start`'s exits
@@ -540,7 +602,7 @@ void main() {
   group('ending a dictation', () {
     test('stop closes the microphone and keeps what was said', () async {
       final c = container();
-      await controllerOf(c).start();
+      await startListening(c);
       await engine.push(
         const SttTranscript('THE CABIN IS VIBRATING', isFinal: true),
       );
@@ -582,10 +644,10 @@ void main() {
 
     test('a capture can be started again after stopping', () async {
       final c = container();
-      await controllerOf(c).start();
+      await startListening(c);
       await controllerOf(c).stop();
 
-      await controllerOf(c).start();
+      await startListening(c);
 
       expect(stateOf(c).phase, DictationPhase.listening);
       expect(input.startStreamCalls, 2);
@@ -593,13 +655,13 @@ void main() {
 
     test('starting again clears the previous line', () async {
       final c = container();
-      await controllerOf(c).start();
+      await startListening(c);
       await engine.push(
         const SttTranscript('THE CABIN IS VIBRATING', isFinal: true),
       );
       await controllerOf(c).stop();
 
-      await controllerOf(c).start();
+      await startListening(c);
 
       expect(
         stateOf(c).text,
@@ -612,7 +674,7 @@ void main() {
 
     test('clear empties the line but is refused mid-capture', () async {
       final c = container();
-      await controllerOf(c).start();
+      await startListening(c);
       await engine.push(
         const SttTranscript('THE CABIN IS VIBRATING', isFinal: true),
       );
@@ -660,11 +722,11 @@ void main() {
 
     test('a dictation can be restarted after a fault', () async {
       final c = container();
-      await controllerOf(c).start();
+      await startListening(c);
       await engine.crash(const MicCaptureFault('gone'));
       await pumpEventQueue();
 
-      await controllerOf(c).start();
+      await startListening(c);
 
       expect(stateOf(c).phase, DictationPhase.listening);
     });
