@@ -118,8 +118,10 @@ void main() {
   /// This is `diagnose_screen_test.dart`'s `settleRealAsync` under another name;
   /// it is duplicated rather than shared because these two files have no common
   /// harness and importing one test's private helper into another is worse.
-  Future<void> tapMic(WidgetTester tester) async {
-    await tester.tap(find.byKey(DiagnoseKeys.dictateButton));
+  /// Real event-loop time, then frames. See [tapMic] for why `pump` alone is not
+  /// enough — and note that a *typed* edit now also closes a capture (R0-F1), so
+  /// this is needed after `enterText` during dictation for the same reason.
+  Future<void> settleAsync(WidgetTester tester) async {
     for (var i = 0; i < 8; i++) {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 20)),
@@ -127,6 +129,11 @@ void main() {
       await tester.pump();
     }
     await tester.pumpAndSettle();
+  }
+
+  Future<void> tapMic(WidgetTester tester) async {
+    await tester.tap(find.byKey(DiagnoseKeys.dictateButton));
+    await settleAsync(tester);
   }
 
   group('the microphone button', () {
@@ -277,6 +284,80 @@ void main() {
       expect(inquiryText(tester), 'THE CABIN IS VIBRATING E 102');
     });
 
+    // **Review finding R0-F1.** The screen's own comment argues the field is not
+    // read-only while dictating "because a technician who sees `FALK CODE` land
+    // has to be able to fix it" — and until R0-F1 that was the one case that
+    // failed: `_onDictation` rebuilds the whole line from `base + transcript` on
+    // every state change, so the next partial wiped the correction. Two tests,
+    // because the reviewer measured two ways to lose it.
+    testWidgets('a mid-capture correction survives the next partial', (
+      tester,
+    ) async {
+      final container = await pumpScreen(tester);
+      await tapMic(tester);
+      await engine.push(tester, const SttTranscript('FALK CODE E 102'));
+
+      await tester.enterText(
+        find.byKey(DiagnoseKeys.inquiryField),
+        'FAULT CODE E 102',
+      );
+      await settleAsync(tester);
+      // The edit stops the capture, which is what makes the words stop arriving
+      // rather than the status line lying about a microphone nobody is mirroring.
+      expect(
+        container.read(dictationControllerProvider).isActive,
+        isFalse,
+        reason:
+            'typing takes the field, and an unmirrored capture reads as broken',
+      );
+
+      // Whatever the recogniser says next cannot reach the field.
+      await engine.push(tester, const SttTranscript('FALK CODE E 102 AGAIN'));
+
+      expect(inquiryText(tester), 'FAULT CODE E 102');
+    });
+
+    testWidgets('a mid-capture correction survives the capture ending', (
+      tester,
+    ) async {
+      // The second way the reviewer lost it: no further speech at all, just the
+      // phase change at the end of the capture firing `_onDictation` once more.
+      await pumpScreen(tester);
+      await tapMic(tester);
+      await engine.push(
+        tester,
+        const SttTranscript('FALK CODE E 102', isFinal: true),
+      );
+
+      await tester.enterText(
+        find.byKey(DiagnoseKeys.inquiryField),
+        'FAULT CODE E 102',
+      );
+      await tester.pumpAndSettle();
+
+      expect(inquiryText(tester), 'FAULT CODE E 102');
+    });
+
+    testWidgets('a later dictation appends to the corrected text', (
+      tester,
+    ) async {
+      // And the correction becomes the base of the next capture, so taking the
+      // field is not the same as giving up on the microphone.
+      await pumpScreen(tester);
+      await tapMic(tester);
+      await engine.push(tester, const SttTranscript('FALK CODE'));
+      await tester.enterText(
+        find.byKey(DiagnoseKeys.inquiryField),
+        'FAULT CODE',
+      );
+      await settleAsync(tester);
+
+      await tapMic(tester);
+      await engine.push(tester, const SttTranscript('E 102', isFinal: true));
+
+      expect(inquiryText(tester), 'FAULT CODE E 102');
+    });
+
     // Diagnose is disabled while dictating: the microphone is writing the inquiry
     // a run would be reading, and a prompt compiled from a sentence that is still
     // being spoken is a question nobody asked.
@@ -376,6 +457,48 @@ void main() {
             'the state → controller sync must not echo back through onChanged '
             'and relabel an agent value as a technician one',
       );
+    });
+
+    // **Review finding R0-F4.** `WorkOrderFormState.rejected` was dead on every
+    // production path while its docstring named a reader. It now reaches the state
+    // and this line, so what the model got wrong is visible beside the form.
+    testWidgets('a refused field is reported on the panel', (tester) async {
+      final container = await pumpScreen(tester);
+
+      container.read(workOrderFormProvider.notifier).applyPayload(const {
+        RecordWorkOrderFieldsTool.recordedKey: {'fault_code': 'E-102'},
+        RecordWorkOrderFieldsTool.refusedKey: [
+          {
+            'field': 'elevator_colour',
+            'error': 'unknown_field',
+            'message': 'not a field of the work order',
+          },
+        ],
+      });
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(WorkOrderKeys.refusals), findsOneWidget);
+      expect(
+        find.textContaining('1 value this form has no field for'),
+        findsOneWidget,
+      );
+      // The message is written for the model, so it does not reach the screen —
+      // `_ResultPanel`'s decision about refused tool calls, applied to fields.
+      expect(
+        find.textContaining('not a field of the work order'),
+        findsNothing,
+      );
+    });
+
+    testWidgets('no refusals means no line', (tester) async {
+      final container = await pumpScreen(tester);
+
+      container.read(workOrderFormProvider.notifier).applyPayload(const {
+        RecordWorkOrderFieldsTool.recordedKey: {'fault_code': 'E-102'},
+      });
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(WorkOrderKeys.refusals), findsNothing);
     });
 
     testWidgets('a conflicting agent value is offered, not applied', (

@@ -30,6 +30,7 @@
 /// which of the three it is.
 library;
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -91,7 +92,7 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
   final TextEditingController _inquiry = TextEditingController();
 
   /// What was in the inquiry field when the current dictation started, or `null`
-  /// when none is running.
+  /// when nothing is being mirrored.
   ///
   /// **Dictation appends to what is there rather than replacing it**, which is
   /// the difference between a microphone that helps and one that costs you a
@@ -100,6 +101,22 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
   /// rather than in `DictationState` is what keeps the controller's line a *pure*
   /// transcript — the state carries what was heard, this carries what it is being
   /// added to, and neither has to know about the other.
+  ///
+  /// **`null` also means "released", and that is review finding R0-F1.** The field
+  /// is not read-only while the microphone is open, because a technician watching
+  /// `FALK CODE` land has to be able to fix it — and until R0-F1 that was a claim
+  /// the code refuted: [_onDictation] rebuilds the whole line from `base +
+  /// transcript` on **every** state change, so a correction was overwritten by the
+  /// next partial, and by the capture merely ending. Measured by the reviewer, not
+  /// argued.
+  ///
+  /// The rule now is the one the comment always claimed: **typing takes the
+  /// field.** An edit made while a capture is running releases the mirror (this
+  /// goes `null`, so [_onDictation] returns) and stops the capture, in that order —
+  /// stopping first would flush a final transcript through the mirror and clobber
+  /// the very edit being protected. Stopping rather than merely releasing is what
+  /// keeps the status line honest: a microphone that stays open while its words
+  /// stop arriving reads as broken.
   String? _dictationBase;
 
   @override
@@ -161,6 +178,22 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
   void dispose() {
     _inquiry.dispose();
     super.dispose();
+  }
+
+  /// Handles a keystroke in the inquiry field.
+  ///
+  /// See [_dictationBase]: an edit during a capture releases the mirror and then
+  /// stops the capture. The order is load-bearing — `stop()` flushes the
+  /// recogniser's last utterance, and a mirror still attached would write
+  /// `base + that` over the words just typed, which is R0-F1 arriving through the
+  /// other door.
+  void _onInquiryEdited() {
+    if (_dictationBase != null &&
+        ref.read(dictationControllerProvider).isActive) {
+      _dictationBase = null;
+      unawaited(ref.read(dictationControllerProvider.notifier).stop());
+    }
+    setState(() {});
   }
 
   /// Mirrors the live transcript into the inquiry field.
@@ -263,7 +296,12 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
                         // Rebuilds so the button's enabled state follows the text.
                         // The viewmodel refuses a blank inquiry too; this is the
                         // affordance, that is the guarantee.
-                        onChanged: (_) => setState(() {}),
+                        //
+                        // `onChanged` fires for a *user* edit only — never for the
+                        // programmatic write in [_onDictation] — which is what
+                        // makes it safe to treat it as "the technician took the
+                        // field" (R0-F1).
+                        onChanged: (_) => _onInquiryEdited(),
                       ),
                     ),
                     const SizedBox(width: 8),

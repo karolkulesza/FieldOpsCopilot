@@ -161,7 +161,12 @@ Future<String?> showClarificationDialog(
 /// * **A dialog with no question.** [WorkOrderFormViewModel.reset] and
 ///   [WorkOrderFormViewModel.answerClarification] can both clear the request while
 ///   the dialog is up, so a cleared request pops the route rather than leaving a
-///   question about a form that has moved on.
+///   question about a form that has moved on. **The same clearing one frame
+///   *earlier* is a different state and used to be handled as if it were this one**
+///   — see [_ClarificationHostState._routeUp], review finding R0-F2. Note that
+///   `reset()` has no caller in `lib/` today, so the citation above is a capability
+///   rather than a live path; it is named because it is what the next "new job"
+///   button will use.
 /// * **A dialog with a different question.** `AgentLoop` runs up to four turns and
 ///   each may call the tool, so a second clarification can arrive while the first
 ///   is still on screen. The route follows [_showing] rather than the request it
@@ -197,6 +202,23 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
   /// one — and there is therefore no empty branch in the builder to go stale.
   ValueNotifier<ClarificationRequest>? _showing;
 
+  /// Whether a dialog route is actually on the navigator right now.
+  ///
+  /// **Distinct from `_showing != null`, and that gap is review finding R0-F2.**
+  /// [_showing] is assigned in the listener; the route is pushed one post-frame
+  /// callback later. A clarification cleared inside that window took the
+  /// `next == null` branch, found `_showing` non-null and popped the **root
+  /// navigator** — with no dialog on the stack, so it popped the app's home route
+  /// and left a blank screen. Measured by the reviewer against `reset()`; latent
+  /// only because `reset()` has no caller in `lib/` yet, which is the sort of thing
+  /// that stops being true the moment someone adds a "new job" button.
+  ///
+  /// So the two states are now separate questions: whether a presentation is
+  /// *pending* ([_showing]) and whether a route is *up* (this). Clearing the
+  /// request before the push cancels the presentation instead of popping something
+  /// else.
+  bool _routeUp = false;
+
   @override
   void dispose() {
     _showing?.dispose();
@@ -216,12 +238,20 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
     ) {
       final showing = _showing;
       if (next == null) {
-        // The question went away under an open dialog — answered, or the form
-        // was reset behind the barrier. `_showing` is deliberately left holding
-        // the outgoing question so the route paints it while it animates out;
-        // `_present` clears it when the route is actually gone.
-        if (showing != null) {
+        if (showing == null) return;
+        if (_routeUp) {
+          // The question went away under an open dialog — answered, or the form
+          // was reset behind the barrier. `_showing` is deliberately left holding
+          // the outgoing question so the route paints it while it animates out;
+          // `_present` clears it when the route is actually gone.
           Navigator.of(context, rootNavigator: true).pop();
+        } else {
+          // Cleared in the window between the assignment above and the push one
+          // frame later — review finding R0-F2. There is nothing to pop, and
+          // popping anyway takes the app's home route with it. Cancel the pending
+          // presentation instead: `_present` re-reads `_showing` and returns.
+          _showing = null;
+          showing.dispose();
         }
         return;
       }
@@ -241,6 +271,8 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
 
   Future<void> _present() async {
     final showing = _showing;
+    // Null when the listener cancelled this presentation before the frame it was
+    // scheduled on — see [_routeUp].
     if (showing == null) return;
     if (!mounted) {
       _showing = null;
@@ -248,7 +280,11 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
       return;
     }
 
+    // Set *before* the await and cleared after it, so the listener can tell a
+    // pending presentation from a route that is actually up — R0-F2.
+    _routeUp = true;
     final choice = await showClarificationDialog(context, showing);
+    _routeUp = false;
     _showing = null;
     showing.dispose();
     if (!mounted) return;

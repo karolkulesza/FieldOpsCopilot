@@ -3069,8 +3069,13 @@ and the argument is not tidiness:
 
 The tool is **pure**. It writes nothing and holds no sink: `WorkOrderFormViewModel`
 reads the *payload* and applies it, which is `_CompletedTool._summarise`'s decision
-one layer up — the screen and the model then cannot disagree about what was
-recorded, because there is one parse and both read its result.
+one layer up — **one parse feeds both readers**, so the screen and the model cannot
+disagree about what the call meant.
+
+They can still show different *values*, and that is the next section rather than a
+hole in this one: a recorded value is not applied over a field the technician holds.
+Stated because an earlier version of this paragraph claimed they "cannot disagree
+about what was recorded", which the precedence rule below contradicts.
 
 ### A refused field is a successful call
 
@@ -3087,6 +3092,13 @@ rejected when most of it landed, so the refusal travels in the payload:
 The failure codes are reserved for a call that recorded nothing *because it could
 not be read at all* — no `form_updates`, or one that is not an object — which
 `ToolArguments` already classifies, now including `requiredMap`.
+
+Those refusals reach the screen as a counted line under the work-order header
+("The assistant sent 1 value this form has no field for"), not as their messages:
+`RejectedFieldUpdate.message` is written *for the model* ("send the value as text"),
+which is `_ResultPanel`'s decision about refused tool calls applied to refused
+fields. Wiring them there is review finding **R0-F4** — before it the list reached
+nothing at all, under a docstring naming a reader that did not exist.
 
 A non-string value is **refused rather than coerced**, quoting
 `ToolArguments.requiredString`: `{"technician_hours": 2}` is the model ignoring a
@@ -3136,18 +3148,34 @@ a dialog whose only move is to agree. Unusable entries are dropped and the *coun
 is then checked, because a list of three where one arrived as `null` still asks a
 coherent question.
 
+One more thing the second tool changed, and it changed a *sentence* rather than
+code: `PromptCompiler.noMatchNotice` told the model "do not call any tool", which
+meant "do not look up a part you have no SKU for" when there was one tool and
+silently became "and do not fill in the work order" when there were two — on the one
+path where the technician's own words are the only source of work-order data. It now
+names the lookup and permits the recording (review finding **R0-F6**); the grounding
+rule is unchanged, because recording a fault code the technician said out loud is
+the opposite of inventing one.
+
 **What answering deliberately does not do is resume the agent's run.**
 `AgentLoop.run` is a single stream over one inquiry, and feeding an answer back
 mid-run would mean a second input channel into a loop whose whole design is "the
 conversation is the prompt". The answer fills the field. That is §2.3's interaction
 minus the round trip, and it is stated rather than implied.
 
-One defect was found here by writing the test that would show it. `AgentLoop` runs
-up to four turns and each may call the tool, so a **second** clarification can
-arrive while the first is on screen. A route built around the request it was pushed
-with then rendered the first question while the state held the second — so a tap
-would have written the option the technician read into the field they were not
-asked about. The route now follows a listenable.
+Two defects were found here rather than reasoned about. `AgentLoop` runs up to four
+turns and each may call the tool, so a **second** clarification can arrive while the
+first is on screen; a route built around the request it was pushed with rendered the
+first question while the state held the second, so a tap would have written the
+option the technician read into the field they were not asked about. The route
+follows a listenable instead.
+
+The other is review finding **R0-F2**, and it is worse: the host popped the **root
+navigator** whenever a presentation was pending, but the route is pushed one
+post-frame callback later — so a clarification cleared inside that window popped the
+app's *home* route and left a blank screen. Whether a presentation is *pending* and
+whether a route is *up* are now separate questions, and clearing inside the window
+cancels the presentation instead of popping something else.
 
 ### Voice: the microphone writes the question
 
@@ -3162,6 +3190,17 @@ in no manual, reaching the full-text query.
 typed half the inquiry and then reached for the microphone must not lose the half
 they typed. The base is held on the screen rather than in `DictationState`, so the
 controller's line stays a pure transcript.
+
+**And typing takes the field.** The inquiry stays editable while the microphone is
+open, because a technician watching `FALK CODE` land has to be able to fix it —
+which was a claim the code refuted until review finding R0-F1: the screen rebuilds
+the whole line from `base + transcript` on every state change, so a correction was
+wiped by the next partial, and by the capture merely ending. An edit during a
+capture now releases the mirror and *then* stops the capture, in that order —
+stopping first flushes a final transcript through a mirror that is still attached,
+which loses the edit through the other door. Stopping rather than only releasing is
+what keeps the status line honest: a microphone that stays open while its words stop
+arriving reads as broken.
 
 **Diagnose is inert while the microphone is open.** The microphone is writing the
 inquiry a run would read, and a prompt compiled from a sentence that is still being

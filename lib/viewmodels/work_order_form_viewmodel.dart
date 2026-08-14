@@ -80,10 +80,16 @@ class WorkOrderFormViewModel extends Notifier<WorkOrderFormState> {
   bool applyPayload(Map<String, Object?> payload) {
     final recorded = recordedFieldsOf(payload);
     final asked = askedClarificationOf(payload);
-    if (recorded.isEmpty && asked == null) return false;
+    // **Read rather than discarded — review finding R0-F4.** This used to pass
+    // `rejected: const []`, so `WorkOrderFormState.rejected` was dead on every
+    // production path while its docstring claimed to be what someone debugging a
+    // demo reads. The refusals are the model's mistakes, and they are worth seeing
+    // beside the form rather than only in the transcript the model got.
+    final refused = refusedUpdatesOf(payload);
+    if (recorded.isEmpty && asked == null && refused.isEmpty) return false;
 
     var next = state.applyUpdates(
-      FormUpdateParse(accepted: recorded, rejected: const []),
+      FormUpdateParse(accepted: recorded, rejected: refused),
     );
     if (asked != null) next = next.withClarification(asked);
     state = next;

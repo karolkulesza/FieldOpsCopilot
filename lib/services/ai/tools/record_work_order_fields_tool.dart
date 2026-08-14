@@ -26,10 +26,20 @@ import '../base_tool.dart';
 /// [AgentToolInvocation.outcome]'s payload and applies it. That is the same
 /// decision `_CompletedTool._summarise` made one layer up ("reads the payload
 /// rather than restating the arguments, because the payload is what the model was
-/// told"): the screen and the model then cannot disagree about what was recorded,
-/// because there is one parse and both read its result. A sink would give two
-/// readings of one call — the one the model got and the one the technician sees —
-/// and nothing to keep them in step.
+/// told"): **one parse feeds both readers**, so the screen and the model cannot
+/// disagree about what this call *meant*. A sink would give two readings of one
+/// call — the one the model got and the one the technician sees — and nothing to
+/// keep them in step.
+///
+/// **What that does not say, corrected by review finding R0-F3:** the screen and
+/// the model can still end up showing different *values*, and by design.
+/// `WorkOrderFormState.applyUpdates` refuses to overwrite a field the technician
+/// holds, so a payload the model was told recorded `E-102` can leave the field
+/// reading the technician's `E-999` with `E-102` parked as a suggestion. That is
+/// the precedence rule working, and it is a deliberate divergence rather than an
+/// exception to a guarantee — an earlier version of this paragraph claimed the two
+/// "cannot disagree about what was recorded", which the rule two files away
+/// contradicts.
 ///
 /// **A refused field is a successful call, not a [ToolFailure].** `{"fault_code":
 /// "E-102", "elevator_colour": "green"}` recorded one field and refused one, and
@@ -209,6 +219,44 @@ Map<WorkOrderField, String> recordedFieldsOf(Map<String, Object?> payload) {
     fields[field] = value;
   }
   return fields;
+}
+
+/// Reads the entries a [RecordWorkOrderFieldsTool] payload reports as refused.
+///
+/// The inverse of [RecordWorkOrderFieldsTool._refusal], and it exists because
+/// review finding **R0-F4** caught `WorkOrderFormState.rejected` being dead on
+/// every production path while its docstring named a reader. The list reaches the
+/// state, and the work-order panel draws a line when it is non-empty — so what the
+/// model got wrong is visible to the person watching the demo rather than only to
+/// the model.
+///
+/// Tolerant for [recordedFieldsOf]'s reason: it runs mid-flight over whatever
+/// payload arrives, so an unrecognised shape yields nothing rather than throwing.
+/// A refusal with no message is dropped — there would be nothing to draw.
+List<RejectedFieldUpdate> refusedUpdatesOf(Map<String, Object?> payload) {
+  final refused = payload[RecordWorkOrderFieldsTool.refusedKey];
+  if (refused is! List) return const [];
+  final entries = <RejectedFieldUpdate>[];
+  for (final raw in refused) {
+    if (raw is! Map) continue;
+    final field = raw['field'];
+    final message = raw['message'];
+    if (field is! String || message is! String || message.isEmpty) continue;
+    entries.add(
+      RejectedFieldUpdate(
+        key: field,
+        // The wire name the tool wrote, resolved back to the enum. An unknown one
+        // is reported as `unknownField` rather than dropped: the entry is real and
+        // the reason is the least interesting part of it.
+        reason: FormUpdateRejection.values.firstWhere(
+          (value) => value.wireName == raw['error'],
+          orElse: () => FormUpdateRejection.unknownField,
+        ),
+        message: message,
+      ),
+    );
+  }
+  return entries;
 }
 
 /// Reads the clarification a [RecordWorkOrderFieldsTool] payload asked for, or
