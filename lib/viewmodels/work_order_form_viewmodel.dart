@@ -50,14 +50,18 @@ class WorkOrderFormViewModel extends Notifier<WorkOrderFormState> {
   /// does not need the form to react to the model mis-spelling an argument.
   ///
   /// **The `ToolSuccess` check is unreachable today, and is recorded as unbound
-  /// rather than dressed up as a guard.** Mutation M12 deleted it and the suite
-  /// stayed green, which is correct and not a coverage gap: `ToolOutcome` is
-  /// sealed, so a failure is a `ToolFailure`, and `ToolFailure.payload` is a
-  /// computed `{error, parameter?, message}` that cannot carry a `recorded` key —
-  /// so [applyPayload] already answers `false` for one. It is kept because it puts
-  /// the rule where the decision belongs instead of making this method depend on a
-  /// payload shape defined one file away. The name check above is a different
-  /// matter and *is* bound (M11).
+  /// rather than dressed up as a guard.** Mutation M12 deletes it and the suite
+  /// stays green, which is correct and not a coverage gap: `ToolOutcome` is sealed,
+  /// so a failure is a `ToolFailure`, and `ToolFailure.payload` is a computed
+  /// `{error, parameter?, message}` — it carries **none** of the three keys
+  /// [applyPayload] reads (`recorded`, `refused`, `asked`), so that method already
+  /// answers `false` for one. Stated over all three rather than over `recorded`
+  /// alone, because review finding R0-F4 added the second and the narrower sentence
+  /// would have gone quietly stale.
+  ///
+  /// It is kept because it puts the rule where the decision belongs instead of
+  /// making this method depend on a payload shape defined one file away. The name
+  /// check above is a different matter and *is* bound (M11).
   ///
   /// Returns whether anything changed, so a caller can tell "no form call" from
   /// "a form call that recorded nothing". Nothing in the app branches on it today;
