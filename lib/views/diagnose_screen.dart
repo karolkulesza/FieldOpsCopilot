@@ -267,10 +267,17 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
                 // **The readiness chrome is `Flexible`, and that is a keyboard
                 // fix rather than a style choice.** Reported from the demo iPad:
                 // with the software keyboard up, `Scaffold` shrinks the body and
-                // this column overflowed — 64 pixels there, reproduced at 12 in a
-                // widget test at the same geometry. The two panels below are
+                // this column overflowed by 64 pixels. The two panels below are
                 // `Expanded` and had already collapsed to zero, so what did not
                 // fit was the *fixed* chrome itself.
+                //
+                // Reproduced in `voice_and_form_screen_test.dart` at **4 pixels**,
+                // with a 420pt keyboard inset and the device's own readiness state
+                // (no LLM configured, STT installed). The magnitudes differ because
+                // the device's banner is taller still; the mechanism is the same.
+                // The inset is stated because it is load-bearing — at 360 the
+                // defect does not reproduce at all, and the first version of that
+                // test passed with this fix reverted.
                 //
                 // Loose flex makes this region take its natural height when there
                 // is room — so the layout is unchanged with the keyboard down —
