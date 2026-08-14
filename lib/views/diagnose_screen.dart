@@ -264,13 +264,35 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const ModelReadinessBanner(),
-                const SizedBox(height: 12),
-                _EngineStatusRow(warmup: warmup),
-                if (startup.hasError) ...[
-                  const SizedBox(height: 12),
-                  _StartupFailure(error: startup.error!),
-                ],
+                // **The readiness chrome is `Flexible`, and that is a keyboard
+                // fix rather than a style choice.** Reported from the demo iPad:
+                // with the software keyboard up, `Scaffold` shrinks the body and
+                // this column overflowed — 64 pixels there, reproduced at 12 in a
+                // widget test at the same geometry. The two panels below are
+                // `Expanded` and had already collapsed to zero, so what did not
+                // fit was the *fixed* chrome itself.
+                //
+                // Loose flex makes this region take its natural height when there
+                // is room — so the layout is unchanged with the keyboard down —
+                // and scroll internally when there is not. The banner is the right
+                // thing to give up first: it is startup information, and by the
+                // time a technician is typing they have already read it.
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const ModelReadinessBanner(),
+                        const SizedBox(height: 12),
+                        _EngineStatusRow(warmup: warmup),
+                        if (startup.hasError) ...[
+                          const SizedBox(height: 12),
+                          _StartupFailure(error: startup.error!),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 16),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,

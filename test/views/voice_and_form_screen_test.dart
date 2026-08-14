@@ -12,11 +12,13 @@ import 'package:field_ops_copilot/services/audio/providers.dart';
 import 'package:field_ops_copilot/services/database/providers.dart';
 import 'package:field_ops_copilot/services/database/database_initializer.dart';
 import 'package:field_ops_copilot/services/inference/engine_warmup_controller.dart';
+import 'package:field_ops_copilot/services/models/model_descriptor.dart';
 import 'package:field_ops_copilot/services/models/model_storage.dart';
 import 'package:field_ops_copilot/services/models/providers.dart';
 import 'package:field_ops_copilot/viewmodels/dictation_viewmodel.dart';
 import 'package:field_ops_copilot/viewmodels/work_order_form_viewmodel.dart';
 import 'package:field_ops_copilot/views/components/clarification_dialog.dart';
+import 'package:field_ops_copilot/views/components/model_readiness_banner.dart';
 import 'package:field_ops_copilot/views/components/work_order_form_panel.dart';
 import 'package:field_ops_copilot/views/diagnose_screen.dart';
 import 'package:flutter/material.dart';
@@ -50,6 +52,14 @@ void main() {
   Future<ProviderContainer> pumpScreen(
     WidgetTester tester, {
     SttEngine? Function()? stt,
+
+    /// The readiness state the *device* was in when the keyboard overflow was
+    /// reported: no LLM configured, so the banner carries the two-line
+    /// "Set FIELDOPS_MODEL_URI…" row and the engine status row reads "no verified
+    /// weights". That chrome is ~90px taller than the ready state every other test
+    /// here uses, and it is the difference between reproducing the overflow and
+    /// writing a test that passes because there was never one.
+    bool modelReady = true,
   }) async {
     tester.view.physicalSize = const Size(1180, 820);
     tester.view.devicePixelRatio = 1;
@@ -58,13 +68,22 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         modelInstallStatusProvider.overrideWith(
-          (ref, modelId) async => ModelInstallStatus.ready,
+          (ref, modelId) async => modelReady
+              ? ModelInstallStatus.ready
+              // The STT set is installed on the device; the LLM is not.
+              : (modelId == ModelCatalog.sttZipformerId
+                    ? ModelInstallStatus.ready
+                    : ModelInstallStatus.absent),
         ),
         seedOutcomeProvider.overrideWith(
           (ref) async => const SeedSkipped(storedRevision: 1, assetRevision: 1),
         ),
         engineWarmupControllerProvider.overrideWith(
-          () => _StubWarmup(const EngineReady(_InertEngine())),
+          () => _StubWarmup(
+            modelReady
+                ? const EngineReady(_InertEngine())
+                : const EngineUnavailable(),
+          ),
         ),
         micCaptureProvider.overrideWith((ref) {
           // **`stallTimeout: null`, and it is the test that is wrong without
@@ -390,6 +409,73 @@ void main() {
             'controller write does not fire onChanged, so nothing else would '
             're-evaluate it',
       );
+    });
+  });
+
+  // **Reported from the demo iPad: `BOTTOM OVERFLOWED BY 64 PIXELS` with the
+  // software keyboard up.** `Scaffold` shrinks the body for the keyboard inset,
+  // and the two panels are `Expanded` — so they had already collapsed to zero and
+  // what did not fit was the *fixed* chrome. Reproduced here at the device's own
+  // geometry before it was fixed (12px in a test, 64 on hardware, because the
+  // device's banner carries two model rows of longer text).
+  group('the keyboard does not overflow the screen', () {
+    /// The keyboard inset from the screenshot, measured off it rather than
+    /// guessed: the keyboard occupies the bottom ~51% of an 820pt landscape iPad,
+    /// so 420. Applied as a *view inset*, which is what the platform reports and
+    /// what `Scaffold` subtracts, rather than by shrinking the surface — shrinking
+    /// would model a smaller device, and this is a full-size device with less room.
+    ///
+    /// **420 specifically, because it is where the defect reproduces.** Sweeping
+    /// the inset against the unfixed layout: 360 and 400 are clean, **420
+    /// overflows by 4px**, and the first guess of 360 produced a test that passed
+    /// with the fix reverted — a test written to bind a layout defect that could
+    /// not see it. The device reported 64px rather than 4 because its banner was
+    /// taller still; the mechanism is the same and the margin is not.
+    Future<void> raiseKeyboard(WidgetTester tester) async {
+      tester.view.viewInsets = const FakeViewPadding(bottom: 420);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('with the keyboard up, nothing overflows', (tester) async {
+      await pumpScreen(tester, modelReady: false);
+
+      await raiseKeyboard(tester);
+
+      expect(
+        tester.takeException(),
+        isNull,
+        reason:
+            'a RenderFlex overflow paints the yellow-and-black stripe on a '
+            'device and silently clips in release',
+      );
+    });
+
+    testWidgets('the inquiry field and Diagnose survive the keyboard', (
+      tester,
+    ) async {
+      await pumpScreen(tester, modelReady: false);
+      await raiseKeyboard(tester);
+
+      // What a technician is actually doing when the keyboard is up. Losing the
+      // readiness banner to make room is the intended trade; losing these is not.
+      expect(find.byKey(DiagnoseKeys.inquiryField), findsOneWidget);
+      expect(find.byKey(DiagnoseKeys.diagnoseButton), findsOneWidget);
+      expect(find.byKey(DiagnoseKeys.dictateButton), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('with the keyboard down the layout is unchanged', (
+      tester,
+    ) async {
+      // The control: loose flex must take its natural height when there is room,
+      // or the fix would have quietly shrunk the banner on every screen.
+      await pumpScreen(tester, modelReady: false);
+
+      expect(find.byType(ModelReadinessBanner), findsOneWidget);
+      expect(find.byKey(DiagnoseKeys.engineStatus), findsOneWidget);
+      expect(find.byKey(WorkOrderKeys.panel), findsOneWidget);
+      expect(find.byKey(DiagnoseKeys.resultPanel), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
   });
 
