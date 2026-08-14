@@ -823,7 +823,18 @@ class _ScriptedAudioInput implements AudioInput {
 
   /// Pushes raw PCM as the plugin would. Even-length only: `MicCapture` emits
   /// whole frames and carries a partial one over.
-  void emit(List<int> bytes) => _raw?.add(Uint8List.fromList(bytes));
+  ///
+  /// Delivered at an **odd `offsetInBytes`**, because that is what the device
+  /// delivered and `Uint8List.fromList` never does — see the long note on the
+  /// same helper in `dictation_viewmodel_test.dart`. A frame read through an
+  /// `Int16List` view threw here and stopped dictation on the first frame, with
+  /// every test green.
+  void emit(List<int> bytes) {
+    const offset = 5;
+    final backing = Uint8List(offset + bytes.length)
+      ..setRange(offset, offset + bytes.length, bytes);
+    _raw?.add(Uint8List.sublistView(backing, offset));
+  }
 
   @override
   Future<bool> hasPermission({bool request = true}) async => permission;

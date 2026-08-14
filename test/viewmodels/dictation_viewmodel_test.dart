@@ -424,6 +424,37 @@ void main() {
       expect(stateOf(c).phase, DictationPhase.listening);
     });
 
+    // **A crash the doubles had been hiding.** Every `emit` above now arrives at
+    // an odd `offsetInBytes`, as the device's frames did; this is the one test
+    // that says so out loud, so the next person to reach for an `Int16List` view
+    // on this path finds the reason rather than just a red bar.
+    test('a frame at an odd offset is audio, not a crash', () async {
+      final c = container();
+      await controllerOf(c).start();
+
+      final frame = _ScriptedAudioInput.platformBufferFor(
+        List<int>.filled(320, 7),
+      );
+      expect(
+        frame.offsetInBytes.isOdd,
+        isTrue,
+        reason: 'the property under test is the misalignment itself',
+      );
+
+      input.emit(List<int>.filled(320, 7));
+      await pumpEventQueue();
+
+      expect(
+        stateOf(c).phase,
+        DictationPhase.listening,
+        reason:
+            'reading the frame must not throw — a RangeError here reached the '
+            'frame handler and stopped dictation on the first frame of every '
+            'session, under a red "Dictation stopped" line',
+      );
+      expect(engine.receivedFrames.single.bytes.length, 320);
+    });
+
     // And the state it must not get stuck in: an input that opens and never
     // delivers is faulted by `MicCapture.stallTimeout`, not left on `starting`
     // for ever. Bound here because the phase change created the possibility.
@@ -908,7 +939,35 @@ class _ScriptedAudioInput implements AudioInput {
   /// back and the test would be measuring the carry rather than the ordering.
   void emit(List<int> bytes) {
     assert(bytes.length.isEven, 'whole 16-bit samples only');
-    _raw?.add(Uint8List.fromList(bytes));
+    _raw?.add(_asPlatformBuffer(bytes));
+  }
+
+  /// A view into a larger buffer at an **odd** `offsetInBytes`, which is what the
+  /// device actually delivered and what `Uint8List.fromList` never produces.
+  ///
+  /// `fromList` allocates its own backing store, so its `offsetInBytes` is always
+  /// 0 and every typed-data view over it is two-byte aligned. A real frame is a
+  /// slice of a platform message and carries whatever offset the allocator gave
+  /// it — on the demo iPad, **5**. Reading one with `Int16List.sublistView` threw
+  /// `RangeError: Offset (5) must be a multiple of BYTES_PER_ELEMENT (2)`, the
+  /// throw reached the frame handler, and dictation stopped on the first frame of
+  /// every session. Every test in this file passed while that shipped, for the
+  /// single reason that `fromList` is kinder than a microphone.
+  ///
+  /// So the offset is now a property of the double rather than a case one test
+  /// remembers to cover: `pcm16ToFloat32` already documents why nothing on this
+  /// path may assume alignment, and this is what makes the rest of the path
+  /// answer for it.
+  /// Exposed so one test can assert the misalignment is real rather than trust
+  /// a private helper to keep being unkind.
+  static Uint8List platformBufferFor(List<int> bytes) =>
+      _asPlatformBuffer(bytes);
+
+  static Uint8List _asPlatformBuffer(List<int> bytes) {
+    const offset = 5;
+    final backing = Uint8List(offset + bytes.length)
+      ..setRange(offset, offset + bytes.length, bytes);
+    return Uint8List.sublistView(backing, offset);
   }
 
   int startStreamCalls = 0;
