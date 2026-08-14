@@ -141,6 +141,12 @@ class DictationController extends Notifier<DictationState> {
   /// that finds it changed abandons its work, closing anything it opened in the
   /// meantime — the microphone is a real resource, so "abandon" has to mean
   /// released rather than forgotten.
+  ///
+  /// **"Abandons its work" includes not repainting the screen**, which it did not
+  /// when this sentence was first written: three of [start]'s exits reported a
+  /// failure before reaching the next check. The guard now sits inside
+  /// [_unavailable], so it covers every exit rather than the ones someone
+  /// remembered (review finding R2-F1).
   int _generation = 0;
 
   /// Completes when the transcript stream has finished — normally or by error.
@@ -182,11 +188,15 @@ class DictationController extends Notifier<DictationState> {
     try {
       engine = await ref.read(dictationEngineProvider.future);
     } on Exception catch (error) {
-      _unavailable('Speech recognition could not be prepared: $error');
+      _unavailable(
+        generation,
+        'Speech recognition could not be prepared: $error',
+      );
       return;
     }
     if (engine == null) {
       _unavailable(
+        generation,
         'No verified speech model is installed on this device, so dictation '
         'is unavailable. Type the inquiry instead.',
       );
@@ -201,7 +211,7 @@ class DictationController extends Notifier<DictationState> {
       // below a `stop()` inside it was a no-op.
       await engine.initialize();
     } on Exception catch (error) {
-      _unavailable('The speech model could not be loaded: $error');
+      _unavailable(generation, 'The speech model could not be loaded: $error');
       return;
     }
     if (!ref.mounted || _generation != generation) return;
@@ -218,6 +228,7 @@ class DictationController extends Notifier<DictationState> {
     switch (outcome) {
       case MicPermissionDenied():
         _unavailable(
+          generation,
           'FieldOps Copilot has no microphone access. Grant it in Settings to '
           'dictate.',
         );
@@ -226,9 +237,12 @@ class DictationController extends Notifier<DictationState> {
         // own re-entry is refused at the top. Reported rather than swallowed,
         // because a mic button that silently does nothing is indistinguishable
         // from one that is broken.
-        _unavailable('The microphone is already in use.');
+        _unavailable(generation, 'The microphone is already in use.');
       case MicCaptureUnavailable(:final message):
-        _unavailable('The microphone could not be opened: $message');
+        _unavailable(
+          generation,
+          'The microphone could not be opened: $message',
+        );
       case MicCaptureStarted(:final session):
         _session = session;
         _listen(engine, session);
@@ -335,7 +349,26 @@ class DictationController extends Notifier<DictationState> {
     state = const DictationState();
   }
 
-  void _unavailable(String message) {
+  /// Reports why this capture cannot run — **unless it is no longer the current
+  /// one.**
+  ///
+  /// The generation check lives here rather than at each call site, which is review
+  /// finding **R2-F1**. R1-F1 added the counter and read it after each `await` on
+  /// the way *forward*; three of [start]'s six exits report a failure and return
+  /// *before* the next such check, so a cancelled start still repainted the screen.
+  /// The reachable one is a fresh install with no STT set: tap the mic, type while
+  /// `dictationEngineProvider` resolves (it awaits a status provider that hashes
+  /// files, so the window is real), watch the status row go — and then a red
+  /// "dictation is unavailable" line appears under an idle microphone, about a
+  /// capture that no longer exists. The message was true and about nothing.
+  ///
+  /// Guarding the **single write** rather than the six exits is the move this
+  /// project keeps arriving at: an enumeration of call sites is a list to keep
+  /// complete, and this is one question asked once. The forward checks after the
+  /// awaits stay, because they stop the microphone being *opened* rather than a
+  /// state being written, which is a different thing to prevent.
+  void _unavailable(int generation, String message) {
+    if (!ref.mounted || _generation != generation) return;
     state = DictationState(phase: DictationPhase.unavailable, message: message);
   }
 
