@@ -47,6 +47,7 @@ import '../services/ai/tool_call_guard.dart';
 import '../services/inference/engine_warmup_controller.dart';
 import '../services/rag/providers.dart';
 import '../services/rag/retrieval_router.dart';
+import 'work_order_form_viewmodel.dart';
 
 /// Where one diagnosis is in its life.
 ///
@@ -234,6 +235,17 @@ class FieldJobViewModel extends Notifier<FieldJobState> {
         // drains or cancels the stream, so walking away without cancelling would
         // deadlock the next run.
         if (!ref.mounted) return;
+        // **The one side effect in this loop, and it is here rather than in
+        // [applyEvent] because [applyEvent] is pure** — it is a table, and a table
+        // that writes to a second provider is not one. Task 2.3's form lives on
+        // its own viewmodel because it outlives a diagnosis, so a completion has to
+        // reach it explicitly; `applyInvocation` ignores everything that is not a
+        // form recording, which is most of them.
+        if (event is AgentToolCallCompleted) {
+          ref
+              .read(workOrderFormProvider.notifier)
+              .applyInvocation(event.invocation);
+        }
         state = applyEvent(state, event);
       }
     } on Exception catch (error, stackTrace) {

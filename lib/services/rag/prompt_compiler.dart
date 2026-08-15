@@ -103,12 +103,26 @@ class PromptCompiler {
   static const String userInquiryMarker = '[USER INQUIRY]';
 
   /// What the model is told when retrieval came back empty.
+  ///
+  /// **"Do not call any tool" was narrowed to the lookup by Task 2.3, and the
+  /// sentence had to change because the *registry* did** — review finding R0-F6.
+  /// When it was written there was one tool and the instruction meant "do not look
+  /// up a part you have no SKU for", which is right: with no manual entry there is
+  /// no part number to check, and a lookup would be the model inventing one. Adding
+  /// `record_work_order_fields` silently widened it to "do not fill in the work
+  /// order either" — on the one path where the technician's own words are the *only*
+  /// source of work-order data, which is where auto-fill is worth most.
+  ///
+  /// The grounding rule is unchanged and is what the rest of the sentence carries:
+  /// nothing may be invented. Recording a fault code the technician said out loud is
+  /// not invention; it is the opposite.
   static const String noMatchNotice =
       'No matching entry was found in the local service manual for this '
       'inquiry.\n'
       'Do not invent a procedure, a part number, a tool or a fault code, and do '
-      'not call any tool. Tell the technician that the offline manual has no '
-      'entry for this fault and ask for the exact fault code shown on the '
+      'not look up parts you have not been given a SKU for. You may still record '
+      'what the technician told you. Tell the technician that the offline manual '
+      'has no entry for this fault and ask for the exact fault code shown on the '
       'controller.';
 
   /// Compiles [result] into the grounded prompt string.

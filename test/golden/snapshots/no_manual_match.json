@@ -31,7 +31,7 @@
         "",
         "[MANUAL DOCUMENT]",
         "No matching entry was found in the local service manual for this inquiry.",
-        "Do not invent a procedure, a part number, a tool or a fault code, and do not call any tool. Tell the technician that the offline manual has no entry for this fault and ask for the exact fault code shown on the controller.",
+        "Do not invent a procedure, a part number, a tool or a fault code, and do not look up parts you have not been given a SKU for. You may still record what the technician told you. Tell the technician that the offline manual has no entry for this fault and ask for the exact fault code shown on the controller.",
         "",
         "[USER INQUIRY]",
         "\"escalator handrail torn\""

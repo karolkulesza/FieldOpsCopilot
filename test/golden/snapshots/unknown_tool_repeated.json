@@ -66,7 +66,7 @@
             "toolName": "check_warehouse_stock",
             "payload": {
               "error": "unknown_tool",
-              "message": "no tool named \"check_warehouse_stock\" is registered; available tools: get_local_parts_inventory"
+              "message": "no tool named \"check_warehouse_stock\" is registered; available tools: get_local_parts_inventory, record_work_order_fields"
             }
           }
         }
@@ -97,7 +97,7 @@
         "[TOOL CALL]",
         "{\"tool\":\"check_warehouse_stock\",\"arguments\":{\"sku\":\"BRK-990-XP\"}}",
         "[TOOL RESULT]",
-        "{\"error\":\"unknown_tool\",\"message\":\"no tool named \\\"check_warehouse_stock\\\" is registered; available tools: get_local_parts_inventory\"}",
+        "{\"error\":\"unknown_tool\",\"message\":\"no tool named \\\"check_warehouse_stock\\\" is registered; available tools: get_local_parts_inventory, record_work_order_fields\"}",
         "",
         "[CONTINUE]",
         "The tool results above are the authoritative local warehouse data \u2014 they come from this device, not from your training. Use them together with the manual document to answer the technician now. Do not call a tool again with arguments already answered above."
@@ -121,7 +121,7 @@
             "toolName": "check_warehouse_stock",
             "payload": {
               "error": "unknown_tool",
-              "message": "no tool named \"check_warehouse_stock\" is registered; available tools: get_local_parts_inventory"
+              "message": "no tool named \"check_warehouse_stock\" is registered; available tools: get_local_parts_inventory, record_work_order_fields"
             }
           }
         }
@@ -152,7 +152,7 @@
         "[TOOL CALL]",
         "{\"tool\":\"check_warehouse_stock\",\"arguments\":{\"sku\":\"BRK-990-XP\"}}",
         "[TOOL RESULT]",
-        "{\"error\":\"unknown_tool\",\"message\":\"no tool named \\\"check_warehouse_stock\\\" is registered; available tools: get_local_parts_inventory\"}",
+        "{\"error\":\"unknown_tool\",\"message\":\"no tool named \\\"check_warehouse_stock\\\" is registered; available tools: get_local_parts_inventory, record_work_order_fields\"}",
         "",
         "[CONTINUE]",
         "The tool results above are the authoritative local warehouse data \u2014 they come from this device, not from your training. Use them together with the manual document to answer the technician now. Do not call a tool again with arguments already answered above.",
@@ -163,7 +163,7 @@
         "[TOOL CALL]",
         "{\"tool\":\"check_warehouse_stock\",\"arguments\":{\"sku\":\"BRK-990-XP\"},\"repeated\":true}",
         "[TOOL RESULT]",
-        "{\"error\":\"unknown_tool\",\"message\":\"no tool named \\\"check_warehouse_stock\\\" is registered; available tools: get_local_parts_inventory\"}",
+        "{\"error\":\"unknown_tool\",\"message\":\"no tool named \\\"check_warehouse_stock\\\" is registered; available tools: get_local_parts_inventory, record_work_order_fields\"}",
         "",
         "[CONTINUE]",
         "The tool results above are the authoritative local warehouse data \u2014 they come from this device, not from your training. Use them together with the manual document to answer the technician now. Do not call a tool again with arguments already answered above."

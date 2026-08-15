@@ -8,6 +8,8 @@
 /// imports `package:sherpa_onnx`.
 library;
 
+import 'dart:typed_data';
+
 import 'pcm_audio_format.dart';
 
 /// Paths to the four files the streaming zipformer is made of.
@@ -80,6 +82,7 @@ class SttConfig {
     this.maxGapBridge = defaultMaxGapBridge,
     this.debug = false,
     this.nativeLibraryPath,
+    this.primer,
   });
 
   /// Builds a config for a Task 2.0 install directory (`…/models/<id>/`).
@@ -110,6 +113,41 @@ class SttConfig {
 
   /// Whether the recogniser segments continuous audio into utterances.
   final bool enableEndpoint;
+
+  /// Speech fed to a fresh stream before the technician's audio, and discarded.
+  ///
+  /// **This is a workaround for the model, and it is here because the alternative
+  /// was a demo that mis-hears the first word of every session.** A technician
+  /// said "cabin vibrating" and read back "IN VIBRATING"; "testing cabin
+  /// vibrating" gave the same. Reproduced on the host in
+  /// `sherpa_recognizer_live_test.dart` — real weights, synthetic audio, the
+  /// runtime called directly, no microphone anywhere in it — so it is the
+  /// recogniser and not this app's capture.
+  ///
+  /// It is not the word: *"the cabin is vibrating"* transcribes perfectly, because
+  /// "the" absorbs the damage. It is the **opening of a stream**, and what fixes
+  /// it is one second of real speech ahead of the utterance:
+  ///
+  /// ```text
+  /// bare    "IN VIBRATING"
+  /// primed  "CABIN VIBRATING"
+  /// ```
+  ///
+  /// Measured and rejected, each by running it rather than reasoning about it:
+  /// leading silence from 0 to 5000ms, room noise at four amplitudes, a 220Hz
+  /// tone, and a larger model (the 2023-06-26 zipformer answers "HAVE BEEN
+  /// VIBRATING" on the same clip). Only speech works, which suggests the encoder
+  /// needs acoustic content to condition on and zeros are not that.
+  ///
+  /// Signed 16-bit little-endian at [format], the same encoding [MicFrame] carries
+  /// — so the primer travels as bytes and is decoded by the same
+  /// `pcm16ToFloat32` the microphone's audio goes through, rather than by a second
+  /// path that could disagree with it about scaling.
+  ///
+  /// `null` disables priming, which is what every host test gets: the scripted
+  /// runtime has no first-word weakness to work around, and a 32KB field on a
+  /// config that dozens of tests construct would be noise in all of them.
+  final Uint8List? primer;
 
   /// Trailing silence, in seconds, that ends an utterance.
   ///
@@ -241,6 +279,7 @@ class SttConfig {
     Duration? maxGapBridge,
     bool? debug,
     String? nativeLibraryPath,
+    Uint8List? primer,
   }) => SttConfig(
     files: files ?? this.files,
     format: format ?? this.format,
@@ -253,6 +292,7 @@ class SttConfig {
     maxGapBridge: maxGapBridge ?? this.maxGapBridge,
     debug: debug ?? this.debug,
     nativeLibraryPath: nativeLibraryPath ?? this.nativeLibraryPath,
+    primer: primer ?? this.primer,
   );
 
   Map<String, Object?> toWire() => {
@@ -267,6 +307,12 @@ class SttConfig {
     'maxGapBridgeMs': maxGapBridge.inMilliseconds,
     'debug': debug,
     'nativeLibraryPath': nativeLibraryPath,
+    // Sent as bytes rather than as a path: the worker cannot reach `rootBundle`
+    // (no `BackgroundIsolateBinaryMessenger`, and this isolate deliberately never
+    // takes a `RootIsolateToken` — see the library doc on `sherpa_recognizer.dart`),
+    // so the asset is read on the root isolate and travels with the config. It
+    // crosses once per load, not once per utterance.
+    'primer': primer,
   };
 
   /// Rebuilds a config from [wire].
@@ -308,6 +354,7 @@ class SttConfig {
         wire['nativeLibraryPath'],
         'nativeLibraryPath',
       ),
+      primer: _optionalBytes(wire['primer'], 'primer'),
     );
   }
 
@@ -349,6 +396,18 @@ class SttConfig {
     if (raw is String && raw.isNotEmpty) return raw;
     throw FormatException(
       'stt config: $field is not a non-empty string ($raw)',
+    );
+  }
+
+  /// An odd length is rejected rather than trimmed, for `pcm16ToFloat32`'s reason:
+  /// half a sample means the buffer was cut mid-sample, and every sample after the
+  /// cut decodes as noise. Priming the encoder with noise is worse than not
+  /// priming it, and it would present as the very defect the primer exists to fix.
+  static Uint8List? _optionalBytes(Object? raw, String field) {
+    if (raw == null) return null;
+    if (raw is Uint8List && raw.isNotEmpty && raw.length.isEven) return raw;
+    throw FormatException(
+      'stt config: $field is not a non-empty, even-length byte list ($raw)',
     );
   }
 
