@@ -54,36 +54,42 @@ void main() {
   group('TC-RAG-COMP-01 zero matches', () {
     const query = 'unknown machinery broken';
 
-    test(
-      'the document block is present and says there is no document',
-      () async {
-        final result = await router.retrieve(query);
-        expect(
-          result.entries,
-          isEmpty,
-          reason: 'the AC needs this query to genuinely retrieve nothing',
-        );
+    test('the document block is present and says there is no document', () async {
+      final result = await router.retrieve(query);
+      expect(
+        result.entries,
+        isEmpty,
+        reason: 'the AC needs this query to genuinely retrieve nothing',
+      );
 
-        final prompt = compiler.compile(result);
+      final prompt = compiler.compile(result);
 
-        // Structure first: both markers are still there. The preamble tells the
-        // model to answer only from the document below, so dropping the block
-        // would leave that instruction pointing at nothing.
-        expect(prompt, contains(PromptCompiler.manualDocumentMarker));
-        expect(prompt, contains(PromptCompiler.userInquiryMarker));
-        expect(prompt, contains('Based ONLY on the verified technical manual'));
+      // Structure first: both markers are still there. The preamble tells the
+      // model to answer only from the document below, so dropping the block
+      // would leave that instruction pointing at nothing.
+      expect(prompt, contains(PromptCompiler.manualDocumentMarker));
+      expect(prompt, contains(PromptCompiler.userInquiryMarker));
+      expect(prompt, contains('Based ONLY on the verified technical manual'));
 
-        // Then the warning, and the instruction that makes it actionable.
-        expect(prompt, contains('No matching entry was found'));
-        expect(prompt, contains('Do not invent'));
-        expect(prompt, contains('do not call any tool'));
+      // Then the warning, and the instruction that makes it actionable.
+      expect(prompt, contains('No matching entry was found'));
+      expect(prompt, contains('Do not invent'));
+      // **The lookup, not every tool — Task 2.3's review finding R0-F6.** This
+      // read `do not call any tool` when the registry held one, which meant
+      // exactly this; registering `record_work_order_fields` silently widened it
+      // to "and do not fill in the work order", on the one path where the
+      // technician's words are the only source of work-order data. Both halves
+      // are asserted, because the prohibition and the permission are one
+      // decision and a test naming only the first would pass on a notice that
+      // forbade everything.
+      expect(prompt, contains('do not look up parts'));
+      expect(prompt, contains('You may still record what the technician told'));
 
-        // And no trace of a document that was not retrieved.
-        expect(prompt, isNot(contains('Title:')));
-        expect(prompt, isNot(contains('Procedure:')));
-        expect(prompt, isNot(contains('Required Parts:')));
-      },
-    );
+      // And no trace of a document that was not retrieved.
+      expect(prompt, isNot(contains('Title:')));
+      expect(prompt, isNot(contains('Procedure:')));
+      expect(prompt, isNot(contains('Required Parts:')));
+    });
 
     test(
       'the inquiry is still quoted back, so the model has the question',
@@ -228,7 +234,7 @@ Required Tools: Hammer
       // R0-F6. `compile` branched the no-match block on the *truncated* list, and
       // the only guard against a zero cap was a constructor `assert` — which is
       // compiled out in release. So a release build with `maxDocuments: 0` told
-      // the model "No matching entry was found … do not call any tool" about a
+      // the model "No matching entry was found … do not look up parts" about a
       // retrieval that had in fact found something: a silently wrong prompt,
       // worse than the crash the assert was written to cause. The cap is now
       // clamped, so the notice can only describe an actually-empty retrieval.

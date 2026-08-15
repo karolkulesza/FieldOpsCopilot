@@ -41,6 +41,7 @@ import 'dart:typed_data';
 
 import 'package:sherpa_onnx/sherpa_onnx.dart' as sherpa;
 
+import 'pcm_samples.dart';
 import 'stt_config.dart';
 
 /// One transcript as the runtime produces it.
@@ -207,9 +208,53 @@ class SherpaRecognizerRuntime implements SttRecognizerRuntime {
     if (_stream != null) {
       throw StateError('a recognition session is already open');
     }
-    _stream = recognizer.createStream();
+    final stream = recognizer.createStream();
+    _stream = stream;
+    _prime(recognizer, stream);
     _segment = 0;
     _lastEmitted = '';
+  }
+
+  /// Warms a fresh stream with [SttConfig.primer] and throws away what it decodes.
+  ///
+  /// The *why* is on `SttConfig.primer` and is not repeated here; what this owns is
+  /// making sure none of it reaches a caller. Three things do that:
+  ///
+  /// * the samples go in through `acceptWaveform` and are drained with the raw
+  ///   `isReady`/`decode` loop rather than through [acceptSamples], so no
+  ///   `SttRuntimeTranscript` is ever constructed from them;
+  /// * `reset` closes the primer's segment, so the technician's first word starts a
+  ///   fresh hypothesis instead of being appended to "THE ELEVATOR IS…";
+  /// * [beginSession] zeroes `_segment` and `_lastEmitted` *after* this returns, so
+  ///   the first utterance a caller sees is segment 0 whether priming ran or not —
+  ///   a consumer keying commits off the segment number cannot tell the difference,
+  ///   which is the point.
+  ///
+  /// The trailing silence is what makes the reset land on a closed utterance rather
+  /// than mid-word. It is [SttConfig.trailingSilenceSeconds] and not a number of its
+  /// own, because the quantity being cleared is exactly what the endpointer calls an
+  /// utterance boundary; a separate constant here would be a second opinion about
+  /// the same thing.
+  ///
+  /// This costs one decode of roughly two and a half seconds of audio per capture,
+  /// on the isolate, before the first frame arrives. It is not free and it is not
+  /// paced by real time — the samples are pushed as fast as the encoder consumes
+  /// them.
+  void _prime(sherpa.OnlineRecognizer recognizer, sherpa.OnlineStream stream) {
+    final config = _config!;
+    final primer = config.primer;
+    if (primer == null) return;
+
+    final rate = config.format.sampleRate;
+    stream.acceptWaveform(samples: pcm16ToFloat32(primer), sampleRate: rate);
+    stream.acceptWaveform(
+      samples: silentSamples((rate * config.trailingSilenceSeconds).round()),
+      sampleRate: rate,
+    );
+    while (recognizer.isReady(stream)) {
+      recognizer.decode(stream);
+    }
+    recognizer.reset(stream);
   }
 
   @override

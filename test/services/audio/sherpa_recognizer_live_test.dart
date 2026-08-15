@@ -223,6 +223,132 @@ void main() {
       );
     });
 
+    // **The device report, reproduced on the host — and the third hypothesis was
+    // the first correct one.**
+    //
+    // A technician tapped the microphone, said "cabin vibrating", and read back
+    // "IN VIBRATING". Twice I answered from the code and was wrong: the first fix
+    // moved the microphone ahead of the model load, the second made `listening`
+    // mean audio-is-arriving. Neither changed the report, because neither touched
+    // the cause. The device logs then ruled out capture outright — `dropped 0B`,
+    // and speech onset **1.8 seconds after** the first audio frame.
+    //
+    // What is left is this: the recogniser mangles the opening of a stream. It is
+    // not the word "cabin" — "the cabin is vibrating" transcribes perfectly,
+    // because "the" absorbs the damage. It is not lost audio, not our capture,
+    // not the isolate, and not a larger model (the 2023-06-26 zipformer returns
+    // "HAVE BEEN VIBRATING" on the same clip). Priming does not work with silence,
+    // white noise, or a 220Hz tone — **only with real speech**, which is what
+    // this test pins.
+    //
+    // Two assertions, and the pair is the point: one fails if the defect is fixed
+    // upstream (delete the workaround, then), the other fails if the remedy stops
+    // working (keep it, then).
+    test('the first word of a session is degraded, and speech primes it', () async {
+      final target = readWav('test/fixtures/cabin_vibrating.wav');
+      expect(target.sampleRate, 16000);
+      expect(target.channels, 1);
+
+      // A second and a half of digital silence, which is what the microphone
+      // delivers between the tap and the first syllable — and which primes
+      // nothing. The `leadIn` is here so the two runs differ *only* in whether
+      // that lead-in carries speech.
+      final leadIn = Uint8List(
+        PcmAudioFormat.sttMono16k.byteCountFor(
+          const Duration(milliseconds: 1500),
+        ),
+      );
+      // One second of real speech, taken from the fixture this suite already
+      // commits rather than from a second recording.
+      final primer = Uint8List.sublistView(
+        readWav('test/fixtures/e102_utterance.wav').pcm,
+        0,
+        PcmAudioFormat.sttMono16k.byteCountFor(const Duration(seconds: 1)),
+      );
+
+      Uint8List precededBy(Uint8List head) {
+        final out = Uint8List(head.length + leadIn.length + target.pcm.length)
+          ..setRange(0, head.length, head)
+          ..setRange(head.length, head.length + leadIn.length, leadIn);
+        out.setRange(head.length + leadIn.length, out.length, target.pcm);
+        return out;
+      }
+
+      final bare = await _run(
+        config,
+        sherpaLib,
+        precededBy(Uint8List(0)),
+        pad: true,
+      );
+      final primed = await _run(
+        config,
+        sherpaLib,
+        precededBy(primer),
+        pad: true,
+      );
+
+      // ignore: avoid_print
+      print('[live] bare   "$bare"');
+      // ignore: avoid_print
+      print('[live] primed "$primed"');
+
+      expect(
+        bare.toUpperCase(),
+        isNot(contains('CABIN')),
+        reason:
+            'this is the defect, and it is asserted so that fixing it fails here '
+            'rather than going unnoticed — if the bare run now recovers "cabin", '
+            'the priming workaround has become dead weight and should go',
+      );
+      expect(
+        primed.toUpperCase(),
+        contains('CABIN'),
+        reason:
+            'one second of speech ahead of the utterance is the whole remedy; '
+            'silence, noise and a tone were all measured and none of them work',
+      );
+    });
+
+    // And the same claim through the shipped path rather than through a hand-built
+    // input: `SttConfig.primer` carrying the committed asset, fed by
+    // `beginSession`, with the caller passing only the technician's own audio.
+    //
+    // The test above proves the *remedy* works. This one proves the *wiring* does,
+    // which is a different thing and the one that can rot: a primer dropped on the
+    // isolate wire, a `reset` that stops closing the primer's segment, an asset
+    // that fails to load and falls back to `null` — every one of those leaves a
+    // build that transcribes fine except for the first word of every session,
+    // which is exactly the defect nobody noticed for three rounds.
+    test('the shipped primer fixes it, through the config the app builds', () async {
+      final target = readWav('test/fixtures/cabin_vibrating.wav').pcm;
+      final primed = config.copyWith(
+        primer: File('assets/audio/stt_primer.pcm').readAsBytesSync(),
+      );
+
+      final transcript = await _run(primed, sherpaLib, target, pad: true);
+
+      // ignore: avoid_print
+      print('[live] via SttConfig.primer "$transcript"');
+
+      expect(
+        transcript.toUpperCase(),
+        contains('CABIN'),
+        reason:
+            'the technician said "cabin vibrating" and the device answered "IN '
+            'VIBRATING"; this is that sentence, through the config the app '
+            'actually builds',
+      );
+      expect(
+        transcript.toUpperCase(),
+        isNot(contains('ELEVATOR')),
+        reason:
+            'the primer is speech and it must not reach the transcript — if a '
+            'word from the warm-up clip appears here, `_prime` has stopped '
+            'closing its own segment and the technician sees a sentence nobody '
+            'said',
+      );
+    });
+
     test(
       'the model emits no digits, and normalisation is what supplies them',
       () async {

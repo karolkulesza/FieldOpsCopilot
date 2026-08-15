@@ -1206,7 +1206,17 @@ class _ScriptedAudioInput implements AudioInput {
       StreamController<Uint8List>.broadcast();
   void Function(String description)? _onCoerced;
 
-  void emit(List<int> bytes) => _raw.add(Uint8List.fromList(bytes));
+  /// Delivered at an **odd `offsetInBytes`**, as the plugin's frames are: this is
+  /// where `MicCapture` slices buffers into whole frames, and `sublistView`
+  /// carries that offset through to everything downstream. `Uint8List.fromList`
+  /// would start at 0 and quietly make the whole path look aligned — which is how
+  /// an `Int16List` view over a frame reached a device and stopped dictation.
+  void emit(List<int> bytes) {
+    const offset = 5;
+    final backing = Uint8List(offset + bytes.length)
+      ..setRange(offset, offset + bytes.length, bytes);
+    _raw.add(Uint8List.sublistView(backing, offset));
+  }
 
   void emitError(Object error) => _raw.addError(error);
 

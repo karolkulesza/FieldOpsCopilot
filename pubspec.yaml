@@ -113,6 +113,16 @@ flutter:
     # `assets/`, so there is exactly one file and the host suite and the device
     # suite cannot drift onto different audio.
     - test/fixtures/e102_utterance.wav
+    # One second of speech from the head of that same fixture, as raw signed
+    # 16-bit little-endian mono at 16kHz — 32KB, no container.
+    #
+    # It is what `SttConfig.primer` feeds a fresh recogniser stream to work around
+    # the model mangling the opening of a session ("cabin vibrating" → "IN
+    # VIBRATING"); the measurement and the four things that do *not* fix it are on
+    # that field. Extracted rather than parsed at runtime so `lib/` needs no RIFF
+    # reader, and `stt_primer_test.dart` asserts these bytes are still the head of
+    # the WAV above — so the two cannot drift apart unnoticed.
+    - assets/audio/stt_primer.pcm
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

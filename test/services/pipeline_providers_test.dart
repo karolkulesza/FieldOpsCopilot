@@ -1,9 +1,11 @@
 import 'dart:io';
 
 import 'package:field_ops_copilot/engines/llm_engine.dart';
+import 'package:field_ops_copilot/models/form_state_model.dart';
 import 'package:field_ops_copilot/services/ai/base_tool.dart';
 import 'package:field_ops_copilot/services/ai/providers.dart';
 import 'package:field_ops_copilot/services/ai/tools/get_parts_inventory_tool.dart';
+import 'package:field_ops_copilot/services/ai/tools/record_work_order_fields_tool.dart';
 import 'package:field_ops_copilot/services/database/database_initializer.dart';
 import 'package:field_ops_copilot/services/database/database_service.dart';
 import 'package:field_ops_copilot/services/database/providers.dart';
@@ -81,13 +83,43 @@ void main() {
   });
 
   group('toolRegistryProvider', () {
-    test('declares the inventory tool to the model', () async {
+    // Order matters and is asserted rather than sorted: it is the order the model
+    // is told about them, and `providers.dart` puts the grounded lookup first
+    // deliberately. Task 2.3 added the second one.
+    test('declares both tools to the model, lookup first', () async {
       final registry = await container().read(toolRegistryProvider.future);
 
-      expect(registry.toolNames, [GetPartsInventoryTool.toolName]);
-      expect(registry.definitions.single.parameters['required'], [
+      expect(registry.toolNames, [
+        GetPartsInventoryTool.toolName,
+        RecordWorkOrderFieldsTool.toolName,
+      ]);
+      expect(registry.definitions.first.parameters['required'], [
         GetPartsInventoryTool.skuParameter,
       ]);
+      expect(registry.definitions.last.parameters['required'], [
+        formUpdatesArgument,
+      ]);
+    });
+
+    // The form tool is pure and reads nothing, so unlike the lookup below it needs
+    // no database — but it does need to be *reachable* through the wired registry,
+    // which is the half a unit test of the tool itself cannot cover.
+    test('dispatches the form tool through the wired registry', () async {
+      final registry = await container().read(toolRegistryProvider.future);
+
+      final outcome = await registry.dispatch(
+        const LlmToolCall(
+          name: RecordWorkOrderFieldsTool.toolName,
+          arguments: {
+            formUpdatesArgument: {'fault_code': 'E-102'},
+          },
+        ),
+      );
+
+      expect(outcome, isA<ToolSuccess>());
+      expect(outcome.payload[RecordWorkOrderFieldsTool.recordedKey], {
+        'fault_code': 'E-102',
+      });
     });
 
     // The tool reads the database, so this is the wiring assertion that matters:

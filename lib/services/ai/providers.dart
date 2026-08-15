@@ -23,13 +23,22 @@ import '../database/providers.dart';
 import '../retry_policy.dart';
 import 'tool_registry.dart';
 import 'tools/get_parts_inventory_tool.dart';
+import 'tools/record_work_order_fields_tool.dart';
 
 /// The tools the agent may call, over the seeded database.
 ///
-/// One tool today. The spec's §2.2 lists three more
+/// Two tools. Task 2.3 added `record_work_order_fields`, and adding it was one
+/// line here plus one file — which is the property Task 1.5's registry was built
+/// for, now demonstrated rather than predicted. The spec's §2.2 lists three more
 /// (`schedule_followup_appointment`, `raise_safety_hazard_alert`, and a
-/// name-based parts search); each is a line in this list and nothing else, which
-/// is the property Task 1.5's registry was built for.
+/// name-based parts search) and each is the same one line.
+///
+/// **The order is the order the model is told about them**, and the lookup comes
+/// first deliberately: `get_local_parts_inventory` is the tool whose result the
+/// answer has to be grounded in, and `record_work_order_fields` is a side channel
+/// that records what has already been established. A run that records first and
+/// looks up second is not wrong, only less useful — it writes a SKU the model has
+/// not checked.
 ///
 /// Constructing a `ToolRegistry` validates every declaration and throws
 /// `ToolSchemaException` on a malformed one. That throw is deliberately not caught
@@ -40,5 +49,8 @@ final toolRegistryProvider = FutureProvider<ToolRegistry>(retry: noRetry, (
   ref,
 ) async {
   final database = await ref.watch(seededDatabaseProvider.future);
-  return ToolRegistry([GetPartsInventoryTool(database)]);
+  return ToolRegistry([
+    GetPartsInventoryTool(database),
+    RecordWorkOrderFieldsTool(),
+  ]);
 });

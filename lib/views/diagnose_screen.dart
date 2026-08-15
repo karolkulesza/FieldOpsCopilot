@@ -30,6 +30,7 @@
 /// which of the three it is.
 library;
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -41,9 +42,12 @@ import '../services/database/tables.dart' show normalizeSku;
 import '../services/inference/engine_warmup_controller.dart';
 import '../services/models/model_storage.dart';
 import '../services/models/providers.dart';
+import '../viewmodels/dictation_viewmodel.dart';
 import '../viewmodels/field_job_viewmodel.dart';
 import 'components/answer_markdown.dart';
+import 'components/clarification_dialog.dart';
 import 'components/model_readiness_banner.dart';
+import 'components/work_order_form_panel.dart';
 
 /// Keys the widget tests find things by, so an assertion names a role rather than
 /// a colour or a string of copy.
@@ -56,6 +60,12 @@ abstract final class DiagnoseKeys {
 
   /// The database or the seed could not be prepared — the app cannot retrieve.
   static const Key startupFailure = Key('diagnose-startup-failure');
+
+  /// The microphone toggle. Task 2.3.
+  static const Key dictateButton = Key('diagnose-dictate-button');
+
+  /// The line saying what dictation is doing, or why it cannot.
+  static const Key dictationStatus = Key('diagnose-dictation-status');
 
   /// This particular diagnosis threw. Distinct from [startupFailure] because one
   /// is "this app is misconfigured" and the other is "that attempt did not work",
@@ -80,6 +90,34 @@ class DiagnoseScreen extends ConsumerStatefulWidget {
 
 class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
   final TextEditingController _inquiry = TextEditingController();
+
+  /// What was in the inquiry field when the current dictation started, or `null`
+  /// when nothing is being mirrored.
+  ///
+  /// **Dictation appends to what is there rather than replacing it**, which is
+  /// the difference between a microphone that helps and one that costs you a
+  /// sentence: a technician who typed "cabin vibrating" and then tapped the mic to
+  /// add the fault code must not lose the half they typed. Holding the base here
+  /// rather than in `DictationState` is what keeps the controller's line a *pure*
+  /// transcript — the state carries what was heard, this carries what it is being
+  /// added to, and neither has to know about the other.
+  ///
+  /// **`null` also means "released", and that is review finding R0-F1.** The field
+  /// is not read-only while the microphone is open, because a technician watching
+  /// `FALK CODE` land has to be able to fix it — and until R0-F1 that was a claim
+  /// the code refuted: [_onDictation] rebuilds the whole line from `base +
+  /// transcript` on **every** state change, so a correction was overwritten by the
+  /// next partial, and by the capture merely ending. Measured by the reviewer, not
+  /// argued.
+  ///
+  /// The rule now is the one the comment always claimed: **typing takes the
+  /// field.** An edit made while a capture is running releases the mirror (this
+  /// goes `null`, so [_onDictation] returns) and stops the capture, in that order —
+  /// stopping first would flush a final transcript through the mirror and clobber
+  /// the very edit being protected. Stopping rather than merely releasing is what
+  /// keeps the status line honest: a microphone that stays open while its words
+  /// stop arriving reads as broken.
+  String? _dictationBase;
 
   @override
   void initState() {
@@ -142,6 +180,54 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
     super.dispose();
   }
 
+  /// Handles a keystroke in the inquiry field.
+  ///
+  /// See [_dictationBase]: an edit during a capture releases the mirror and then
+  /// stops the capture. The order is load-bearing — `stop()` flushes the
+  /// recogniser's last utterance, and a mirror still attached would write
+  /// `base + that` over the words just typed, which is R0-F1 arriving through the
+  /// other door.
+  void _onInquiryEdited() {
+    if (_dictationBase != null &&
+        ref.read(dictationControllerProvider).isActive) {
+      _dictationBase = null;
+      unawaited(ref.read(dictationControllerProvider.notifier).stop());
+    }
+    setState(() {});
+  }
+
+  /// Mirrors the live transcript into the inquiry field.
+  ///
+  /// Called from a `ref.listen` rather than from `build`, because writing a
+  /// controller during a build is a change to a widget that is already being laid
+  /// out. `setState` is still needed: a programmatic `controller.text =` does
+  /// **not** fire `onChanged`, so nothing else would re-evaluate whether Diagnose
+  /// should be enabled — which is the whole point of dictating.
+  void _onDictation(DictationState? previous, DictationState next) {
+    if (next.phase == DictationPhase.starting &&
+        previous?.phase != DictationPhase.starting) {
+      _dictationBase = _inquiry.text.trim();
+    }
+    final base = _dictationBase;
+    if (base == null) return;
+
+    final heard = next.text;
+    final combined = [
+      if (base.isNotEmpty) base,
+      if (heard.isNotEmpty) heard,
+    ].join(' ');
+    if (_inquiry.text != combined) {
+      _inquiry.value = TextEditingValue(
+        text: combined,
+        selection: TextSelection.collapsed(offset: combined.length),
+      );
+    }
+    // The base is released once the capture is over, so the *next* one starts
+    // from what is now in the field — including anything typed in between.
+    if (!next.isActive) _dictationBase = null;
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -150,65 +236,261 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
     // Watched rather than read so a startup failure is rendered instead of
     // surfacing as an exception the first time the viewmodel touches it.
     final startup = ref.watch(seedOutcomeProvider);
+    final dictation = ref.watch(dictationControllerProvider);
+    ref.listen<DictationState>(dictationControllerProvider, _onDictation);
 
+    // A run and a dictation are mutually exclusive: the microphone is writing the
+    // inquiry the run would be reading, and letting both go at once means an
+    // inquiry that changes under a prompt that has already been compiled.
     final canDiagnose =
-        warmup is EngineReady && !job.isBusy && !startup.hasError;
+        warmup is EngineReady &&
+        !job.isBusy &&
+        !dictation.isActive &&
+        !startup.hasError;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('FieldOps Copilot'),
         backgroundColor: theme.colorScheme.inversePrimary,
       ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const ModelReadinessBanner(),
-              const SizedBox(height: 12),
-              _EngineStatusRow(warmup: warmup),
-              if (startup.hasError) ...[
-                const SizedBox(height: 12),
-                _StartupFailure(error: startup.error!),
-              ],
-              const SizedBox(height: 16),
-              TextField(
-                key: DiagnoseKeys.inquiryField,
-                controller: _inquiry,
-                minLines: 2,
-                maxLines: 4,
-                textInputAction: TextInputAction.newline,
-                decoration: const InputDecoration(
-                  labelText: 'Describe the fault',
-                  hintText: 'e.g. cabin vibrating, E-102',
-                  border: OutlineInputBorder(),
+      // The agent's questions arrive over everything else — see
+      // `ClarificationHost`, which owns when a modal is up and which question it
+      // is about. Wrapped at the body rather than inside the column so the barrier
+      // covers the whole screen, including the readiness banner's download button.
+      body: ClarificationHost(
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // **The readiness chrome is `Flexible`, and that is a keyboard
+                // fix rather than a style choice.** Reported from the demo iPad:
+                // with the software keyboard up, `Scaffold` shrinks the body and
+                // this column overflowed by 64 pixels. The two panels below are
+                // `Expanded` and had already collapsed to zero, so what did not
+                // fit was the *fixed* chrome itself.
+                //
+                // Reproduced in `voice_and_form_screen_test.dart` at **4 pixels**,
+                // with a 420pt keyboard inset and the device's own readiness state
+                // (no LLM configured, STT installed). The magnitudes differ because
+                // the device's banner is taller still; the mechanism is the same.
+                // The inset is stated because it is load-bearing — at 360 the
+                // defect does not reproduce at all, and the first version of that
+                // test passed with this fix reverted.
+                //
+                // Loose flex makes this region take its natural height when there
+                // is room — so the layout is unchanged with the keyboard down —
+                // and scroll internally when there is not. The banner is the right
+                // thing to give up first: it is startup information, and by the
+                // time a technician is typing they have already read it.
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const ModelReadinessBanner(),
+                        const SizedBox(height: 12),
+                        _EngineStatusRow(warmup: warmup),
+                        if (startup.hasError) ...[
+                          const SizedBox(height: 12),
+                          _StartupFailure(error: startup.error!),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
-                // Rebuilds so the button's enabled state follows the text. The
-                // viewmodel refuses a blank inquiry too; this is the affordance,
-                // that is the guarantee.
-                onChanged: (_) => setState(() {}),
-              ),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                key: DiagnoseKeys.diagnoseButton,
-                onPressed: canDiagnose && _inquiry.text.trim().isNotEmpty
-                    ? () => ref
-                          .read(fieldJobViewModelProvider.notifier)
-                          .diagnose(_inquiry.text)
-                    : null,
-                icon: const Icon(Icons.medical_services_outlined),
-                // No spinner in the busy label, for the reason in the library doc.
-                // "Diagnosing…" plus text arriving in the panel below is the
-                // progress report.
-                label: Text(job.isBusy ? 'Diagnosing…' : 'Diagnose'),
-              ),
-              const SizedBox(height: 16),
-              Expanded(child: _ResultPanel(job: job)),
-            ],
+                const SizedBox(height: 16),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        key: DiagnoseKeys.inquiryField,
+                        controller: _inquiry,
+                        minLines: 2,
+                        maxLines: 4,
+                        textInputAction: TextInputAction.newline,
+                        // Not read-only while dictating, deliberately: the words
+                        // arriving are a transcript of a room, and a technician who
+                        // sees `FALK CODE` land has to be able to fix it. What they
+                        // type is preserved — `_onDictation` only ever rewrites the
+                        // field when the combined line differs, and the base is
+                        // re-read at the start of the *next* capture.
+                        decoration: const InputDecoration(
+                          labelText: 'Describe the fault',
+                          hintText: 'e.g. cabin vibrating, E-102',
+                          border: OutlineInputBorder(),
+                        ),
+                        // Rebuilds so the button's enabled state follows the text.
+                        // The viewmodel refuses a blank inquiry too; this is the
+                        // affordance, that is the guarantee.
+                        //
+                        // `onChanged` fires for a *user* edit only — never for the
+                        // programmatic write in [_onDictation] — which is what
+                        // makes it safe to treat it as "the technician took the
+                        // field" (R0-F1).
+                        onChanged: (_) => _onInquiryEdited(),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _DictateButton(dictation: dictation, busy: job.isBusy),
+                  ],
+                ),
+                if (dictation.phase != DictationPhase.idle) ...[
+                  const SizedBox(height: 8),
+                  _DictationStatus(dictation: dictation),
+                ],
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  key: DiagnoseKeys.diagnoseButton,
+                  onPressed: canDiagnose && _inquiry.text.trim().isNotEmpty
+                      ? () => ref
+                            .read(fieldJobViewModelProvider.notifier)
+                            .diagnose(_inquiry.text)
+                      : null,
+                  icon: const Icon(Icons.medical_services_outlined),
+                  // No spinner in the busy label, for the reason in the library
+                  // doc. "Diagnosing…" plus text arriving in the panel below is the
+                  // progress report.
+                  label: Text(job.isBusy ? 'Diagnosing…' : 'Diagnose'),
+                ),
+                const SizedBox(height: 16),
+                // Three parts to two, and the split is what makes the form fill
+                // *visible* — Task 2.3's whole demo is fields populating while the
+                // answer streams, which a collapsed section would hide. The panel
+                // is outside the answer's scroll view for the reason
+                // `work_order_form_panel.dart` gives.
+                Expanded(flex: 3, child: _ResultPanel(job: job)),
+                const SizedBox(height: 12),
+                const Expanded(flex: 2, child: WorkOrderFormPanel()),
+              ],
+            ),
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The microphone toggle.
+///
+/// **A toggle rather than press-and-hold**, which is the one interaction decision
+/// here and it is made for the technician rather than for the test: this app's
+/// persona is someone in heavy gloves (§2.1), and holding a soft key steady for
+/// fifteen seconds through a glove is exactly the thing gloves are bad at. A
+/// toggle also makes the "stop" moment observable, which press-and-hold leaves to
+/// a pointer-up nothing records.
+///
+/// **Static in every state, like everything else on this screen.** No pulsing
+/// record dot: Task 1.8 measured the UI isolate dropping 5–8 frames while tokens
+/// stream, and a recogniser decode step runs on its own isolate but the *state
+/// updates* land here — an animation that stutters exactly when the microphone is
+/// working reads as the microphone failing.
+class _DictateButton extends ConsumerWidget {
+  const _DictateButton({required this.dictation, required this.busy});
+
+  final DictationState dictation;
+
+  /// Whether a diagnosis is running. Dictating into an inquiry the agent has
+  /// already compiled a prompt from would change the question after it was asked.
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final controller = ref.read(dictationControllerProvider.notifier);
+    final active = dictation.isActive;
+
+    return IconButton.filledTonal(
+      key: DiagnoseKeys.dictateButton,
+      // **Live during `starting` too**, which it was not. The comment here used to
+      // argue that a second tap in that window "would reach `start`'s own re-entry
+      // guard and do nothing, which reads as a dead button" — true when it was
+      // written, and no longer: review findings R1-F1 and R2-F1 gave `start` a
+      // cancellation edge, so a stop during the load now genuinely stops. With the
+      // wait made visible (it is 1227ms of microphone plus 458ms of model on the
+      // demo device), a button that cannot be taken back during it is worse than
+      // one that can.
+      onPressed: busy
+          ? null
+          : () => active ? controller.stop() : controller.start(),
+      tooltip: active ? 'Stop dictating' : 'Dictate the fault',
+      icon: Icon(active ? Icons.stop : Icons.mic_none),
+      style: IconButton.styleFrom(
+        foregroundColor: active ? theme.colorScheme.error : null,
+        // Square with the two-line text field beside it, so the row does not
+        // change height when the icon does.
+        minimumSize: const Size(56, 56),
+      ),
+    );
+  }
+}
+
+/// What dictation is doing, or why it cannot.
+///
+/// Shown only outside [DictationPhase.idle] — an idle microphone has nothing to
+/// say, and a permanent "not listening" line is a line a reader learns to skip.
+class _DictationStatus extends StatelessWidget {
+  const _DictationStatus({required this.dictation});
+
+  final DictationState dictation;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final (
+      IconData icon,
+      String label,
+      Color color,
+    ) = switch (dictation.phase) {
+      DictationPhase.starting => (
+        Icons.hourglass_empty,
+        // **"Wait" is the operative word and it is there for a measured reason.**
+        // Opening the input takes 1227ms on the demo iPad and the recogniser load
+        // another 458ms; a technician who talks over that window loses the start
+        // of their sentence, which is what "IN VIBRATING" was. The status now
+        // names the thing to wait for, and `listening` does not appear until audio
+        // is genuinely arriving.
+        'Getting the microphone ready — wait for “Listening”',
+        theme.colorScheme.outline,
+      ),
+      DictationPhase.listening => (
+        Icons.graphic_eq,
+        // Nothing about *what* was heard: the words are in the field above, and
+        // repeating them here would be the second representation this project
+        // keeps deleting.
+        'Listening — tap stop when you are done',
+        theme.colorScheme.primary,
+      ),
+      DictationPhase.unavailable || DictationPhase.failed => (
+        Icons.mic_off,
+        dictation.message ?? 'Dictation is unavailable.',
+        theme.colorScheme.error,
+      ),
+      // Not rendered; the caller gates on it. Answered rather than thrown for
+      // `_notReadyMessage`'s reason — a wrong line beats a crash on the screen
+      // being recorded, and nothing can render this without the gate failing.
+      DictationPhase.idle => (
+        Icons.mic_none,
+        'Dictation is idle.',
+        theme.colorScheme.outline,
+      ),
+    };
+
+    return Row(
+      key: DiagnoseKeys.dictationStatus,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: color),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(color: color),
+          ),
+        ),
+      ],
     );
   }
 }
