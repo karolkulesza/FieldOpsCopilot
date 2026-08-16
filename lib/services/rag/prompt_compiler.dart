@@ -263,10 +263,46 @@ class PromptCompiler {
   /// The `Pe` counterpart.
   static final RegExp _closingPunctuation = RegExp(r'\p{Pe}', unicode: true);
 
+  /// The standing instruction, ahead of the manual and the inquiry.
+  ///
+  /// **The second paragraph exists because the first one was measured on a device
+  /// and the asymmetry it created was the whole failure.** With only the inventory
+  /// sentence here, Gemma 4 E2B did exactly as told on a four-field inquiry: it
+  /// called `get_local_parts_inventory`, wrote a correct grounded plan, left the
+  /// work order at **0 of 4**, and closed with
+  ///
+  /// > *"If you require any further assistance or need to record the work order
+  /// > fields, please let me know."*
+  ///
+  /// Which is the model behaving well. It knew the tool existed — the registry
+  /// declares it and its schema describes it — and treated it as an offer, because
+  /// nothing at this level had ever told it otherwise. One tool carried a `MUST`
+  /// and the other carried a description. The turn budget was not the constraint
+  /// (`AgentLoop.defaultMaxTurns` is 4, and one turn had been spent).
+  ///
+  /// So the rule this file now follows: **a tool the app depends on being called
+  /// is named here, not only in its own schema.** A schema tells a model what a
+  /// tool *is*; this tells it what the job *requires*. The last clause is aimed
+  /// squarely at the sentence above — an offer to record is not a recording, and
+  /// the technician never sees the prose version.
+  ///
+  /// The tool names are literals rather than references to
+  /// `GetPartsInventoryTool.toolName` and `RecordWorkOrderFieldsTool.toolName`,
+  /// which is a real cost and is bounded deliberately: `prompt_compiler.dart`
+  /// belongs to the retrieval layer and importing the tool implementations would
+  /// invert that dependency. `prompt_compiler_test.dart` asserts the two spellings
+  /// agree with the registry instead, so a rename fails a test rather than
+  /// silently instructing the model to call something that does not exist.
   static const String _preamble =
       'You are an offline Field Service Assistant.\n'
       'Based ONLY on the verified technical manual document below, answer the '
       "user's inquiry and formulate a repair plan.\n"
       'If parts are required, you MUST call the '
-      '"get_local_parts_inventory(sku)" tool to check warehouse stock.';
+      '"get_local_parts_inventory(sku)" tool to check warehouse stock.\n'
+      'You MUST also call the "record_work_order_fields" tool with every '
+      'work-order field the technician has stated — the fault code, the '
+      'replacement parts, the hours worked, the safety checkpoints — before you '
+      'write your answer. Do not offer to record them and do not wait to be '
+      'asked: the technician reads those fields on their form, never in your '
+      'reply.';
 }
