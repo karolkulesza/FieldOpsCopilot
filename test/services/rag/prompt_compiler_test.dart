@@ -4,6 +4,8 @@ import 'package:field_ops_copilot/services/database/database_initializer.dart';
 import 'package:field_ops_copilot/services/database/database_service.dart';
 import 'package:field_ops_copilot/services/database/tables/manual_fts_table.dart'
     show encodeStringList;
+import 'package:field_ops_copilot/services/ai/tools/get_parts_inventory_tool.dart';
+import 'package:field_ops_copilot/services/ai/tools/record_work_order_fields_tool.dart';
 import 'package:field_ops_copilot/services/rag/prompt_compiler.dart';
 import 'package:field_ops_copilot/services/rag/retrieval_router.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -153,6 +155,44 @@ void main() {
     );
   });
 
+  // **The preamble names two tools by literal, and this is what stops those
+  // literals going stale.** `prompt_compiler.dart` deliberately does not import
+  // the tool implementations — it belongs to the retrieval layer and the
+  // dependency would run the wrong way — so the spellings are duplicated, and a
+  // duplicate that nothing checks is a duplicate that drifts. A rename would
+  // otherwise leave the model under orders to call a tool the registry has never
+  // heard of, which `ToolCallGuard` would then report as an unknown-tool call:
+  // recoverable, wasteful, and traceable to a string in a file nobody would think
+  // to grep.
+  group('the preamble and the registry agree about tool names', () {
+    final prompt = compiler.compile(_resultWith([_entry(id: 'x')]));
+
+    test('the inventory lookup is spelled as the registry spells it', () {
+      expect(prompt, contains('"${GetPartsInventoryTool.toolName}(sku)"'));
+    });
+
+    test('so is the work-order recorder', () {
+      expect(prompt, contains('"${RecordWorkOrderFieldsTool.toolName}"'));
+    });
+
+    // **Not decoration — this is the device result that put the sentence there.**
+    // With `record_work_order_fields` mentioned only in its own schema, Gemma 4
+    // E2B called the inventory tool, wrote a correct plan, left the form at 0 of 4
+    // and closed by *offering* to record the fields. A `MUST` on one tool and a
+    // description on the other is an instruction to do one of them.
+    test('both tools are ordered, not suggested', () {
+      final ordered = RegExp(r'MUST').allMatches(prompt).length;
+      expect(
+        ordered,
+        greaterThanOrEqualTo(2),
+        reason:
+            'each tool the app depends on being called carries its own MUST; a '
+            'tool described but not ordered is a tool the model offers instead '
+            'of calling',
+      );
+    });
+  });
+
   group('layout', () {
     test('a single document renders exactly the spec\'s shape', () {
       // A synthetic entry rather than the seed, so this pins the compiler's
@@ -164,6 +204,7 @@ void main() {
 You are an offline Field Service Assistant.
 Based ONLY on the verified technical manual document below, answer the user's inquiry and formulate a repair plan.
 If parts are required, you MUST call the "get_local_parts_inventory(sku)" tool to check warehouse stock.
+You MUST also call the "record_work_order_fields" tool with every work-order field the technician has stated — the fault code, the replacement parts, the hours worked, the safety checkpoints — before you write your answer. Do not offer to record them and do not wait to be asked: the technician reads those fields on their form, never in your reply.
 
 [MANUAL DOCUMENT]
 Title: Widget Fault (Code: X-001)
