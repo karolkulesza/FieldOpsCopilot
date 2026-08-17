@@ -526,4 +526,87 @@ void main() {
       });
     });
   });
+
+  // **The device produced a work order that mixed two jobs, and this is the
+  // group that stops it.** A brake fault recorded four fields; a door fault
+  // diagnosed next on the same screen overwrote the two it had values for and
+  // left `technician_hours: 1.5` and `safety_checkpoints: lockout/tagout
+  // verified` behind — still marked as the agent's, so the panel asserted the
+  // model had recorded them for the door fault. Every value was one the agent
+  // really had produced, which is exactly what made it convincing.
+  group('WorkOrderFormState.forNewInquiry', () {
+    const empty = WorkOrderFormState();
+
+    test("drops the agent's fields", () {
+      final state = empty.applyUpdates(
+        parseFormUpdates(const {
+          'fault_code': 'E-102',
+          'technician_hours': '1.5',
+        }),
+      );
+      expect(state.fields, hasLength(2));
+
+      final next = state.forNewInquiry();
+
+      expect(next.fields, isEmpty);
+      expect(next.isEmpty, isTrue);
+    });
+
+    test('keeps what the technician typed', () {
+      final state = empty
+          .withTechnicianEntry(WorkOrderField.faultCode, 'E-999')
+          .applyUpdates(parseFormUpdates(const {'technician_hours': '1.5'}));
+
+      final next = state.forNewInquiry();
+
+      expect(next.textOf(WorkOrderField.faultCode), 'E-999');
+      expect(
+        next.fields[WorkOrderField.faultCode]!.origin,
+        FormFieldOrigin.technician,
+        reason:
+            'a surviving field must stay theirs — demoted to the agent it '
+            'would be silently overwritten by the next inquiry',
+      );
+      expect(next.textOf(WorkOrderField.technicianHours), '');
+    });
+
+    test('drops a suggestion parked against a surviving field', () {
+      // The same defect one indirection deeper: a suggestion is the agent's
+      // reading of the *previous* inquiry, and carrying it forward offers stale
+      // text against the new one as though it were live.
+      final state = empty
+          .withTechnicianEntry(WorkOrderField.faultCode, 'E-999')
+          .applyUpdates(parseFormUpdates(const {'fault_code': 'E-102'}));
+      expect(state.fields[WorkOrderField.faultCode]!.suggestion, 'E-102');
+
+      final next = state.forNewInquiry();
+
+      expect(next.textOf(WorkOrderField.faultCode), 'E-999');
+      expect(next.fields[WorkOrderField.faultCode]!.suggestion, isNull);
+    });
+
+    test('clears refusals and any pending question', () {
+      // The panel's line reads "the assistant sent N values this form has no
+      // fields for" — a sentence about the run being reported, not about every
+      // run since launch. A question from the previous inquiry is stale for the
+      // same reason, and `rejected` is the one that had a test proving it
+      // *accumulates* across runs, which is right within an inquiry and wrong
+      // across two.
+      final state = empty
+          .applyUpdates(parseFormUpdates(const {'nope': 'x'}))
+          .withClarification(
+            const ClarificationRequest(
+              field: WorkOrderField.faultCode,
+              question: 'Which one?',
+              options: ['E-102', 'E-305'],
+            ),
+          );
+      expect(state.rejected, isNotEmpty);
+
+      final next = state.forNewInquiry();
+
+      expect(next.rejected, isEmpty);
+      expect(next.clarification, isNull);
+    });
+  });
 }

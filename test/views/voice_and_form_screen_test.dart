@@ -533,6 +533,70 @@ void main() {
       expect(find.text('2 of 4'), findsOneWidget);
     });
 
+    // **Reported from the demo iPad, and the screenshot is the argument.** A
+    // brake fault was diagnosed and recorded four fields. A door fault was then
+    // diagnosed on the same screen: it overwrote `fault_code` and
+    // `required_parts` with E-305 and BELT-330-DRV, and left `1.5` hours and
+    // `lockout/tagout verified` sitting under them from the *brake* job — each
+    // still drawn with the agent-origin marker, so the panel asserted the model
+    // had recorded them for the door fault. Nothing on screen was invented;
+    // every value had really been produced by the agent, one inquiry earlier.
+    // That is what made it convincing, and a work order is signed off.
+    testWidgets('a new diagnosis drops agent fields and keeps typed ones', (
+      tester,
+    ) async {
+      final container = await pumpScreen(tester);
+
+      await tester.enterText(
+        find.byKey(WorkOrderKeys.field(WorkOrderField.technicianHours)),
+        '1.5',
+      );
+      container.read(workOrderFormProvider.notifier).applyPayload(const {
+        RecordWorkOrderFieldsTool.recordedKey: {'fault_code': 'E-102'},
+      });
+      await tester.pumpAndSettle();
+      expect(find.text('2 of 4'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(DiagnoseKeys.inquiryField),
+        'the doors keep re-opening on car two',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(DiagnoseKeys.diagnoseButton));
+      await tester.pump();
+
+      final state = container.read(workOrderFormProvider);
+      expect(
+        state.textOf(WorkOrderField.faultCode),
+        '',
+        reason:
+            "the previous inquiry's fault code must not survive into this one",
+      );
+      expect(
+        state.textOf(WorkOrderField.technicianHours),
+        '1.5',
+        reason:
+            'a new question about the same job is not an instruction to throw '
+            "away the technician's own work — that is `reset`, and a new job",
+      );
+      // And the visible half, because the controllers are what the technician
+      // reads and they are synced separately from the state.
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(WorkOrderKeys.field(WorkOrderField.faultCode)),
+            )
+            .controller!
+            .text,
+        '',
+      );
+      expect(find.text('1 of 4'), findsOneWidget);
+
+      // Whatever the stubbed engine does with the run itself is not this test's
+      // subject; the clearing happens before it and must not depend on it.
+      tester.takeException();
+    });
+
     testWidgets('typing into a field records it as the technician\'s', (
       tester,
     ) async {
