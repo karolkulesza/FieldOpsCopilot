@@ -59,6 +59,43 @@ void main() {
       expect(chosen, '14-inch carbon');
     });
 
+    testWidgets('an option is big enough for a gloved hand', (tester) async {
+      // **The claim in this widget's own source, checked rather than trusted.**
+      // The comment beside the option list has argued about "tap targets a
+      // technician in gloves has to aim at" since the widget was written, and
+      // nothing measured it.
+      //
+      // It measures **48.0**, which clears Apple's 44pt HIG minimum and meets
+      // Material's own accessibility guidance — so the paragraph was right and no
+      // code change was needed. Worth knowing *why*, because the obvious reading
+      // is wrong: `OutlinedButton`'s Material 3 `minimumSize` is `Size(64, 40)`,
+      // and it is the default padding and visual density that carry the rendered
+      // height the rest of the way. A style setting `minimumSize` to 48 was
+      // written here and then deleted — it changed nothing, and its own mutation
+      // survived.
+      //
+      // The assertion stays because the number is now load-bearing and arrived by
+      // accident: a future change to density, padding or button type could drop it
+      // under 44 with nothing else complaining.
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ClarificationDialog(
+            request: request,
+            onChosen: (_) {},
+            onDismissed: () {},
+          ),
+        ),
+      );
+
+      for (var i = 0; i < request.options.length; i++) {
+        expect(
+          tester.getSize(find.byKey(ClarificationKeys.option(i))).height,
+          greaterThanOrEqualTo(48),
+          reason: 'option $i is below the accessible touch target',
+        );
+      }
+    });
+
     testWidgets('the question and the field label are both shown', (
       tester,
     ) async {
