@@ -54,6 +54,9 @@ import 'components/work_order_form_panel.dart';
 /// a colour or a string of copy.
 abstract final class DiagnoseKeys {
   static const Key inquiryField = Key('diagnose-inquiry-field');
+
+  /// Empties the inquiry field. Present only while it has text.
+  static const Key clearInquiry = Key('diagnose-clear-inquiry');
   static const Key diagnoseButton = Key('diagnose-button');
   static const Key resultPanel = Key('diagnose-result-panel');
   static const Key engineStatus = Key('diagnose-engine-status');
@@ -197,6 +200,32 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
     setState(() {});
   }
 
+  /// Empties the inquiry field in one tap.
+  ///
+  /// **It goes through [_onInquiryEdited] rather than just calling `clear()`**,
+  /// and both halves of that matter.
+  ///
+  /// `controller.clear()` is a *programmatic* write, so `onChanged` does not fire
+  /// — the same asymmetry [_onDictation] documents. Without this call the text
+  /// would vanish while Diagnose stayed enabled, because the button's enabled
+  /// state is computed in `build` from `_inquiry.text` and nothing would have
+  /// asked for a rebuild.
+  ///
+  /// And clearing **is an edit by the technician**, so it takes the field on
+  /// exactly the terms typing does: during a capture it releases the mirror and
+  /// stops the microphone. Anything else would be worse in both directions — a
+  /// clear that left the mirror attached would be undone by the next partial, and
+  /// one that left the microphone open would go on filling a field the technician
+  /// had just emptied.
+  ///
+  /// The dictation state is deliberately not touched. `start()` resets the
+  /// transcript and [_onDictation] re-reads the base from the field, so the next
+  /// capture already begins from what is there — which, after this, is nothing.
+  void _clearInquiry() {
+    _inquiry.clear();
+    _onInquiryEdited();
+  }
+
   /// Mirrors the live transcript into the inquiry field.
   ///
   /// Called from a `ref.listen` rather than from `build`, because writing a
@@ -318,10 +347,30 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
                         // type is preserved — `_onDictation` only ever rewrites the
                         // field when the combined line differs, and the base is
                         // re-read at the start of the *next* capture.
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Describe the fault',
                           hintText: 'e.g. cabin vibrating, E-102',
-                          border: OutlineInputBorder(),
+                          border: const OutlineInputBorder(),
+                          // **Only when there is something to clear.** A button
+                          // that is always there is a permanent invitation to
+                          // destroy the field, sitting a thumb's width from the
+                          // microphone; one that appears with the text says what
+                          // it does by existing. It also keeps the empty state —
+                          // the screen a technician meets — free of a control
+                          // that would do nothing.
+                          //
+                          // A `suffixIcon` rather than another button in the row
+                          // beside the microphone: the row is already tight at
+                          // the demo device's width, and Task 2.3 has one
+                          // recorded overflow from adding chrome to this column.
+                          suffixIcon: _inquiry.text.isEmpty
+                              ? null
+                              : IconButton(
+                                  key: DiagnoseKeys.clearInquiry,
+                                  icon: const Icon(Icons.clear),
+                                  tooltip: 'Clear the fault description',
+                                  onPressed: _clearInquiry,
+                                ),
                         ),
                         // Rebuilds so the button's enabled state follows the text.
                         // The viewmodel refuses a blank inquiry too; this is the
