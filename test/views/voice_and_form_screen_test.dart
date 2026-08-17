@@ -422,6 +422,109 @@ void main() {
     });
   });
 
+  group('clearing the inquiry', () {
+    testWidgets('the button is absent until there is something to clear', (
+      tester,
+    ) async {
+      await pumpScreen(tester);
+      expect(find.byKey(DiagnoseKeys.clearInquiry), findsNothing);
+
+      await tester.enterText(
+        find.byKey(DiagnoseKeys.inquiryField),
+        'cabin vibrating',
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(DiagnoseKeys.clearInquiry), findsOneWidget);
+    });
+
+    testWidgets('one tap empties the field and disables Diagnose', (
+      tester,
+    ) async {
+      await pumpScreen(tester);
+      await tester.enterText(
+        find.byKey(DiagnoseKeys.inquiryField),
+        'cabin vibrating, E-102',
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(DiagnoseKeys.diagnoseButton))
+            .onPressed,
+        isNotNull,
+      );
+
+      await tester.tap(find.byKey(DiagnoseKeys.clearInquiry));
+      await tester.pumpAndSettle();
+
+      expect(inquiryText(tester), '');
+      // **The half a `clear()` alone would miss.** `controller.clear()` is a
+      // programmatic write and does not fire `onChanged`, so without the
+      // rebuild the text would vanish while Diagnose stayed live over an empty
+      // inquiry — the same asymmetry `_onDictation` documents, arriving through
+      // a different door.
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(DiagnoseKeys.diagnoseButton))
+            .onPressed,
+        isNull,
+        reason: 'an empty inquiry must not be diagnosable',
+      );
+      expect(find.byKey(DiagnoseKeys.clearInquiry), findsNothing);
+    });
+
+    testWidgets('clearing during a capture takes the field and stops the mic', (
+      tester,
+    ) async {
+      // Clearing **is** an edit, so it takes the field on the same terms typing
+      // does (R0-F1). A clear that left the microphone open would go on filling
+      // a field the technician had just emptied; one that left the mirror
+      // attached would be undone by the next partial.
+      final c = await pumpScreen(tester);
+      await tapMic(tester);
+      await engine.push(
+        tester,
+        const SttTranscript('THE CABIN IS VIBRATING', isFinal: true),
+      );
+      expect(inquiryText(tester), 'THE CABIN IS VIBRATING');
+      expect(c.read(dictationControllerProvider).isActive, isTrue);
+
+      await tester.tap(find.byKey(DiagnoseKeys.clearInquiry));
+      await settleAsync(tester);
+
+      expect(inquiryText(tester), '');
+      expect(
+        c.read(dictationControllerProvider).isActive,
+        isFalse,
+        reason: 'the microphone must not keep writing into a cleared field',
+      );
+    });
+
+    testWidgets('a capture after a clear starts from empty', (tester) async {
+      // The transcript is not carried over: `start()` resets it and
+      // `_onDictation` re-reads the base from the field, which is now blank. If
+      // either stopped being true, the cleared words would reappear on the next
+      // capture — which is the failure a technician would read as the clear
+      // button not working.
+      await pumpScreen(tester);
+      await tapMic(tester);
+      await engine.push(
+        tester,
+        const SttTranscript('THE CABIN IS VIBRATING', isFinal: true),
+      );
+      await tester.tap(find.byKey(DiagnoseKeys.clearInquiry));
+      await settleAsync(tester);
+
+      await tapMic(tester);
+      await engine.push(
+        tester,
+        const SttTranscript('E ONE OH TWO', isFinal: true),
+      );
+
+      expect(inquiryText(tester), 'E ONE OH TWO');
+    });
+  });
+
   // **Reported from the demo iPad: `BOTTOM OVERFLOWED BY 64 PIXELS` with the
   // software keyboard up.** `Scaffold` shrinks the body for the keyboard inset,
   // and the two panels are `Expanded` — so they had already collapsed to zero and
@@ -531,6 +634,70 @@ void main() {
         'E-102',
       );
       expect(find.text('2 of 4'), findsOneWidget);
+    });
+
+    // **Reported from the demo iPad, and the screenshot is the argument.** A
+    // brake fault was diagnosed and recorded four fields. A door fault was then
+    // diagnosed on the same screen: it overwrote `fault_code` and
+    // `required_parts` with E-305 and BELT-330-DRV, and left `1.5` hours and
+    // `lockout/tagout verified` sitting under them from the *brake* job — each
+    // still drawn with the agent-origin marker, so the panel asserted the model
+    // had recorded them for the door fault. Nothing on screen was invented;
+    // every value had really been produced by the agent, one inquiry earlier.
+    // That is what made it convincing, and a work order is signed off.
+    testWidgets('a new diagnosis drops agent fields and keeps typed ones', (
+      tester,
+    ) async {
+      final container = await pumpScreen(tester);
+
+      await tester.enterText(
+        find.byKey(WorkOrderKeys.field(WorkOrderField.technicianHours)),
+        '1.5',
+      );
+      container.read(workOrderFormProvider.notifier).applyPayload(const {
+        RecordWorkOrderFieldsTool.recordedKey: {'fault_code': 'E-102'},
+      });
+      await tester.pumpAndSettle();
+      expect(find.text('2 of 4'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(DiagnoseKeys.inquiryField),
+        'the doors keep re-opening on car two',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(DiagnoseKeys.diagnoseButton));
+      await tester.pump();
+
+      final state = container.read(workOrderFormProvider);
+      expect(
+        state.textOf(WorkOrderField.faultCode),
+        '',
+        reason:
+            "the previous inquiry's fault code must not survive into this one",
+      );
+      expect(
+        state.textOf(WorkOrderField.technicianHours),
+        '1.5',
+        reason:
+            'a new question about the same job is not an instruction to throw '
+            "away the technician's own work — that is `reset`, and a new job",
+      );
+      // And the visible half, because the controllers are what the technician
+      // reads and they are synced separately from the state.
+      expect(
+        tester
+            .widget<TextField>(
+              find.byKey(WorkOrderKeys.field(WorkOrderField.faultCode)),
+            )
+            .controller!
+            .text,
+        '',
+      );
+      expect(find.text('1 of 4'), findsOneWidget);
+
+      // Whatever the stubbed engine does with the run itself is not this test's
+      // subject; the clearing happens before it and must not depend on it.
+      tester.takeException();
     });
 
     testWidgets('typing into a field records it as the technician\'s', (

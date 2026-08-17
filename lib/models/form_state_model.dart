@@ -520,6 +520,42 @@ class WorkOrderFormState {
   /// Whether anything at all has been filled in.
   bool get isEmpty => fields.isEmpty;
 
+  /// The form as a **new inquiry** should find it: the agent's work discarded,
+  /// the technician's kept.
+  ///
+  /// **This exists because the alternative was observed on a device producing a
+  /// work order that mixed two jobs.** A brake fault was diagnosed and recorded
+  /// four fields; a door fault was then diagnosed on the same screen, and it
+  /// overwrote the two fields it had values for while `technician_hours: 1.5` and
+  /// `safety_checkpoints: lockout/tagout verified` stayed behind from the brake
+  /// job — still carrying [FormFieldOrigin.agent], so the panel asserted the model
+  /// had recorded them *for this fault*. Every value on screen was one the agent
+  /// really did produce, which is what made it convincing and what makes it worth
+  /// preventing: a work order is signed off.
+  ///
+  /// **Only the agent's fields go.** A field the technician typed survives, for
+  /// the same reason [applyUpdates] will not overwrite one: their work is the
+  /// thing this whole model is built to outrank the agent's, and a new inquiry is
+  /// not their instruction to throw it away. Emptying the form entirely is
+  /// [WorkOrderFormViewModel.reset] and belongs to a *new job* rather than a new
+  /// question about the same one.
+  ///
+  /// Suggestions go with them. A parked suggestion is the agent's reading of the
+  /// *previous* inquiry offered against a field the technician holds; carrying it
+  /// into the next one would present stale text as a live offer, which is the same
+  /// defect one indirection deeper.
+  ///
+  /// [rejected] is cleared too — the panel's counted line reads "the assistant
+  /// sent N values this form has no fields for", and that sentence is about the
+  /// run being reported, not about every run since the app started.
+  WorkOrderFormState forNewInquiry() => WorkOrderFormState(
+    fields: {
+      for (final entry in fields.entries)
+        if (entry.value.origin != FormFieldOrigin.agent)
+          entry.key: entry.value.copyWith(suggestion: null),
+    },
+  );
+
   /// The text of [field], or `''`.
   String textOf(WorkOrderField field) => fields[field]?.text ?? '';
 
