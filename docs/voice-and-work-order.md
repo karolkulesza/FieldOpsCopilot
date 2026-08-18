@@ -207,13 +207,29 @@ recogniser on its own isolate with real weights, `DictationController`, and the
 screen — so what it proves is the **join**, which is the one thing neither TC-MIC-01
 nor TC-STT-STRM-01 covers.
 
-⚠️ **The model has never been observed calling `record_work_order_fields`.** Every
-test here scripts the call. What the tool's *description* is worth — whether Gemma
-4 reaches for it unprompted on a grounded turn — is a property of the weights and
-the description together, and only a device run against the real model can say. The
-host suite proves that when the call arrives the form fills; it says nothing about
-how often it arrives. That is the single most important thing to watch for on the
-next device session.
+✅ **The model calls `record_work_order_fields` unprompted — observed on device,
+2026-08-19.** This paragraph carried the opposite warning until then, and the
+warning was the right thing to have written: every host test *scripts* the call,
+so the suite proved only that the form fills when a call arrives, never how often
+one arrives. That is a property of the weights and the tool description together,
+and only hardware could answer it.
+
+Two manual runs on an iPad, both in airplane mode, against the real 2.59GB
+artifact:
+
+- **Scenario 1** (technician reports finished work) — 4 of 4 fields, including
+  `1.5` derived from *"an hour and a half"*, which nothing in the schema asks for.
+- **Scenario 2** (technician asks what part they need) — 2 of 4, correctly: the
+  inquiry never mentioned hours or safety checks. The same turn also called
+  `get_local_parts_inventory` and reported the part out of stock **in its prose**,
+  not merely on the tool card.
+
+⚠️ **One defect the same runs exposed.** On scenario 2 the model sent two values
+under field names the form does not have, and the panel said so
+(*"The assistant sent 2 values this form has no fields for"*). Which two, and
+whether it recurs, is not yet established — the refusal path handled it correctly,
+so this is a question about the tool's schema and description rather than about the
+form.
 
 ⚠️ **Also unrun on hardware:** dictation with a *live* microphone (TC-MIC-01 covers
 the capture, this would cover the whole chain in a real room), and the clarification

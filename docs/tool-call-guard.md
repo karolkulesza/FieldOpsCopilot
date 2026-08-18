@@ -272,13 +272,6 @@ committed baseline**. Task 1.5 recorded that, and this harness hit it anyway —
 the first revert destroyed both uncommitted fixes, which had to be re-applied.
 It now refuses to run when the file under mutation is dirty.
 
-## Not wired into the app
-
-Same as the registry it feeds: a library with tests and no production call site.
-Task 1.9's agent loop is the consumer — it decides what a `GuardFailure` *means*
-for a turn (feed the message back, or treat the turn as a plain answer), which is
-what `GuardFailureReason` exists to let it branch on.
-
 ---
 
 [← Back to the README](../README.md)

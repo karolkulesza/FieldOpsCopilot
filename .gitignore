@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local implementation-review ledgers and mutation harnesses (not part of the deliverable)
+ledgers/
