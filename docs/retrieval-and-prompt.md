@@ -121,14 +121,6 @@ should not be described as if it did.
 per resolved code plus its full-text hits. The cap truncates from the end, so the
 code hits — which the merge puts first — are the last thing dropped.
 
-## Not wired into the app
-
-Like the seeding engine before it, this is a library with tests and no
-production call site: binding a `DatabaseService` needs an encryption key, which
-Task 1.1 deferred to the demo screen. Task 1.11 owns the key, the seed trigger
-and the wiring; Task 1.9's agent loop is the first consumer of the compiled
-prompt.
-
 ---
 
 [← Back to the README](../README.md)

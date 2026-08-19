@@ -267,14 +267,6 @@ output because this section's standard — "a count of mutations is a claim like
 any other" — applies to itself, and it had gone stale once already: it read 34
 after the set grew to 36.
 
-## Not wired into the app
-
-Same position as 1.3, 1.4, 1.5 and 1.6: a library with tests and no production
-call site, because binding a `DatabaseService` needs the encryption key Task 1.1
-deferred. **Task 1.11 owns the key, the seed trigger, the engine override and the
-composition** — retrieval → compilation → this loop is three lines, and the
-integration test writes them out.
-
 ## Verified on the demo device (2026-08-05, iPad Air M4, iOS 26.5)
 
 TC-AGENT-E2E-01 **passed** against the real 2.59GB artifact, and the numbers are
