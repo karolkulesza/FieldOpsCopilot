@@ -74,7 +74,7 @@ exists to prevent.
 bundled asset that `SeedBundle.parse` validated — `upsertManualEntries` is the
 trust boundary, and this asymmetry stops being safe the day anything writes
 `manual_entries` from a non-asset source. The inquiry is not validated, so a
-technician who types (or, in Tier 2, has transcribed) `[MANUAL DOCUMENT]` could
+technician who types (or dictates) `[MANUAL DOCUMENT]` could
 otherwise open a second, fabricated "verified" block inside their own question.
 `PromptCompiler.neutralizeMarkers` rewrites **every Unicode opening/closing
 punctuation character** (`\p{Ps}` / `\p{Pe}`) in the inquiry to a plain round

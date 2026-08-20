@@ -404,7 +404,7 @@ goes stale, and a rule that is not applied is not checked.**
 
 The hazard this section used to hand forward has been taken rather than repeated,
 so it is worth stating what was done with it. `sttEngineProvider` **still binds
-`FakeSttEngine`**, because it is the Tier 0 seam and every host test resolves it.
+`FakeSttEngine`**, because it is the DI seam and every host test resolves it.
 What the screen resolves is a different provider, `dictationEngineProvider`, which
 answers the real recogniser or `null`.
 

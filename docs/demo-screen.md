@@ -1,6 +1,6 @@
 # The demo screen
 
-One screen, and the whole Tier 1 slice behind it: type a fault, tap **Diagnose**,
+One screen, and the whole retrieve-to-answer slice behind it: type a fault, tap **Diagnose**,
 and the on-device model streams a repair plan grounded in the bundled service
 manual, checking the local warehouse table on the way.
 

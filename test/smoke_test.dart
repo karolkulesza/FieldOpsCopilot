@@ -6,8 +6,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// TC-APP-BOOT-01, retargeted at the real home screen.
 ///
-/// The home screen is now `DiagnoseScreen`; the Tier 0 skeleton is gone. That
-/// makes this test stronger than it was, and it is worth saying why: it pumps the
+/// The home screen is `DiagnoseScreen`, not the placeholder this test first
+/// targeted. That makes it stronger, and it is worth saying why: it pumps the
 /// app with **no overrides at all**, so every startup provider runs for real and
 /// every one of them fails — `getApplicationSupportDirectory()` and the
 /// model-status platform channel have no host implementation. The AC says "no
