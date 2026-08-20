@@ -1,6 +1,6 @@
 /// Runs speech recognition on a dedicated background isolate.
 ///
-/// **Why an isolate, stated more strongly than Task 1.8 could state it.** The LLM's
+/// **Why an isolate, and the case is stronger here than for the LLM.** The LLM's
 /// isolate is insurance: LiteRT-LM already keeps its worst work off the caller, so
 /// that boundary guarantees at *this app's* seam something the plugin happens to
 /// do. Here there is nothing to insure. Every entry point of `sherpa_onnx`'s Dart
@@ -15,9 +15,9 @@
 /// answered, so no queue can build in front of a decoder that has fallen behind.
 /// Back-pressure then propagates up through `await for` to the subscription on
 /// `MicCaptureSession.frames`, whose pump is already pause-aware, and the mic's
-/// bounded backlog does what Task 2.1 built it to do: drop oldest and report the
-/// gap. The gap arrives here as [SttAudioRequest.precedingGapBytes] and is bridged
-/// with silence. Every piece of that chain existed before this task; this file is
+/// bounded backlog does what it was built to do: drop oldest and report the gap.
+/// The gap arrives here as [SttAudioRequest.precedingGapBytes] and is bridged with
+/// silence. Every piece of that chain existed before this worker did; this file is
 /// the part that declines to break it by queueing.
 library;
 

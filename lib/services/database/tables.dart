@@ -2,10 +2,10 @@ import 'package:drift/drift.dart';
 
 /// Drift table definitions for the local, encrypted field-service database.
 ///
-/// Three domains cover the Tier 1 vertical slice: the technician using the
+/// Three domains cover the app's vertical slice: the technician using the
 /// device, the spare-parts inventory the agent looks up, and the work orders a
 /// diagnosis produces. Fault codes elsewhere in the app live in the manual/FTS
-/// tables (Task 1.2) — these tables hold operational, per-technician data.
+/// tables — these tables hold operational, per-technician data.
 
 /// Profile of the technician signed in on this device.
 @DataClassName('TechnicianRow')
@@ -55,8 +55,8 @@ class InventoryParts extends Table {
   /// upper-cased) via [normalizeSku] and matched by exact equality.
   ///
   /// `COLLATE NOCASE` for the same reason `manual_entries.code` carries it, and
-  /// it matters more here: from Task 1.5 onward the SKU in a lookup arrives from
-  /// the *model*, inside a native function call, so its casing is whatever the
+  /// it matters more here: the SKU in a lookup arrives from the *model*, inside a
+  /// native function call, so its casing is whatever the
   /// weights felt like emitting. The collation applies to the implicit primary-key
   /// index too, so case-insensitive equality goes *through* the index instead of
   /// forcing `upper(sku)` and a table scan.
@@ -87,7 +87,7 @@ class InventoryParts extends Table {
 /// [normalizeFaultCode]. Applied on write and on lookup.
 ///
 /// Whitespace is the half the `COLLATE NOCASE` collation cannot cover, and a SKU
-/// dictated by voice (Tier 2) or emitted by the model arrives with both problems.
+/// dictated by voice or emitted by the model arrives with both problems.
 String normalizeSku(String sku) => sku.trim().toUpperCase();
 
 /// Record of a seed dataset that has already been applied to this database.

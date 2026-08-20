@@ -16,14 +16,14 @@ import '../../services/models/providers.dart';
 /// they verify?" visible *before* someone taps Diagnose. The states below
 /// are exactly the answers the provisioner can give.
 ///
-/// Task 2.0 turned the single banner into a **column of independent rows**, one
-/// per entry in [provisionedModelDescriptorsProvider]. Independent is the
+/// Multi-model provisioning turned the single banner into a **column of independent
+/// rows**, one per entry in [provisionedModelDescriptorsProvider]. Independent is the
 /// load-bearing word: each row watches its own family instance of the status and
 /// provisioning providers, so the STT set being absent renders as one warning row
 /// while the LLM's row — and everything the LLM gates, Diagnose included — is
 /// untouched (TC-PROV-MULTI-01).
 ///
-/// Task 1.8 added the trigger underneath each row. Note what the button
+/// Each row carries a retry trigger underneath it. Note what the button
 /// deliberately does *not* do: it does not come back after a download whose bytes
 /// failed the pinned digest. That is a configuration error, a retry moves the same
 /// gigabytes and fails the same way, and `ModelProvisioningController` is where
@@ -46,8 +46,8 @@ class ModelReadinessBanner extends ConsumerWidget {
   }
 }
 
-/// Readiness and provisioning for one model — Task 1.7's whole banner, scoped to
-/// a descriptor.
+/// Readiness and provisioning for one model — the whole banner, scoped to a
+/// descriptor.
 class _ModelRow extends ConsumerWidget {
   const _ModelRow({required this.descriptor});
 

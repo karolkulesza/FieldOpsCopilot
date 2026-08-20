@@ -73,9 +73,9 @@ class DatabaseService extends _$DatabaseService {
   @override
   int get schemaVersion => 3;
 
-  /// v1 shipped the technician/inventory/work-order tables; v2 (Task 1.2) adds
-  /// the manual table, its FTS5 index and the triggers that keep them in sync;
-  /// v3 (Task 1.3) adds the seed-marker table and gives `inventory_parts.sku` the
+  /// v1 shipped the technician/inventory/work-order tables; v2 adds the manual
+  /// table, its FTS5 index and the triggers that keep them in sync;
+  /// v3 adds the seed-marker table and gives `inventory_parts.sku` the
   /// `COLLATE NOCASE` collation.
   ///
   /// `createTable` emits only `CREATE TABLE`, so every non-table entity has to be
@@ -137,8 +137,8 @@ class DatabaseService extends _$DatabaseService {
     );
   }
 
-  /// Exact SKU lookup — the query the agent's `get_local_parts_inventory` tool
-  /// (Task 1.5) is built on.
+  /// Exact SKU lookup — the query the agent's `get_local_parts_inventory` tool is
+  /// built on.
   ///
   /// [sku] is canonicalised before comparison, and `inventory_parts.sku` is
   /// declared `COLLATE NOCASE`, so `" brk-990-xp "` finds `BRK-990-XP` through the
@@ -241,7 +241,7 @@ class DatabaseService extends _$DatabaseService {
 
   /// Ranked full-text search over an already-extracted term list.
   ///
-  /// This is the entry point for the retrieval router (Task 1.4), which pulls a
+  /// This is the entry point for the retrieval router, which pulls a
   /// fault code out of the raw text, handles it through [manualEntryByCode], and
   /// searches on what remains. Routing through here rather than the generated
   /// `searchManualEntriesRanked` keeps the empty-expression guard attached to the

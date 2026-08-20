@@ -123,19 +123,22 @@ void main() {
       expect(client.autoUncompress, isFalse);
     });
 
-    test('the declared length describes the bytes actually delivered', () async {
-      // The property the gzip defect broke: whatever the server says
-      // Content-Length is, the
-      // stream must deliver exactly that many bytes, or the provisioner's
-      // truncation check is comparing two different quantities.
-      final downloader = HttpModelDownloader();
-      addTearDown(downloader.close);
+    test(
+      'the declared length describes the bytes actually delivered',
+      () async {
+        // The property the gzip defect broke: whatever the server says
+        // Content-Length is, the
+        // stream must deliver exactly that many bytes, or the provisioner's
+        // truncation check is comparing two different quantities.
+        final downloader = HttpModelDownloader();
+        addTearDown(downloader.close);
 
-      final stream = await downloader.open(origin.uri('/model'));
-      final received = await _collect(stream.bytes);
+        final stream = await downloader.open(origin.uri('/model'));
+        final received = await _collect(stream.bytes);
 
-      expect(received.length, stream.contentLength);
-    });
+        expect(received.length, stream.contentLength);
+      },
+    );
   });
 
   group('credentials across redirects', () {

@@ -1,8 +1,8 @@
 /// The shape a [ToolDefinition] must have before an on-device model can be told
 /// about it.
 ///
-/// Task 0.2 declared `ToolDefinition.parameters` as a "JSON-schema-ish type
-/// descriptor", which was enough for a fake that never rendered it. It is not enough
+/// `ToolDefinition.parameters` began life as a "JSON-schema-ish type descriptor",
+/// which was enough for a fake that never rendered it. It is not enough
 /// now, because the map has to satisfy **two consumers that read it completely
 /// differently**, and neither one tells you when it does not:
 ///
@@ -31,7 +31,7 @@
 /// (validate at registration, where the mistake is) but the mechanism is not the one
 /// originally described.
 ///
-/// This is the contract Task 1.5's registry must emit. [objectSchema] exists so it
+/// This is the contract the tool registry must emit. [objectSchema] exists so it
 /// (and the tests here) can build a conforming map without hand-writing it.
 ///
 /// It lives beside `llm_engine.dart` rather than under the Gemma runtime because it is a

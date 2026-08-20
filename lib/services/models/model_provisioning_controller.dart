@@ -1,11 +1,11 @@
 /// The user-facing trigger for provisioning model weights.
 ///
-/// Task 1.7 built everything underneath this — download with progress, streaming
-/// SHA-256, atomic install, per-model serialisation — and deliberately shipped no way
-/// to *start* it, leaving the trigger to the task that first needs the weights
-/// resident. That is this one.
+/// Everything underneath this — download with progress, streaming SHA-256, atomic
+/// install, per-model serialisation — deliberately shipped with no way to *start*
+/// it, leaving the trigger to whatever first needs the weights resident. This is
+/// that trigger.
 ///
-/// Task 2.0 made it a **family keyed by model id**: the banner shows one row per
+/// It is a **family keyed by model id**: the banner shows one row per
 /// provisioned model, and each row needs its own trigger, its own progress and its
 /// own failure — a shared notifier would show the STT download's progress bar under
 /// the LLM's label. The sticky-rejection rule below is per model for the same
@@ -96,7 +96,7 @@ class ModelProvisioningController extends Notifier<ModelProvisioningState> {
   /// Held rather than a bare "failed" flag so the block lifts exactly when it should:
   /// a new pin (a corrected `--dart-define`, a moved revision) is a genuinely
   /// different question and is allowed to fetch. A *fingerprint* over the whole file
-  /// set rather than Task 1.7's single hash, because any one member pin moving makes
+  /// set rather than a single hash, because any one member pin moving makes
   /// the download a different question. Session-scoped on purpose — it guards
   /// against a repeated tap, not against a relaunch, and persisting it would mean a
   /// user could never recover a device whose flash really did corrupt one download.
