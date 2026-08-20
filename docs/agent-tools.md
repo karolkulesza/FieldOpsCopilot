@@ -139,16 +139,6 @@ several rows, or the disambiguation question §2.3 describes. The tool declares
 `sku` only, which is what the acceptance criteria specify. Name search is a
 separate tool, not a widened parameter.
 
-## Not wired into the app
-
-Same position as the seeding engine and the retrieval router: a library with
-tests and no production call site, because binding a `DatabaseService` needs the
-encryption key Task 1.1 deferred. Task 1.11 owns the key and the wiring; Task
-1.9's agent loop is the first consumer of `dispatch`, and the guard below feeds
-the degraded path into it. Lenient tool-name matching lives there rather than
-here — `dispatch` matches names exactly, because on the primary path Gemma 4's
-constrained decoding emits a name that came from this registry.
-
 ---
 
 [← Back to the README](../README.md)

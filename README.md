@@ -9,17 +9,32 @@ structured work order.
 the manual, the parts inventory, the 2.59GB language model and the speech
 recogniser all live locally.
 
-```
-"Fault code E-102 on car three. Brake pads are worn, I replaced
- BRK-990-XP. Took me an hour and a half, lockout/tagout verified."
+![A symptom description becomes a grounded repair plan and a warehouse answer, in airplane mode](docs/demo-out-of-stock.gif)
 
-  → retrieved   Traction Brake Pad Wear & Vibration (E-102)
-  → tool call   get_local_parts_inventory("BRK-990-XP")
-                → 2 in stock at Aisle 4, Shelf B
-  → tool call   record_work_order_fields({...})
-  → work order  4 of 4 fields filled — including 1.5 hours,
-                converted from "an hour and a half"
+*Recorded on an iPad in airplane mode — the ✈ in the status bar is the whole point.*
+
 ```
+"Doors on car two cycle three times and throw an obstruction warning,
+ and the belt squeals when they open. What part do I need and is it in stock?"
+
+  → retrieved   Door Clutches & Belt Slippage (E-305)   ← from symptoms alone;
+                                                          no fault code was typed
+  → tool call   record_work_order_fields({fault_code, replacement_parts})
+                → the work-order panel fills, live
+  → tool call   get_local_parts_inventory("BELT-330-DRV")
+                → 0 units — Aisle 1, Shelf C
+  → answer      "BELT-330-DRV is currently out of stock (0 units in stock
+                 at Aisle 1, Shelf C)"
+```
+
+The last line is the one worth watching. A grounded tool result is easy; a model
+whose *prose* then agrees with it — rather than confidently inventing a quantity
+next to it — is the thing this architecture exists to get right.
+
+Two fields stay empty because the technician never mentioned hours or safety
+checks, and the panel says so rather than guessing. The warning above them is
+also real: on this run the model sent two values under field names the form does
+not have, and reporting that is deliberate — see design decision 3.
 
 Verified on real hardware — an iPad Air M4 (iOS 26.5) for the inference and
 frame-budget measurements, an iPad Pro 11 (iOS 17.5) for the voice and
@@ -31,12 +46,11 @@ from. The domain is fictional; the engineering is not.
 | Capability | State |
 |---|---|
 | Encrypted local database, offline retrieval, first-launch seeding | ✅ shipped |
-| Model provisioning — SHA-256 pinned, resumable, atomic | ✅ shipped |
+| Model provisioning — SHA-256 pinned, staged, atomic | ✅ shipped |
 | On-device LLM (Gemma 4 E2B / LiteRT-LM) with native function calling | ✅ shipped |
 | Agent loop, tool registry, defensive call guard | ✅ shipped |
 | Microphone capture + on-device speech-to-text | ✅ shipped |
 | Voice → inquiry → agent → auto-filled work order | ✅ shipped |
-| Camera OCR / barcode scanning (`VisionEngine`) | ⬜ still a fake — the one remaining stub |
 
 1179 host tests, 7 golden transcript snapshots, 9 device integration test files.
 
@@ -99,6 +113,14 @@ the malformed-call guard already covers it, the agent loop already feeds refusal
 back, and the exchange lands in the golden snapshots. A scraped blob has none of
 that and needs a brace scanner nobody wants to own.
 
+![The agent fills all four work-order fields by calling a tool](docs/demo-work-order.gif)
+
+A second run, where the technician reports finished work instead of asking a
+question. Four fields land at once — and **Technician hours reads `1.5`**, which
+nothing asked for: the schema says the field exists and the model converted *"an
+hour and a half"* on its own. Every field carries the agent-origin marker, so the
+technician can see what they did not type.
+
 → [Agent tools](docs/agent-tools.md) · [The tool-call guard](docs/tool-call-guard.md)
 
 ### 3 · The technician outranks the agent
@@ -113,9 +135,9 @@ rejected when most of it landed.
 
 ### 4 · Weights that do not verify do not run
 
-Every model file carries a committed SHA-256 pin. Downloads are resumable and
-staged in a `.part` directory, renamed into place only after **every** file in the
-set verifies. A truncated encoder does not fail cleanly — it transcribes noise,
+Every model file carries a committed SHA-256 pin. Downloads are staged in a
+`.part` directory and renamed into place only after **every** file in the set
+verifies. A truncated encoder does not fail cleanly — it transcribes noise,
 which reaches a technician as a confident sentence.
 
 **Cost:** the URL and hash are build inputs (`--dart-define`), not constants,
@@ -218,6 +240,18 @@ Three things this project does that are worth stealing:
 
 → [Testing](docs/testing.md)
 
+## How this was built
+
+Built with Claude Code, under review — each task its own PR, behind an adversarial
+review pass and the mutation testing described above. The direction, the
+architecture, the measurements and every decision documented on this page are
+mine; the typing was assisted. Both facts are in the git history.
+
+The interesting part of working this way is not the speed. It is that a reviewer
+who proposes a concrete defect, and a harness that proves the suite would catch
+it, become cheap enough to apply to **every** task rather than the scary ones —
+which is where most of the findings on this page came from.
+
 ## Deep dives
 
 | | |
@@ -228,7 +262,7 @@ Three things this project does that are worth stealing:
 | [The tool-call guard](docs/tool-call-guard.md) | Calls spelled as prose, invented tools, repeated calls |
 | [Retrieval and the grounded prompt](docs/retrieval-and-prompt.md) | Code lookup merged code-first with FTS, and prompt-injection defences |
 | [Offline retrieval](docs/offline-retrieval.md) | FTS5, and the exact-match column a fault code needs |
-| [Model provisioning](docs/model-provisioning.md) | Pinned hashes, atomic installs, resumable downloads |
+| [Model provisioning](docs/model-provisioning.md) | Pinned hashes, atomic installs, staged transfers |
 | [Data persistence & encryption](docs/data-persistence-and-encryption.md) | drift + SQLite3MultipleCiphers, ChaCha20-Poly1305 |
 | [First-launch seeding](docs/first-launch-seeding.md) | Transactional seeding and revision checks |
 | [Speech to text](docs/speech-to-text.md) | Streaming zipformer on an isolate, and the first-word defect |
@@ -257,4 +291,5 @@ Three things this project does that are worth stealing:
 
 ## License
 
-Not yet specified.
+[Apache-2.0](LICENSE). The Gemma weights are not covered by it — their use is
+governed by the [Gemma terms](https://ai.google.dev/gemma/terms).
