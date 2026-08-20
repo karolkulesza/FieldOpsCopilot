@@ -1,28 +1,61 @@
-# This file configures the analyzer, which statically analyzes Dart code to
-# check for errors, warnings, and lints.
+# Static analysis configuration.
 #
-# The issues identified by the analyzer are surfaced in the UI of Dart-enabled
-# IDEs (https://dart.dev/tools#ides-and-editors). The analyzer can also be
-# invoked from the command line by running `flutter analyze`.
-
-# The following line activates a set of recommended lints for Flutter apps,
-# packages, and plugins designed to encourage good coding practices.
+# Two decisions here, both deliberate.
+#
+# **The analyzer is stricter than the default.** `flutter_lints` is a style set;
+# it says nothing about the type system. The three `strict-*` modes below turn
+# implicit `dynamic` into an error at the places it actually costs something —
+# an unannotated `List` element, a downcast the analyzer inferred rather than the
+# author writing it, a raw generic. This app crosses two FFI boundaries and a
+# `SendPort`, where everything arrives as `Object?`; a lint set that lets those
+# values spread untyped through `lib/` is the wrong one for this codebase.
+#
+# **Generated files are excluded from analysis, not from the build.** `drift_dev`
+# emits `*.g.dart` in a style nobody chose, and lint findings on generated code
+# are noise that trains you to ignore the report. The CI freshness gate is what
+# guards those files instead: it regenerates them and fails if the diff is
+# non-empty, which is a stronger property than any lint.
 include: package:flutter_lints/flutter.yaml
 
-linter:
-  # The lint rules applied to this project can be customized in the
-  # section below to disable rules from the `package:flutter_lints/flutter.yaml`
-  # included above or to enable additional rules. A list of all available lints
-  # and their documentation is published at https://dart.dev/lints.
-  #
-  # Instead of disabling a lint rule for the entire project in the
-  # section below, it can also be suppressed for a single line of code
-  # or a specific dart file by using the `// ignore: name_of_lint` and
-  # `// ignore_for_file: name_of_lint` syntax on the line or in the file
-  # producing the lint.
-  rules:
-    # avoid_print: false  # Uncomment to disable the `avoid_print` rule
-    # prefer_single_quotes: true  # Uncomment to enable the `prefer_single_quotes` rule
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+  errors:
+    # An unawaited future in this codebase is nearly always a defect rather than
+    # a style choice: the isolate protocols, the provisioner and the capture
+    # lifecycle all depend on ordering that only `await` establishes.
+    unawaited_futures: error
+    # A `TODO` that survives review is a claim the code does not keep. There are
+    # none; this keeps it that way.
+    todo: warning
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
 
-# Additional information about this file can be found at
-# https://dart.dev/guides/language/analysis-options
+linter:
+  rules:
+    # Two rules are deliberately *off*. `comment_references` wants every name in a
+    # dartdoc to be imported, which in this repo means importing types purely to
+    # mention them — the doc comments here reference across layers on purpose.
+    # `avoid_slow_async_io` wants the synchronous `dart:io` calls, which is exactly
+    # backwards for an app whose whole argument is that the UI isolate must not
+    # block: `ModelStorage` awaits its file operations because a 2.59GB install
+    # cannot stall a frame.
+    - prefer_single_quotes
+    # `Error` means the app is broken and must not be swallowed; this is the rule
+    # that stops `on Object` and bare `catch` from appearing by habit.
+    - avoid_catches_without_on_clauses
+    - avoid_catching_errors
+    # Ordering and immutability, so a reader can predict where a member is.
+    - prefer_final_locals
+    - prefer_final_in_for_each
+    - sort_constructors_first
+    - always_declare_return_types
+    # Async correctness.
+    - unawaited_futures
+    - avoid_void_async
+    - cancel_subscriptions
+    - close_sinks
+    - use_build_context_synchronously

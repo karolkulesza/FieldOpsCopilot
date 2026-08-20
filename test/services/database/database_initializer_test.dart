@@ -392,7 +392,7 @@ void main() {
         // migration, a sync path, a hand-fixed database — stores a SKU
         // un-normalised; the canonical lookup must still reach it.
         await db.customStatement(
-          "INSERT INTO inventory_parts (sku, name, stock, location) "
+          'INSERT INTO inventory_parts (sku, name, stock, location) '
           "VALUES ('lot-777-raw', 'Raw-written Part', 4, 'Aisle 9')",
         );
 
@@ -793,7 +793,7 @@ void main() {
       // arrived, because `normalizeSku` upper-cases the lookup argument too — so
       // asserting on that row would test nothing about the migration.
       await v2.customStatement(
-        "INSERT INTO inventory_parts (sku, name, stock, location) "
+        'INSERT INTO inventory_parts (sku, name, stock, location) '
         "VALUES ('brk-990-xp', 'Traction Brake Pad Assembly', 2, "
         "'Aisle 4, Shelf B')",
       );

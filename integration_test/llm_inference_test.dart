@@ -282,7 +282,7 @@ void main() {
         switch (event) {
           case LlmToken(:final text):
             prose.write(text);
-          case LlmToolCall call:
+          case final LlmToolCall call:
             calls.add(call);
           case LlmDone():
             // Recorded, not `break`ed: a bare `break` here leaves the `switch`, not

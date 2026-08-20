@@ -324,7 +324,7 @@ void main() {
       // along with the collation.
       await expectLater(
         db.customStatement(
-          "INSERT INTO manual_entries "
+          'INSERT INTO manual_entries '
           '(id, section, code, title, symptoms, procedure) '
           "VALUES ('x', 's', NULL, 't', 'sy', 'p')",
         ),

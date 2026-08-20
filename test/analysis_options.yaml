@@ -1,0 +1,21 @@
+# The root configuration, minus three rules that are about *production* resource
+# lifecycle and misfire on a test.
+#
+# `cancel_subscriptions` and `close_sinks` assume a resource outlives the function
+# that made it. In this suite they almost never do: a subscription is opened to
+# assert what arrives on it and is paused or abandoned deliberately (pausing is
+# the behaviour under test in several cases), and the controllers the lint finds
+# belong to scripted doubles that close them from their own `dispose`. Silencing
+# each site individually would put an `// ignore:` on the line the test is about.
+#
+# `avoid_catches_without_on_clauses` is off for the same reason a teardown catches
+# broadly: a cleanup that throws must not mask the assertion that already failed.
+# In `lib/` all three stay on — nothing there violates them today, and that is the
+# point of leaving them enabled.
+include: ../analysis_options.yaml
+
+linter:
+  rules:
+    cancel_subscriptions: false
+    close_sinks: false
+    avoid_catches_without_on_clauses: false
