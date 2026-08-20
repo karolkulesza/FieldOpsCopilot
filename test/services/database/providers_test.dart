@@ -10,14 +10,14 @@ import 'package:flutter/services.dart' show MissingPluginException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Unit-tier coverage for Task 1.11's first deferred wiring: the database, the
-/// key it needs, and the first-launch seed.
+/// Unit-tier coverage for the database wiring: the database itself, the key it
+/// needs, and the first-launch seed.
 ///
 /// **What can and cannot be tested on the host, stated up front because the
 /// boundary is the interesting part.** [appDatabaseProvider] calls
 /// `getApplicationSupportDirectory()`, a platform channel with no host
 /// implementation, so it is *overridden* here with a temp-file database. That
-/// means these tests bind the two properties this task actually owns — the key
+/// means these tests bind the two properties this wiring actually owns — the key
 /// the graph resolves, and that nothing reaches the retrieval path before the
 /// seed has run — and say nothing about the application-support path itself.
 /// `integration_test/demo_flow_test.dart` is what exercises that, on device,
@@ -83,8 +83,8 @@ void main() {
   }
 
   group('the encryption-key decision', () {
-    // The task's brief permits a hardcoded key and requires that it be a
-    // deliberate recorded decision. This binds the decision: with no define
+    // A hardcoded key is acceptable in this demo app only as a deliberate,
+    // recorded decision. This binds the decision: with no define
     // supplied — which is how every host test and every un-configured build runs
     // — the key is the named demo constant and nothing else.
     test('falls back to the named demo key when no define is supplied', () {
@@ -161,7 +161,7 @@ void main() {
       },
     );
 
-    // Task 1.3's contract: a malformed asset is a build defect and must fail
+    // The seeder's contract: a malformed asset is a build defect and must fail
     // loudly rather than start the app with an empty manual. "Loudly" here means
     // the provider carries the error, which is what lets the screen render it
     // instead of the framework swallowing it.
@@ -184,7 +184,7 @@ void main() {
     // is reported at all (`ProviderContainer.defaultRetry` skips only `Error` and
     // `ProviderException`). Both of this provider's failures are ordinary
     // `Exception`s and both are perfectly deterministic, so the default turns
-    // Task 1.3's "fail loudly at startup" into a forty-second hang that then
+    // the seeder's "fail loudly at startup" into a forty-second hang that then
     // says something.
     //
     // This binds the fix rather than describing it, and the numbers below are
@@ -207,11 +207,11 @@ void main() {
       },
     );
 
-    // **The model-status chain needs its own guard, and review finding R0-F4 is
-    // that it did not have one.** `retry: noRetry` was applied to eleven providers
-    // and only two were bound; the reviewer measured that deleting it from
-    // `modelInstallStatusProvider`, `modelStorageProvider`, `retrievalRouterProvider`
-    // and `toolRegistryProvider` all survived the whole suite. The unbound one that
+    // **The model-status chain needs its own guard, and for a while it did not
+    // have one.** `retry: noRetry` was applied to eleven providers and only two
+    // were bound: deleting it from `modelInstallStatusProvider`,
+    // `modelStorageProvider`, `retrievalRouterProvider` and `toolRegistryProvider`
+    // each survived the whole suite. The unbound one that
     // matters most is the model-status site, because
     // `lib/services/models/providers.dart` makes the strongest behavioural claim in
     // the set — that without it the banner sits on "Checking model…" for half a

@@ -71,8 +71,8 @@ void main() {
       // is wrong: `OutlinedButton`'s Material 3 `minimumSize` is `Size(64, 40)`,
       // and it is the default padding and visual density that carry the rendered
       // height the rest of the way. A style setting `minimumSize` to 48 was
-      // written here and then deleted — it changed nothing, and its own mutation
-      // survived.
+      // written here and then deleted — it changed nothing, and removing it
+      // again left every assertion green.
       //
       // The assertion stays because the number is now load-bearing and arrived by
       // accident: a future change to density, padding or button type could drop it
@@ -327,9 +327,9 @@ void main() {
       expect(find.byKey(ClarificationKeys.dialog), findsNothing);
     });
 
-    // **What mutation M19 actually established, after the fix it seemed to call
-    // for was measured and reverted.** The row expected the state check in
-    // `_present`'s tail to be load-bearing; it survived. The story that fit — a
+    // **What deleting the state check in `_present`'s tail actually established,
+    // after the fix it seemed to call for was measured and reverted.** The check
+    // was expected to be load-bearing; its deletion survived. The story that fit — a
     // question arriving while the route animates out and being dismissed by its
     // close — turned out to be unreachable: an instrumented trace showed
     // `showDialog`'s future resolving in the *same frame* as the pop, with
@@ -378,7 +378,7 @@ void main() {
       );
     });
 
-    // **Review finding R0-F2, and the failure it describes is not subtle: the app's
+    // **This failure is not subtle: the app's
     // home route disappears.** `_showing` is assigned in the listener and the route
     // is pushed one post-frame callback later; clearing the clarification inside
     // that window used to take the `next == null` branch, find `_showing` non-null
@@ -426,11 +426,11 @@ void main() {
       expect(find.byKey(ClarificationKeys.dialog), findsOneWidget);
     });
 
-    // **Review finding R1-F2, and it is R0-F2's fix creating a new state one over.**
+    // **The fix for the popped home route created a new state one over.**
     // Cancelling cleared `_showing` without unscheduling the callback queued for
     // it, so a question arriving in the same frame scheduled a second one and both
     // pushed a route. No `pumpAndSettle` between the three calls — that is the
-    // window, and it is the same one the R0-F2 test insists on.
+    // window, and it is the same one the popped-home-route test insists on.
     testWidgets('a question arriving in the cancel window opens one dialog', (
       tester,
     ) async {

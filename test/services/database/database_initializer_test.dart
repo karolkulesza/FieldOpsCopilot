@@ -11,10 +11,10 @@ import 'package:field_ops_copilot/services/database/tables.dart'
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Unit-tier coverage for Task 1.3 (seeding engine & inventory).
+/// Unit-tier coverage for the seeding engine and the parts inventory.
 ///
-/// Runs against a real encrypted database with the real FTS5 module, like the
-/// Task 1.2 suite: the loader's contract is "the manual is searchable and the
+/// Runs against a real encrypted database with the real FTS5 module, like
+/// `manual_fts_test.dart`: the loader's contract is "the manual is searchable and the
 /// inventory is queryable afterwards", and a faked database would assert only that
 /// the loader called the methods this test file already knows it calls.
 void main() {
@@ -93,8 +93,8 @@ void main() {
       //
       // So the redundancy is real defence in depth rather than a claim, and each
       // layer is pinned by its own assertion elsewhere: the parser by "parsed rows
-      // are already canonical" below, the database by 1.2's "stored codes are
-      // canonicalised on write". Deleting *both* fails this test.
+      // are already canonical" below, the database by the FTS suite's "stored
+      // codes are canonicalised on write". Deleting *both* fails this test.
       await initializerFor(_fixtureJson()).ensureSeeded();
 
       expect((await db.manualEntryByCode('E-102'))?.id, 'apex_9_err_102');
@@ -105,7 +105,7 @@ void main() {
     });
 
     test('required tools and parts survive as decodable lists', () async {
-      // 1.4's TC-RAG-COMP-02 asserts a tool name and a part SKU reach the prompt,
+      // TC-RAG-COMP-02 asserts a tool name and a part SKU reach the prompt,
       // so the seed has to land them in a form `ManualEntryLists` can decode —
       // not, say, a JSON-encoded string of a JSON string.
       await initializerFor(_fixtureJson()).ensureSeeded();
@@ -139,8 +139,8 @@ void main() {
       // rolled back, making that expectation unfailable — which is what a first
       // version of this test did.
       //
-      // Deliberately not driven by drift's `withLength` check any more: R0-F2
-      // moved length validation into the parser, so an over-length name now fails
+      // Deliberately not driven by drift's `withLength` check any more: length
+      // validation moved into the parser, so an over-length name now fails
       // before the transaction opens and could not reach this code path. Injecting
       // the failure directly also stops this test from silently becoming a test of
       // whichever column constraint happens to fire first.
@@ -240,8 +240,9 @@ void main() {
     });
 
     test('a re-seed is upsert-shaped, not replace-shaped', () async {
-      // Pins the two limits of a revision bump that the README now states, because
-      // both are easy to assume the other way round and 1.4+ may lean on them.
+      // Pins the two limits of a revision bump that the README now states,
+      // because both are easy to assume the other way round and downstream
+      // layers may lean on them.
       await initializerFor(_fixtureJson()).ensureSeeded();
 
       await initializerFor(
@@ -336,8 +337,8 @@ void main() {
     });
 
     test('lookup tolerates the casing and padding a model emits', () async {
-      // From Task 1.5 the SKU arrives inside a native function call, so its shape
-      // is whatever the weights produced.
+      // In production the SKU arrives inside a model-emitted function call, so
+      // its shape is whatever the weights produced.
       //
       // All three of these are `normalizeSku` doing the work, on both the write
       // and the read side — **not** the column's collation. Verified by mutation:
@@ -351,18 +352,18 @@ void main() {
     });
 
     test('upsertInventoryParts canonicalises the SKU it stores', () async {
-      // R0-F1. The write side of `normalizeSku` had no regression guard: deleting
+      // The write side of `normalizeSku` had no regression guard: deleting
       // it from `upsertInventoryParts` left all 269 tests green, because every SKU
       // reaching that method in this suite had already been canonicalised by
       // `SeedBundle.parse`, and the one test that writes a non-canonical SKU (the
       // next one) goes through `customStatement` and bypasses the method entirely.
       //
-      // That gap mattered because three documents call this layer the *primary*
+      // That gap mattered because this layer is documented as the *primary*
       // mechanism and the collation only a backstop — and the collation genuinely
       // cannot cover this case: whitespace survives NOCASE, so the row would be
-      // permanently unreachable. `upsertInventoryParts` is public API and the seed
-      // parser is not its only future caller (from 1.5 the SKU comes from the
-      // model, in Tier 2 from speech).
+      // permanently unreachable. `upsertInventoryParts` is public API and the
+      // seed parser is not its only caller: the SKU also arrives from the
+      // model's tool calls, and by voice from speech.
       await db.upsertInventoryParts([
         const InventoryPartRow(
           sku: '  lot-888-pad  ',
@@ -634,7 +635,7 @@ void main() {
           'from a procedure that needs no tools',
     );
 
-    // R0-F2: these two bounds are the reason the parser's promise is now true.
+    // These two bounds are what make the parser's promise true.
     // Drift declares them with `withLength`, whose check runs in
     // `validateIntegrity` at *insert* time — inside the seeding transaction, i.e.
     // too late to be a parse error. Both are validated here against the same

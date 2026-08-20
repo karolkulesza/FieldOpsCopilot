@@ -37,8 +37,8 @@ void main() {
     // one that does not.
     //
     // The exotic separators are spelled with [String.fromCharCode] rather than
-    // pasted in. Task 1.9 paid for that lesson: its hostile list carried a
-    // literal U+2028, invisible in the source, and the assertions beside it
+    // pasted in. The agent-loop suite paid for that lesson: its hostile list
+    // carried a literal U+2028, invisible in the source, and the assertions beside it
     // could never have failed on it. A separator you cannot see is a fixture
     // nobody has read.
     final hostile = <String>[
@@ -95,7 +95,7 @@ void main() {
     });
 
     test('escapes every code unit outside printable ASCII', () {
-      // The four `jsonEncode` leaves raw (Task 1.9's R0-F1 measured them), an em
+      // The four `jsonEncode` leaves raw (measured, not assumed), an em
       // dash, and an astral-plane character. Spelled by code point for the same
       // reason as the list above: this test's entire subject is characters you
       // cannot see in a source file.
@@ -107,7 +107,7 @@ void main() {
       // — the loop never appends a `[CONTINUE]` block, so that golden has no
       // escape of any kind in it. The first version of this comment said "every
       // committed golden exercises this case", which was one `grep -c` from being
-      // checked (review finding R0-F3).
+      // checked — and wrong.
       final raw = [
         'nel:${String.fromCharCode(0x0085)}',
         'ls:${String.fromCharCode(0x2028)}',
@@ -369,7 +369,7 @@ void main() {
       // of this test claimed to bind it and did not: it wrote the file itself
       // with `..writeAsStringSync(encodeSnapshot(snapshot))` and never called
       // `verifyGolden`, so the comment asserting the property was the only thing
-      // holding it (review finding R0-F2). Deleting both statements of the write
+      // holding it. Deleting both statements of the write
       // left all 552 tests green.
       final snapshot = {
         'scenario': 'probe',
@@ -397,7 +397,7 @@ void main() {
       // The em dash proves the ASCII escaping survives the round trip to disk —
       // and it is asserted in its *escaped* form, because that is what a golden
       // holds. The first version of this line looked for the raw character and
-      // failed immediately, which is the third time in this task that a literal
+      // failed immediately, which is the third time in this suite that a literal
       // non-ASCII character in a fixture has been wrong where the escape was
       // right.
       expect(file.readAsStringSync(), contains(r'\u2014'));
@@ -419,9 +419,8 @@ void main() {
       // The other half, and the one that matters for CI: an ordinary run must
       // never touch the committed snapshots. Without this, a write condition
       // widened to `if (!reconciliation.passes)` would silently accept every
-      // regression by overwriting the evidence — which is precisely what the
-      // mutation harness's M29 does, and precisely why its run has to revert the
-      // whole `test/golden` surface rather than the file it edited.
+      // regression by overwriting the evidence — a failure mode that destroys
+      // the committed goldens instead of reporting against them.
       final file = File(
         '${tempDir.path}/probe.json',
       )..writeAsStringSync(encodeSnapshot({'scenario': 'probe', 'value': 'a'}));
@@ -527,8 +526,8 @@ final Object? _skipWhenUpdating = goldensAreBeingUpdated
 /// *name*.
 ///
 /// A test whose name contains a raw U+2028 is a test whose name contains a line
-/// break as far as the expanded reporter and the mutation harness's output
-/// parser are concerned — and the harness keys its results by test name.
+/// break as far as the expanded reporter — and any tooling that keys its
+/// results by test name — is concerned.
 String visibly(String text) => text.replaceAllMapped(
   RegExp(r'[^\x20-\x7E]'),
   (m) => '\\u${m[0]!.codeUnitAt(0).toRadixString(16).padLeft(4, '0')}',

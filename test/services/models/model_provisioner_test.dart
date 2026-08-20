@@ -10,7 +10,7 @@ import 'package:field_ops_copilot/services/models/model_provisioner.dart';
 import 'package:field_ops_copilot/services/models/model_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Unit-tier coverage for Task 1.7 (model provisioning & delivery).
+/// Unit-tier coverage for model provisioning and delivery.
 ///
 /// Everything here runs on the host with no network: the download seam is a
 /// scripted byte stream, and the "model" is a few hundred bytes of fixture whose
@@ -324,7 +324,7 @@ void main() {
   });
 
   group('concurrency', () {
-    // Regression for R0-F1. Before the fix, two overlapping provision() calls
+    // Regression. Before the fix, two overlapping provision() calls
     // shared one `.part` path; because rename preserves the inode, the losing
     // transfer's still-open sink kept writing into the artifact the winner had
     // just installed. The result was `ModelVerified` + `ready` for bytes whose
@@ -513,11 +513,11 @@ void main() {
   });
 
   group('staging names', () {
-    // Regression for R1-F1. The first version of the nonce was `pid` plus a
+    // Regression. The first version of the nonce was `pid` plus a
     // static counter, and static state is per-isolate while `pid` is process-wide
     // — so two isolates both produced `<pid>-0`, shared a staging path, and
-    // brought R0-F1's corruption back in full. Task 1.8 runs inference on an
-    // isolate and is also what will call provision().
+    // brought the overlapping-provision corruption back in full. Inference runs
+    // on an isolate, and that side is also what calls provision().
     test('nonces do not collide across isolates', () async {
       const perIsolate = 32;
 
@@ -584,7 +584,7 @@ void main() {
   });
 
   group('replacing an artifact whose pin moved', () {
-    // Regression for R0-F3: one provision() call used to hash the stale file,
+    // Regression: one provision() call used to hash the stale file,
     // delete it, and return ModelCorrupt without ever contacting the source — so
     // a device went from "working old model" to "no model" in a single call.
     test(
@@ -725,7 +725,7 @@ void main() {
   });
 
   group('receipt hygiene', () {
-    // Regression for R0-F4: the corrupt-download path deleted the staging file
+    // Regression: the corrupt-download path deleted the staging file
     // but not the receipt, so a receipt could outlive its artifact and then bless
     // the next same-sized file to appear at that path.
     test(
@@ -819,7 +819,7 @@ void main() {
       expect(downloader.lastToken, isNull);
     });
 
-    // R0-F3: the token is paired with the *configured* model's source. A
+    // The token is paired with the *configured* model's source. A
     // committed-source descriptor must not carry it to its own host — in the
     // private-mirror configuration that would ship the mirror's credential to
     // huggingface.co.
@@ -945,8 +945,8 @@ void main() {
         await storage.prepare();
         // What a killed process leaves behind: partial staging *directories*
         // (this build's shape — bare-suffix and nonced), and partial staging
-        // *files* at the root, which is what a Task 1.7 build staged as. The
-        // file shape matters most (R0-F2): an upgraded device can carry a
+        // *files* at the root, which is what earlier builds staged as. The
+        // file shape matters most: an upgraded device can carry a
         // gigabyte-scale `<fileName>.part.<nonce>` that nothing but this sweep
         // will ever touch again.
         await storage.stagingDir(descriptor).create(recursive: true);
@@ -988,12 +988,12 @@ void main() {
         expect(
           legacyBare.existsSync(),
           isFalse,
-          reason: '1.7-shaped staging files must be swept too (R0-F2)',
+          reason: 'legacy-shaped staging files must be swept too',
         );
         expect(
           legacyNonced.existsSync(),
           isFalse,
-          reason: '1.7-shaped staging files must be swept too (R0-F2)',
+          reason: 'legacy-shaped staging files must be swept too',
         );
       },
     );
@@ -1183,7 +1183,7 @@ void main() {
     );
   });
 
-  group('file sets (Task 2.0)', () {
+  group('file sets', () {
     /// Deterministic per-file bodies, so any file's pin can be computed or
     /// deliberately broken independently of its set-mates.
     Uint8List bodyOf(String name) =>

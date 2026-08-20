@@ -1,4 +1,4 @@
-/// Task 1.10 — the `llm_golden` snapshot suite.
+/// The `llm_golden` snapshot suite.
 ///
 /// Six scripted scenarios are driven through the **real** retrieval router, the
 /// real prompt compiler, the real agent loop, the real guard and the real
@@ -7,7 +7,7 @@
 /// faked thing is the model, because it is the only non-deterministic thing:
 /// a golden over the device engine would be a flake generator.
 ///
-/// **What a golden buys that the unit suites do not.** Tasks 1.2–1.9 assert
+/// **What a golden buys that the unit suites do not.** The unit suites assert
 /// *properties* — this prompt contains that marker, that payload reached the next
 /// turn. A golden asserts the **whole artefact**, which is the only assertion
 /// that notices a change nobody thought to write a property about: a reworded
@@ -27,7 +27,7 @@
 ///   `transcript_snapshot.dart` lists what is deliberately left out.
 ///
 ///   **And that guard is not uniform**, which the first version of this sentence
-///   glossed as "breaks all six goldens at once" (review finding R0-F7). It holds
+///   glossed as "breaks all six goldens at once". It holds
 ///   for the top-level and per-turn keys, which every golden has. Below them it
 ///   thins out with coverage: invocations per golden are 1, 1, 4, **0**, 2, 2, so
 ///   the invocation and outcome keys are guarded by five of six; rejections are
@@ -91,7 +91,7 @@ void main() {
       database: db,
       source: _TextSeedSource(shippedJson),
     ).ensureSeeded();
-    // **The production tool set, not a subset — Task 2.3.** This registry is what
+    // **The production tool set, not a subset.** This registry is what
     // builds the loop's `ToolCallGuard`, so the set of known names is part of what
     // the goldens pin: a near-miss the guard canonicalises depends on which names
     // exist. A golden suite running one tool while the app ships two would stop
@@ -167,8 +167,8 @@ void main() {
   // ---------------------------------------------------------------------------
 
   group('TC-GOLD-01 snapshot match', () {
-    test('e102_native_tool_call — the spec\'s §5.2 walkthrough', () async {
-      // The AC's scenario. Fault code resolves structurally, one document is
+    test('e102_native_tool_call — the canonical walkthrough', () async {
+      // The demo's scenario. Fault code resolves structurally, one document is
       // compiled, the model emits a native call for the SKU the manual names,
       // the real database answers, and the second turn is asked with that answer
       // embedded.
@@ -196,7 +196,7 @@ void main() {
       // name the model misspelled and the guard canonicalised, and the
       // out-of-stock payload shape. `BELT-330-DRV` is seeded at zero on purpose.
       //
-      // The inquiry is 1.2's hostile string, so this golden also pins the
+      // The inquiry is the sanitizer suite's hostile string, so this golden also pins the
       // sanitizer's terms and `PromptCompiler.escapeQuotes` — the inquiry block
       // is the one place the technician's own quotes reach the prompt.
       final run = await runScenario(
@@ -229,7 +229,7 @@ void main() {
       expect(invocation.renamedFrom, 'GetLocalPartsInventory');
       expect(invocation.call.name, GetPartsInventoryTool.toolName);
       expect(invocation.outcome.payload['in_stock'], 0);
-      // The echo is dropped on this path (1.9's R0-F5/R1-F1): the second prompt
+      // The echo is dropped on this path: the second prompt
       // must not contain a marker-mangled copy of the JSON the model got right.
       expect(
         run.result.turns[1].prompt,
@@ -256,7 +256,8 @@ void main() {
       verifyGolden(scenario: 'no_manual_match', snapshot: run.snapshot);
 
       // The premise: the no-match branch is only meaningful if retrieval really
-      // came back empty. `OR`-joined FTS terms match generously (1.2's note), so
+      // came back empty. `OR`-joined FTS terms match generously (the sanitizer's
+      // own caveat), so
       // an inquiry that *looks* unrelated often still hits a document.
       expect(run.retrieval.entries, isEmpty);
       expect(
@@ -269,18 +270,18 @@ void main() {
 
     test('iteration_cap — four tool turns and a stop', () async {
       // Each turn calls a *different* SKU, so the repeat short circuit is not
-      // what ends this run — the cap is. (1.9's TC-AGENT-LOOP-02 makes the same
+      // what ends this run — the cap is. (TC-AGENT-LOOP-02 makes the same
       // distinction; a golden that conflated them would pin the wrong bound.)
       // Four turns also makes this one of the two widest transcripts in the suite
       // — though **not the widest**, which the first version of this comment
-      // claimed while calling it "the context ceiling" (review finding R0-F4).
+      // claimed while calling it "the context ceiling".
       // Measured over the committed goldens, widest prompt in characters: e102
       // 1485, e305 1363, iteration_cap **2347**, no_manual_match 620,
       // recovery_ladder **2363**, unknown_tool_repeated 2012.
       //
       // The two leaders are 16 characters apart — 0.7% — so they are effectively
       // tied, and **no causal account of the margin is offered here**, because the
-      // first attempt at one was wrong twice over (R1-F1): it said "a rejection
+      // first attempt at one was wrong twice over: it said "a rejection
       // block plus three tool blocks outweigh four tool blocks" when the widest
       // prompts (turn 3 in both) carry *one rejection plus two* tool blocks against
       // *three*, and the direction does not follow from block composition anyway —
@@ -291,8 +292,9 @@ void main() {
       // would be a third guess. The figures are the result; the explanation was
       // never needed.
       //
-      // Neither is a ceiling either: 1.9 measured ~2900 for a *two*-document prompt
-      // and every scenario here retrieves exactly one document.
+      // Neither is a ceiling either: the agent-loop suite measured ~2900 for a
+      // *two*-document prompt and every scenario here retrieves exactly one
+      // document.
       final run = await runScenario(
         scenario: 'iteration_cap',
         inquiry: 'cabin vibrating, E-102',
@@ -437,7 +439,7 @@ void main() {
     });
 
     test('form_autofill — the work order recorded and a question asked', () async {
-      // **Task 2.3's path through the same pipeline**, which is the whole reason
+      // **The form-autofill path through the same pipeline**, which is the whole reason
       // this suite exists rather than a set of assertions: what is pinned is the
       // *artefact* — the tool the model was declared, the arguments it sent, the
       // payload it got back, and the exact text of the next turn's prompt with
@@ -813,8 +815,8 @@ final List<String> _scenarioNames = [
 ///
 /// Subclasses the real compiler and rewrites its output, rather than editing
 /// `prompt_compiler.dart` by hand and describing the result in prose. That
-/// distinction is the whole of this repo's recorded lesson about claims: a
-/// mutation nobody can re-run is a sentence, and this one runs on every CI push.
+/// distinction is this repo's whole lesson about claims: an experiment
+/// nobody can re-run is a sentence, and this one runs on every CI push.
 class _DriftedPromptCompiler extends PromptCompiler {
   const _DriftedPromptCompiler();
 

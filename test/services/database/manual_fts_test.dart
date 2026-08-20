@@ -7,7 +7,7 @@ import 'package:field_ops_copilot/services/database/tables/manual_fts_table.dart
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart';
 
-/// Unit-tier coverage for Task 1.2 (FTS5 manual index + query sanitizer).
+/// Unit-tier coverage for the FTS5 manual index and its query sanitizer.
 ///
 /// Every test runs against a real encrypted database file and the real FTS5
 /// module from the bundled SQLite3MultipleCiphers build — the tokenizer, the
@@ -118,7 +118,7 @@ void main() {
 
   group('migration', () {
     // The manual table, its FTS5 index and the sync triggers arrive in schema
-    // v2; an app installed before Task 1.2 upgrades into them. Exercised by
+    // v2; an app installed at schema v1 upgrades into them. Exercised by
     // tearing the v2 objects back down, rewinding user_version, and reopening.
     test('v1 database upgrades to the manual index', () async {
       final file = File('${tempDir.path}/migrate.db');
@@ -248,7 +248,7 @@ void main() {
     });
 
     test('the code column is not part of the FTS index', () async {
-      // The invariant the plan asks for: `code` is a structured column, so it is
+      // The invariant: `code` is a structured column, so it is
       // not an fts5 column at all. A column-filtered MATCH against it is a
       // hard error, which is the only way to assert its absence — note that the
       // code *text* is still findable through prose (the symptom paragraphs
@@ -295,7 +295,8 @@ void main() {
 
     test('a code stored in lower case is still found', () async {
       // The one scenario that justifies COLLATE NOCASE over a plain `.equals()`:
-      // a write path that skips `upsertManualEntries` (Task 1.3's seeder is the
+      // a write path that skips `upsertManualEntries` (the first-launch seeder
+      // is the
       // obvious candidate) and therefore never canonicalises the code. Inserting
       // through `into(...)` deliberately bypasses normalizeFaultCode, so the
       // collation is the only thing that can make this match.
@@ -378,7 +379,8 @@ void main() {
     });
 
     test('term-list search is guarded for a router that consumes the code', () async {
-      // The Task 1.4 shape: extract "E-102", handle it structurally, search on
+      // The retrieval router's shape: extract "E-102", handle it structurally,
+      // search on
       // what is left. When the input is *only* a code there is nothing left, and
       // an empty MATCH expression is an FTS5 syntax error — so the guard has to
       // live on this path too, not only on the raw-text one.
@@ -454,7 +456,7 @@ void main() {
 
     test('a hand-built term with syntax in it cannot inject', () async {
       // terms() can never emit a double quote, but sanitizeTerms is public for
-      // the retrieval router (Task 1.4), so it normalises what it is given: the
+      // the retrieval router, so it normalises what it is given: the
       // quote is stripped rather than merely escaped, and the operator word ends
       // up quoted like any other term.
       expect(
@@ -555,8 +557,9 @@ void main() {
 }
 
 /// The three Apex-9 manual entries from `assets/elevator_manual_seed.json`.
-/// Inlined rather than loaded from the asset bundle: asset loading is Task 1.3's
-/// concern, and these tests must pin the index behaviour, not the loader.
+/// Inlined rather than loaded from the asset bundle: asset loading is the
+/// seeder's concern, and these tests must pin the index behaviour, not the
+/// loader.
 final List<ManualEntryRow> _seedEntries = [
   ManualEntryRow(
     id: 'apex_9_err_102',

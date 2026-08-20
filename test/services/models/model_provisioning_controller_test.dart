@@ -10,7 +10,7 @@ import 'package:field_ops_copilot/services/models/providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// The rule under test is the one Task 1.7 wrote down and left unenforced: a
+/// The rule under test is one the provisioner documented but left unenforced: a
 /// **download** that failed its digest must not be retried, because the provisioner
 /// will happily transfer the same 2.6GB and fail identically. Everything else here
 /// exists to make sure that rule is not applied too widely — a transport failure or a
@@ -332,8 +332,8 @@ void main() {
   );
 
   test('a tap during an in-flight transfer does not re-enter', () async {
-    // Rewritten after review, because the first version passed for a reason that had
-    // nothing to do with this task's code. It called `provision()` twice in a row and
+    // Rewritten, because the first version passed for a reason that had nothing
+    // to do with the controller's code. It called `provision()` twice in a row and
     // asserted the downloader opened once — but the *provisioner* already guarantees
     // that: calls are serialised, and by the time the second one runs the first has
     // installed a receipt, so `statusOf == ready` short-circuits before the network.
@@ -384,8 +384,8 @@ void main() {
     // Waited on deterministically rather than pumped. `pumpEventQueue()` was enough when
     // this file runs alone and *not* when the whole suite runs concurrently.
     //
-    // The precise cause, corrected after review because the first post-mortem named the
-    // wrong assertion: `provision()` sets `ProvisioningRunning` *before* its first
+    // The precise cause — the first post-mortem named the wrong
+    // assertion: `provision()` sets `ProvisioningRunning` *before* its first
     // `await`, so the state check could not have been what failed. What raced was
     // `openCount == 1` — the pump returned before the provisioner had worked through
     // `storage.prepare()` and `statusOf()` (real filesystem I/O) to reach `open()`.

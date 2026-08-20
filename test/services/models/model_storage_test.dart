@@ -7,8 +7,8 @@ import 'package:field_ops_copilot/services/models/model_storage.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Unit-tier coverage for model storage layout, the Task 2.0 file-set status
-/// rules, the legacy-layout migration and the no-backup marking.
+/// Unit-tier coverage for model storage layout, the file-set status rules,
+/// the legacy-layout migration and the no-backup marking.
 ///
 /// The platform mechanism is injected rather than sniffed from `Platform`, so
 /// these assertions run identically on the macOS dev host and the Linux CI
@@ -81,8 +81,8 @@ void main() {
     test('artifact, staging and receipt paths are distinct and namespaced', () {
       final storage = storageWith(const NoopBackupExclusion());
 
-      // Task 2.0: each model owns a subdirectory named by its id, so two
-      // models' files cannot collide however they are named.
+      // Each model owns a subdirectory named by its id, so two models'
+      // files cannot collide however they are named.
       expect(
         storage.installedFile(descriptor).path,
         '${storage.root.path}/gemma-test/gemma-test.litertlm',
@@ -201,7 +201,7 @@ void main() {
   });
 
   group('legacy layout migration', () {
-    test('a Task 1.7 flat install is moved into the model directory and stays '
+    test('a legacy flat install is moved into the model directory and stays '
         'ready without re-hashing', () async {
       final storage = storageWith(const NoopBackupExclusion());
       await storage.prepare();
@@ -213,7 +213,7 @@ void main() {
         uri: 'https://example.invalid/w.litertlm',
         sha256Hex: digest,
       );
-      // The flat layout 1.7 wrote: file and receipt sidecar directly in root.
+      // The legacy flat layout: file and receipt sidecar directly in root.
       await File('${storage.root.path}/${file.fileName}').writeAsBytes(bytes);
       await File(
         '${storage.root.path}/${file.fileName}.receipt.json',
@@ -240,9 +240,9 @@ void main() {
     test(
       'an orphaned legacy receipt is removed rather than kept forever',
       () async {
-        // A 1.7 receipt whose artifact is gone (freed by hand for disk space).
-        // Nothing reads the root location any more, so without cleanup it is
-        // permanent clutter — the non-blocking Round 0 review note.
+        // A legacy receipt whose artifact is gone (freed by hand for disk
+        // space). Nothing reads the root location any more, so without cleanup
+        // it is permanent clutter.
         final storage = storageWith(const NoopBackupExclusion());
         await storage.prepare();
         final orphan = File(

@@ -7,7 +7,7 @@ import 'package:field_ops_copilot/services/inference/providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Unit-tier coverage for Task 1.11's third deferred wiring: loading the weights
+/// Unit-tier coverage for the warm-up wiring: loading the weights
 /// before the UI needs to be interactive.
 ///
 /// **What this suite can and cannot bind.** It can bind the state machine, the
@@ -22,7 +22,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// `integration_test/demo_flow_test.dart`.
 ///
 /// The engines here wrap `FakeLlmEngine` rather than replacing it, for the reason
-/// Task 1.9's `_RecordingEngine` gives: Task 1.8 made the fake enforce every rule
+/// the agent-loop suite's `_RecordingEngine` gives: the fake enforces every rule
 /// the device engine does, at the same moment, and a hand-written stub silently
 /// drops all of them.
 void main() {
@@ -107,8 +107,8 @@ void main() {
     });
 
     // **This test used to assert `initializeCalls == 1` and it proved nothing.**
-    // Deleting `state is EngineReady` from the guard left it green (mutation M11
-    // survived), because the *other* protection catches it: the second call
+    // Deleting `state is EngineReady` from the guard left it green,
+    // because the *other* protection catches it: the second call
     // reaches the `engine.isReady` branch below and adopts the engine without
     // reloading. Two overlapping mechanisms, one test, and the test was bound by
     // the one it was not written for.
@@ -305,8 +305,8 @@ void main() {
       );
     });
 
-    // **And it must not leave the state claiming a load is in progress**, which was
-    // a non-blocking review note with a real consequence: `warmUp` returns early on
+    // **And it must not leave the state claiming a load is in progress**, an
+    // easy-to-miss case with a real consequence: `warmUp` returns early on
     // `EngineLoading`, so an escaped `Error` made every later call a no-op and the
     // screen read "Loading model weights — this takes a few seconds" forever. The
     // outer `on Object` sets a terminal state and **rethrows**, so the `Error` still
@@ -368,7 +368,7 @@ void main() {
 /// to finish without becoming ready.
 ///
 /// Delegates rather than reimplements: everything except the lifecycle knobs is the
-/// real fake, so the rules Task 1.8 put there still apply.
+/// real fake, so the rules built into it still apply.
 class _GatedEngine implements LlmEngine {
   _GatedEngine({this.initializeError, this.readyAfterInitialize = true});
 

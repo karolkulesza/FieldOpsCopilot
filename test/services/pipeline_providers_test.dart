@@ -14,12 +14,12 @@ import 'package:field_ops_copilot/services/rag/providers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Unit-tier coverage for Task 1.11's second deferred wiring: the retrieval and
-/// agent halves of the slice, finally given production call sites.
+/// Unit-tier coverage for the retrieval and agent halves of the app's wiring,
+/// at their production call sites.
 ///
-/// Tasks 1.4 and 1.5 shipped `RetrievalRouter`, `PromptCompiler`, `ToolRegistry`
-/// and `GetPartsInventoryTool` with no provider and no call site, and five task
-/// rows record the same reason: each needs a `DatabaseService`, and a database
+/// `RetrievalRouter`, `PromptCompiler`, `ToolRegistry` and
+/// `GetPartsInventoryTool` all started life with no provider and no call site,
+/// for one shared reason: each needs a `DatabaseService`, and a database
 /// needed a key. These tests are about the *wiring*, not about those classes —
 /// their behaviour is bound by `retrieval_router_test.dart`,
 /// `prompt_compiler_test.dart` and `tool_registry_test.dart`. What is new here is
@@ -85,7 +85,7 @@ void main() {
   group('toolRegistryProvider', () {
     // Order matters and is asserted rather than sorted: it is the order the model
     // is told about them, and `providers.dart` puts the grounded lookup first
-    // deliberately. Task 2.3 added the second one.
+    // deliberately. The form tool is the newer of the two.
     test('declares both tools to the model, lookup first', () async {
       final registry = await container().read(toolRegistryProvider.future);
 
@@ -150,10 +150,11 @@ void main() {
     });
   });
 
-  // Task 1.11's brief calls the composition "three lines", and this is those three
-  // lines through the resolved providers rather than through hand-built objects.
-  // It is a wiring test, so it asserts the *shape* the loop is handed — the spec's
-  // §5.2 markers, the retrieved procedure and the technician's words — and leaves
+  // The whole composition is three lines, and this is those three lines through
+  // the resolved providers rather than through hand-built objects.
+  // It is a wiring test, so it asserts the *shape* the loop is handed — the
+  // prompt's section markers, the retrieved procedure and the technician's
+  // words — and leaves
   // the prompt's exact text to `prompt_compiler_test.dart` and the six goldens.
   group('the composition', () {
     test('router → compiler produces a grounded prompt for the loop', () async {

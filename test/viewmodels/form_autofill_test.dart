@@ -11,8 +11,8 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Task 2.3's unit tier: the agent's `form_updates` map reaching the Riverpod
-/// form controllers, and everything that decides whether it should.
+/// Form autofill at the unit tier: the agent's `form_updates` map reaching the
+/// Riverpod form controllers, and everything that decides whether it should.
 ///
 /// **TC-VM-FORM-01 is driven through the real loop, not through the viewmodel's
 /// front door**, and that is the difference between asserting the criterion and
@@ -182,10 +182,9 @@ void main() {
     });
   });
 
-  // **Review finding R0-F4.** `applyPayload` used to pass `rejected: const []`,
-  // so the state field that carries the model's refusals was populated only by
-  // unit tests of the model itself — dead on every production path, under a
-  // docstring naming a reader.
+  // `applyPayload` used to pass `rejected: const []`, so the state field that
+  // carries the model's refusals was populated only by unit tests of the model
+  // itself — dead on every production path, under a docstring naming a reader.
   group('refusals reach the form', () {
     test('a refused field lands on the state beside the recorded one', () {
       final c = container();
@@ -210,7 +209,7 @@ void main() {
     });
 
     // A call whose *every* field was refused records nothing and is still worth
-    // reporting — before R0-F4 this returned `false` and vanished.
+    // reporting — this used to return `false` and vanish.
     test(
       'a call that recorded nothing but refused something still applies',
       () {
@@ -264,9 +263,9 @@ void main() {
     });
   });
 
-  // **Review finding R1-F3.** `AgentLoop` re-announces a repeated call with the
-  // outcome it recorded the first time, and R0-F4's wiring appended its refusals
-  // again — so one refused field counted twice and the panel line said "2 values".
+  // `AgentLoop` re-announces a repeated call with the outcome it recorded the
+  // first time, and the refusal wiring above appended its refusals again — so one
+  // refused field counted twice and the panel line said "2 values".
   group('a replayed call is not a second recording', () {
     /// The same call on two turns, which is what the loop's repeat short circuit
     /// is for and what `unknown_tool_repeated` is in the goldens for.

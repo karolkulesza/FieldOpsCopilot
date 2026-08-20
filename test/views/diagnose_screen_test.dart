@@ -23,7 +23,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Widget coverage for Task 1.11's demo screen.
+/// Widget coverage for the demo screen.
 ///
 /// **The suite is split in two, and the split is the important design decision
 /// here.**
@@ -49,8 +49,8 @@ import 'package:flutter_test/flutter_test.dart';
 ///
 /// Three properties are worth more than the rest:
 ///
-/// 1. **Nothing animates while the model works.** Task 1.8 measured the UI isolate
-///    stalling 1445–1728ms during the load and dropping 5–8 frames while tokens
+/// 1. **Nothing animates while the model works.** On the demo device the UI
+///    isolate stalls 1445–1728ms during the load and drops 5–8 frames while tokens
 ///    stream, so a progress indicator freezes or stutters exactly when it is being
 ///    watched — and a frozen indicator reads as a crash. Asserted structurally, by
 ///    walking the tree for `ProgressIndicator`, rather than by trusting the
@@ -328,7 +328,7 @@ void main() {
       }
     });
 
-    // Task 1.9 emits `AgentToolCallStarted` before the query is in flight
+    // The agent loop emits `AgentToolCallStarted` before the query is in flight
     // specifically so this can be on screen while it runs. Static, like everything
     // else here.
     testWidgets('shows the lookup in flight, naming the SKU, without animating', (
@@ -404,9 +404,9 @@ void main() {
   });
 
   group('the completed-lookup line', () {
-    // Task 1.5 kept "we do not carry this part" and "we carry it and have none"
-    // apart in the payload; the screen has to keep them apart on the page, or that
-    // distinction was made for nothing.
+    // The inventory tool keeps "we do not carry this part" and "we carry it and
+    // have none" apart in the payload; the screen has to keep them apart on the
+    // page, or that distinction was made for nothing.
     testWidgets('in stock reads as a count and a location', (tester) async {
       await pumpState(
         tester,
@@ -487,7 +487,7 @@ void main() {
     });
 
     // `_ToolActivity` had a generic fallback for an unrecognised tool and
-    // `_summarise` did not, so the first of the spec's §2.2 tools would have
+    // `_summarise` did not, so the next tool this app registers would have
     // rendered as "null: null in stock" — worse than useless, because it looks
     // like data.
     testWidgets(
@@ -573,7 +573,7 @@ void main() {
     });
 
     // **Every other fixture in this file uses markup-free answer text, and that is
-    // exactly how the R0-F5 fix broke the device test unnoticed.** With raw and
+    // exactly how the Markdown formatter broke the device test unnoticed.** With raw and
     // formatted identical, nothing here could tell a `Text` from a `Text.rich` or a
     // consumed delimiter from a shown one. This fixture carries the real thing —
     // the shape both device runs returned — so the host suite can.
@@ -610,8 +610,8 @@ void main() {
       expect(bold, ['Parts Check:', 'BRK-990-XP']);
     });
 
-    // The gap Task 1.10 handed this task: `emptyResponse` has no golden, and this
-    // screen is the thing that has to render all three.
+    // The gap the golden suite leaves open: `emptyResponse` has no golden, and
+    // this screen is the thing that has to render all three.
     testWidgets('emptyResponse says so instead of showing a blank panel', (
       tester,
     ) async {
@@ -711,7 +711,7 @@ void main() {
   });
 
   group('failures are screens, not exceptions', () {
-    // Task 1.3 asked for a malformed asset to fail loudly. Loudly means legible:
+    // The seeding layer wants a malformed asset to fail loudly. Loudly means legible:
     // the message names the problem, the button is dead, and nothing was thrown.
     testWidgets('a startup failure is rendered and disables Diagnose', (
       tester,
@@ -763,7 +763,7 @@ void main() {
     });
   });
 
-  group('R0-F1: weights becoming ready re-triggers the warm-up', () {
+  group('weights becoming ready re-triggers the warm-up', () {
     // **The screen's only production `warmUp` call used to be a one-shot post-frame
     // callback**, and this screen is `MaterialApp.home` under a `StatelessWidget`,
     // so `initState` never runs twice. An operator who used the download button
@@ -881,7 +881,7 @@ void main() {
     });
   });
 
-  group('R0-F2: the advice-vs-failure decision is isDiagnosis', () {
+  group('the advice-vs-failure decision is isDiagnosis', () {
     // Four documents claimed the screen branched on `isDiagnosis` while `_Body`
     // re-derived the decision from `stopReason` itself. The duplication is gone;
     // these bind that the *treatment* follows the one question, across all three
@@ -910,8 +910,8 @@ void main() {
         },
       );
 
-      // **The icon alone was not enough**: mutation M20 — making the header colour
-      // a constant `primary` while the icon still followed `isDiagnosis` — survived
+      // **The icon alone was not enough**: making the header colour
+      // a constant `primary` while the icon still followed `isDiagnosis` survived
       // the icon test. Colour is the louder of the two signals in a recording, so
       // it gets its own guard, tied to the icon rather than to a theme literal so
       // the two cannot drift apart.
@@ -966,7 +966,7 @@ void main() {
     });
   });
 
-  group('R0-F6: the panel follows a streaming answer', () {
+  group('the panel follows a streaming answer', () {
     // A bare `SingleChildScrollView` stays pinned at offset 0 while its content
     // grows, so the measured 1401-character device answer streamed below the fold —
     // which breaks "the live token stream is the progress indicator" exactly when
@@ -1010,20 +1010,20 @@ void main() {
         greaterThan(0),
         reason: 'the fixture must actually overflow, or this proves nothing',
       );
-      // **Exact equality**, which is review finding R1-F4. This was
+      // **Exact equality.** This was
       // `closeTo(…, 24)`, justified by a "measured lag on this fixture of 16px" —
-      // and the reviewer showed the assertion holds exactly, so the tolerance was
-      // 24px of slack guarding nothing. The 16px was real when I saw it but was an
+      // but the assertion holds exactly, so the tolerance was
+      // 24px of slack guarding nothing. The 16px was real when first seen but was an
       // artefact of the fixture at the time, which re-pumped the whole tree instead
       // of pushing state through the notifier; that fixture no longer exists, so
-      // neither does the lag. A tolerance justified by an unreproducible number is
-      // the species of claim round 0 was about.
+      // neither does the lag. A tolerance justified by an unreproducible number
+      // guards nothing and hides a real regression inside its slack.
       expect(after.offset, after.position.maxScrollExtent);
     });
 
-    // **The property the code claimed and did not have** — review finding R1-F1.
-    // The reviewer's probe: scroll to the top mid-generation, push one more token,
-    // and the panel returned to exactly `maxScrollExtent`. A technician re-reading a
+    // **The property the code claimed and did not have.**
+    // The probe that showed it: scroll to the top mid-generation, push one more
+    // token, and the panel returned to exactly `maxScrollExtent`. A technician re-reading a
     // procedure while the answer is still arriving was yanked back on every token.
     testWidgets('a reader who scrolls up mid-generation is not yanked back', (
       tester,
@@ -1088,18 +1088,18 @@ void main() {
       );
     });
 
-    // **The same property as R1-F1, driven by a finger instead of a `jumpTo`** —
-    // review finding **R12-F0**, reported from the device as "I could not scroll
-    // anything" while the answer streamed.
+    // **The same property as above, driven by a finger instead of a `jumpTo`** —
+    // a regression found on device: "I could not scroll anything" while the
+    // answer streamed.
     //
-    // R1-F1's test above scrolls with `_scroll.jumpTo(0)`. That is a *programmatic*
+    // The test above scrolls with `_scroll.jumpTo(0)`. That is a *programmatic*
     // move with no drag to dispose, so it exercises the offset guard and never the
     // mechanism that actually failed: `jumpTo` opens with `goIdle()`, `goIdle`
     // disposes the active drag, and every token therefore cancelled the reader's
     // in-flight gesture before it could travel the `_followSlack` pixels that would
     // have released the follow. The panel was not merely overruling the reader, it
     // was unscrollable — and that presents as the app being busy, which is why it
-    // survived eleven review rounds, two device runs and a screen recording.
+    // survived the whole host suite, two device runs and a screen recording.
     //
     // Measured with the matched control below: the *same* 288px drag moves the
     // offset when no tokens arrive and does not when they do. Both directions are
@@ -1109,8 +1109,9 @@ void main() {
     // default.** `flutter_test` reports `TargetPlatform.android`, which selects
     // `ClampingScrollPhysics`; the iPad this ships on uses `BouncingScrollPhysics`,
     // where a drag past the extent is allowed and settles back. Binding one and
-    // shipping the other is the same "bound at the wrong width" mistake R12-F0 was,
-    // one level over — so the platform is a parameter rather than an assumption.
+    // shipping the other is the same tested-one-thing-shipped-another mistake the
+    // drag defect was, one level over — so the platform is a parameter rather
+    // than an assumption.
     // `variant:` rather than setting `debugDefaultTargetPlatformOverride` by hand:
     // the binding asserts foundation debug vars are unset at the *end of the test
     // body*, before `addTearDown` runs, so the hand-rolled version fails on its own
@@ -1172,7 +1173,8 @@ void main() {
           await tester.pumpAndSettle();
           final afterDrag = _panelScrollController(tester).offset;
 
-          // One more token *after* the finger lifts. This is R1-F1's own property,
+          // One more token *after* the finger lifts. This is the yank-back
+          // property above,
           // asserted for the first time against a scroll a reader actually performed:
           // the drag flag is clear by now, so the offset guard alone must hold the
           // position.
@@ -1200,7 +1202,7 @@ void main() {
           streaming.$2,
           lessThan(streaming.$1),
           reason:
-              'the reader dragged 288px while tokens arrived; before R12-F0 the '
+              'the reader dragged 288px while tokens arrived; before the fix the '
               'offset ended pinned to maxScrollExtent because each token disposed '
               'the drag',
         );
@@ -1209,7 +1211,7 @@ void main() {
           streaming.$2,
           reason:
               'and the token after the finger lifted must not haul them back — '
-              'R1-F1, from a real drag rather than a jumpTo',
+              'the yank-back guard, from a real drag rather than a jumpTo',
         );
       },
       variant: const TargetPlatformVariant({
@@ -1218,13 +1220,14 @@ void main() {
       }),
     );
 
-    // **The other half of R12-F0's claim: releasing the follow must be reversible.**
+    // **The other half of the drag fix's claim: releasing the follow must be
+    // reversible.**
     // `_readerIsDragging` clears on any `ScrollEndNotification`, and the comment on
     // it says a reader who returns to the bottom resumes following. Nothing bound
     // that — `TestGesture.moveBy` defaults to `timeStamp: Duration.zero`, so no test
     // in this file produces a ballistic scroll at all, and a flag that latched true
     // after a fling would disable following silently and forever. That would be a
-    // worse defect than the one R12-F0 fixed.
+    // worse defect than the one the drag fix removed.
     testWidgets('a reader who flings back to the bottom follows again', (
       tester,
     ) async {
@@ -1264,10 +1267,10 @@ void main() {
       final back = _panelScrollController(tester);
       expect(
         back.offset,
-        // `closeTo`, not equality — Task 2.3. The fling settles through a
+        // `closeTo`, not equality. The fling settles through a
         // *ballistic simulation*, so where it lands is arithmetic over the
         // panel's extent rather than a `jumpTo`, and changing the panel's height
-        // (2.3 gave the work order two fifths of the column) moved the residue
+        // (the work-order panel takes two fifths of the column) moved the residue
         // from exactly 0 to 8e-13. Equality here was passing on the layout rather
         // than on the property. The property is "the reader is back at the
         // bottom", and the slack that governs the follow is 48 logical pixels, so
@@ -1291,8 +1294,8 @@ void main() {
       expect(after.offset, after.position.maxScrollExtent);
     });
 
-    // **The slack's value, bound in the direction that constrains it** — review
-    // finding R2-F4 measured that `_followSlack = 0` survived the suite, so nothing
+    // **The slack's value, bound in the direction that constrains it** — setting
+    // `_followSlack = 0` survived the suite, so nothing
     // held the constant except an upper bound. A reader who nudges up by less than a
     // line has not asked to stop following, and this is the case that says so.
     testWidgets('a nudge smaller than the slack keeps following', (
@@ -1409,9 +1412,9 @@ void main() {
     });
   });
 
-  // ------------------------------------------ guards the review found unbound
+  // --------------------------------------------- guards nothing was holding
 
-  group('R0-F9: guards with correct code and nothing holding them', () {
+  group('guards with correct code and nothing holding them', () {
     // The doc says "One line per refusal, counted rather than iterated", and the
     // README argues the count is the point — "silently hiding them would make a
     // four-turn run look like an inexplicably slow two-turn one". Every earlier test
@@ -1709,7 +1712,8 @@ ScrollController _panelScrollController(WidgetTester tester) => tester
 ///
 /// `turns` is a single real [AgentTurn] rather than an empty list, because
 /// `AgentRunResult` documents its turns as never empty and a fixture that
-/// contradicts the type it stands in for is the trap Task 1.8 recorded.
+/// contradicts the type it stands in for is a trap this repo has fallen into
+/// before.
 FieldJobState _doneWith({
   String answer = 'An answer.',
   AgentStopReason stopReason = AgentStopReason.answered,

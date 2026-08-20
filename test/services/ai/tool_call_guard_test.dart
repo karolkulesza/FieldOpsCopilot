@@ -10,16 +10,16 @@ import 'package:field_ops_copilot/services/database/database_initializer.dart';
 import 'package:field_ops_copilot/services/database/database_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Unit-tier coverage for Task 1.6's defensive tool-call guard.
+/// Unit-tier coverage for the defensive tool-call guard.
 ///
 /// Two things this suite deliberately does *not* fake:
 ///
 /// * **the tool name** — every guard here is built from `registry.toolNames`, so a test
 ///   asserting that `Get_Local_Parts_Inventory` canonicalises is asserting it against
-///   the name Task 1.5 actually declares. A hard-coded name list would let this suite
+///   the name the registry actually declares. A hard-coded name list would let this suite
 ///   stay green while the registry renamed the tool out from under it.
 /// * **the consumer** — the composition group dispatches guarded calls through a real
-///   `ToolRegistry` over a real seeded database, because the whole claim of this task is
+///   `ToolRegistry` over a real seeded database, because the guard's whole claim is
 ///   that its output feeds straight into `dispatch`. Asserting the guard's return value
 ///   alone would leave that claim untested.
 void main() {
@@ -159,7 +159,7 @@ Once I have the stock level I'll finish the plan.''';
     });
 
     test('a decoded argument that jsonEncode would refuse is a failure', () {
-      // R0-F1: this path skipped the encodability probe because decoded arguments were
+      // This path once skipped the encodability probe because decoded arguments were
       // claimed "JSON-encodable by construction". A numeric literal that overflows a
       // double decodes to `Infinity`, which `jsonEncode` refuses — so the guard was
       // handing the agent loop the exact value whose serialisation throws an
@@ -198,9 +198,10 @@ Once I have the stock level I'll finish the plan.''';
     });
 
     test('an overflow inside arguments-as-a-JSON-string is caught too', () {
-      // R1-F4: the probe must run on the *decoded* arguments, not on the outer object.
+      // The probe must run on the *decoded* arguments, not on the outer object.
       // Both are `Map<String, Object?>` and both are in scope at the call site, so
-      // probing `object` instead compiles, passes every other test, and reopens R0-F1 for
+      // probing `object` instead compiles, passes every other test, and reopens the
+      // encodability hole for
       // exactly this shape — the outer object's `arguments` value is a `String`, which is
       // perfectly encodable, and nothing would look through it. The arguments-as-string
       // shape is the one `flutter_gemma`'s own SDK parser tolerates, so it is not exotic.
@@ -246,7 +247,7 @@ Once I have the stock level I'll finish the plan.''';
       // The fixture must be **unbalanced** for that to be what is tested. It was
       // `"A}B{C"` — a matched `}`…`{` pair, which a plain brace counter walks straight
       // through to the same closing brace, so the test was green with or without string
-      // tracking and its comment claimed otherwise (R0-F2). With `"A}B"` a counter closes
+      // tracking and its comment claimed otherwise. With `"A}B"` a counter closes
       // on the in-string `}`, the extent loses its final `}`, and `jsonDecode` rejects it.
       const text = '{"tool": "$toolName", "arguments": {"sku": "A}B"}}';
 
@@ -256,7 +257,7 @@ Once I have the stock level I'll finish the plan.''';
     test('the first name key and argument key in preference order win', () {
       // `_nameKeys` and `_argumentKeys` are documented "in preference order" and nothing
       // bound that: no other fixture carries two name keys or two argument keys, so
-      // reversing either list failed no test (R0-F3). An object with both has to resolve
+      // reversing either list failed no test. An object with both has to resolve
       // somehow, and this is the answer — `tool` before `name`, `arguments` before
       // `parameters`.
       const text =
@@ -327,7 +328,7 @@ Once I have the stock level I'll finish the plan.''';
     });
 
     test('extracted arguments survive a jsonEncode round-trip', () {
-      // Task 1.9 serialises the attempted call into the next turn, so this is a
+      // The agent loop serialises the attempted call into the next turn, so this is a
       // property of the guard's output rather than a curiosity.
       const text =
           '{"tool": "$toolName", "arguments": {"sku": "BRK-990-XP", '
@@ -452,7 +453,8 @@ Sure!! ###{{{ tool call:: get inventory ]] "sku" -> BRK-990-XP <<<
 
     test('the failure message never quotes the offending text back', () {
       // A malformed call is model output; echoing it verbatim into the next prompt
-      // invites the model to repeat it, and §3.2's device boundary includes the prompt.
+      // invites the model to repeat it, and the on-device privacy boundary
+      // includes the prompt.
       const secret = 'ACME-INTERNAL-9931';
       final result =
           guard.inspectText('{"tool": "$toolName", "arguments": "$secret"}')
@@ -576,7 +578,7 @@ Sure!! ###{{{ tool call:: get inventory ]] "sku" -> BRK-990-XP <<<
 
       expect(guardedCall(result).name, toolName);
       // `renamedFrom` on the text path could be deleted with all tests green while its
-      // native twin was bound ten times over (R0-F4) — a property with a correct
+      // native twin was bound ten times over — a property with a correct
       // implementation and no guard.
       expect((result as GuardedCall).renamedFrom, 'Get-Local-Parts-Inventory');
     });
@@ -768,8 +770,8 @@ Sure!! ###{{{ tool call:: get inventory ]] "sku" -> BRK-990-XP <<<
         ),
       );
 
-      // The name was canonicalised by the guard; the *SKU* casing is Task 1.3's
-      // normaliser, and both have to hold for this to land on the row.
+      // The name was canonicalised by the guard; the *SKU* casing is the database
+      // normaliser's, and both have to hold for this to land on the row.
       expect(outcome.payload['in_stock'], 2);
     });
 

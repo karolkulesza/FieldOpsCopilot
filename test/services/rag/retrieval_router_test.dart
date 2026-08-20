@@ -5,11 +5,11 @@ import 'package:field_ops_copilot/services/database/database_service.dart';
 import 'package:field_ops_copilot/services/rag/retrieval_router.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Unit-tier coverage for Task 1.4's retrieval router.
+/// Unit-tier coverage for the retrieval router.
 ///
 /// Every test runs against a real encrypted database seeded from the **shipped**
-/// `assets/elevator_manual_seed.json`, not from fixtures. Task 1.3 established
-/// why, and 1.4 depends on it harder than 1.3 did: TC-RAG-ROUTE-03's two expected
+/// `assets/elevator_manual_seed.json`, not from fixtures. The router depends on
+/// that even harder than the seeder does: TC-RAG-ROUTE-03's two expected
 /// ids are a property of that exact seed text and its porter stems, so a fixture
 /// would let the suite stay green while the bundled manual stopped producing
 /// them.
@@ -122,7 +122,7 @@ void main() {
     test(
       'the code hit leads because it is a code hit, not because bm25 agrees',
       () async {
-        // The AC's own input is a weak test of ordering, and a mutation proved it:
+        // The input above is a weak test of ordering, and a mutation proved it:
         // bm25 already ranks _305 top for "door belt squealing", so swapping the
         // merge to put the full-text leg first leaves the assertion above green.
         // This input separates the two properties. Full text ranks _305 then _102;
@@ -166,11 +166,11 @@ void main() {
     test(
       '"noise" matches nothing, so the OR join is what earns the recall',
       () async {
-        // Task 1.2 chose `OR` over `AND` specifically for this input and recorded
-        // that `"squealing" AND "noise"` returns zero rows. That claim is only
-        // interesting if "noise" is genuinely absent from the manual — pin it here,
-        // because if a future seed adds the word, this AC starts passing for a
-        // different reason than the one it was written for.
+        // The sanitizer chose `OR` over `AND` specifically for this input:
+        // `"squealing" AND "noise"` returns zero rows. That claim is only
+        // interesting if "noise" is genuinely absent from the manual — pin it
+        // here, because if a future seed adds the word, the test above starts
+        // passing for a different reason than the one it was written for.
         expect(await ftsOnly('noise'), isEmpty);
         expect(await ftsOnly('squealing'), hasLength(2));
       },
@@ -289,7 +289,7 @@ void main() {
     );
 
     test('a code repeated around another code is still cut everywhere', () async {
-      // R0-F3. The spans reach `_withoutSpans` grouped by canonical code, not in
+      // The spans reach `_withoutSpans` grouped by canonical code, not in
       // text order, so a code that repeats *around* another one produces
       // out-of-order starts — here `[0, 16, 8]`. Without the sort, the cursor has
       // already passed position 8 when that span arrives and the overlap branch
@@ -304,7 +304,7 @@ void main() {
     });
 
     test('a one- or two-letter word before a single digit is not a code', () async {
-      // R0-F4. This is what the two-digit floor actually excludes. `breaker 4A`
+      // This is what the two-digit floor actually excludes. `breaker 4A`
       // — which the pattern's doc used to credit to the floor — is out because of
       // the letter prefix instead, so it could never bind this. `to 8` can:
       // relax `\d{2,4}` to `\d{1,4}` and `torque to 8 Nm` yields the candidate
@@ -352,7 +352,7 @@ void main() {
     });
 
     test('route reports the full-text leg even when it adds no new row', () async {
-      // R0-F1. `route` used to derive the full-text leg from `entries.length >
+      // Regression. `route` used to derive the full-text leg from `entries.length >
       // codeHitIds.length`, which is silent exactly when every full-text hit is
       // also a code hit — the merged list grows by nothing. That bug shipped for
       // one commit and was fixed by recording `ftsHitIds`; nothing bound the fix,
@@ -387,7 +387,7 @@ void main() {
     });
 
     test('hostile punctuation reaches FTS as terms, not as syntax', () async {
-      // Task 1.2's TC-FTS-SAN-01 input, routed. The router adds a way to get this
+      // TC-FTS-SAN-01's input, routed. The router adds a way to get this
       // wrong that the sanitizer cannot catch: it edits the raw string before
       // sanitizing, so a bad span cut could produce text the sanitizer then turns
       // into a valid-but-wrong query, or the code could be forwarded unsanitized.
