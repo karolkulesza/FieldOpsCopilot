@@ -1,5 +1,5 @@
 /// The agent's offline warehouse lookup — the first tool in the registry, and the
-/// one the spec's §5.2 walkthrough calls.
+/// one the canonical parts-availability walkthrough calls.
 library;
 
 import '../../../engines/llm_engine.dart';
@@ -10,20 +10,20 @@ import '../base_tool.dart';
 
 /// Looks up one spare part in the local inventory by exact SKU.
 ///
-/// Thin by design: Task 1.3 built `DatabaseService.inventoryPartBySku` for this call
-/// site and put the three properties it needs *inside the query* rather than here —
+/// Thin by design: `DatabaseService.inventoryPartBySku` was built for this call
+/// site and puts the three properties it needs *inside the query* rather than here —
 /// the SKU is canonicalised with [normalizeSku] on the way in (trim + upper-case,
 /// because from here the argument arrives from the *model* in whatever casing the
 /// weights emitted), `inventory_parts.sku` is `COLLATE NOCASE` as a backstop for rows
 /// written past the normaliser, and the lookup goes through the primary-key index
 /// rather than a scan.
 ///
-/// **Scope note, because the spec is two-minded about this tool's signature.** §2.2
-/// describes `get_local_parts_inventory(sku_or_name)`, but the only lookup that
-/// exists is exact-SKU: a name search would need a different query (FTS over
+/// **Scope note.** An earlier sketch of this tool's signature was
+/// `get_local_parts_inventory(sku_or_name)`, but the only lookup that exists is
+/// exact-SKU: a name search would need a different query (FTS over
 /// `inventory_parts.name`, which is not indexed) and a different answer shape (several
-/// rows, or a disambiguation question — the spec's own §2.3 clarification loop). This
-/// tool declares `sku` only, which is what TC-TOOL-REG-01 and TC-TOOL-EXEC-01 specify.
+/// rows, or a disambiguation question back to the technician). This tool declares
+/// `sku` only, which is what TC-TOOL-REG-01 and TC-TOOL-EXEC-01 specify.
 /// Name search is a separate tool, not a widened parameter.
 class GetPartsInventoryTool extends AgentTool {
   GetPartsInventoryTool(this._database);
@@ -67,8 +67,8 @@ class GetPartsInventoryTool extends AgentTool {
   ///
   /// Two payload shapes, and the difference between them is load-bearing:
   ///
-  /// * **Found** — `{'sku': …, 'in_stock': n, 'aisle': …}`, exactly the three keys the
-  ///   spec's §5.2 tool-result example carries and TC-TOOL-EXEC-01 asserts. `sku`
+  /// * **Found** — `{'sku': …, 'in_stock': n, 'aisle': …}`, exactly the three keys
+  ///   TC-TOOL-EXEC-01 asserts. `sku`
   ///   echoes the **stored** row, not the model's spelling, so the next turn quotes the
   ///   canonical form back to the technician.
   /// * **Not found** — `{'sku': …, 'found': false}`. A distinct shape rather than
@@ -78,8 +78,8 @@ class GetPartsInventoryTool extends AgentTool {
   ///   a test can hold the two apart. The echoed `sku` is the canonicalised form —
   ///   what was actually looked up, not what the model typed.
   ///
-  /// `found: true` is deliberately absent from the success payload: the shape is pinned
-  /// by §5.2 and by the AC, and `in_stock`'s presence already discriminates.
+  /// `found: true` is deliberately absent from the success payload: the shape is
+  /// pinned by TC-TOOL-EXEC-01, and `in_stock`'s presence already discriminates.
   ///
   /// `aisle` is `null` when the row has no recorded location. Present-and-null rather
   /// than omitted, because an omitted key is indistinguishable from a tool that does not

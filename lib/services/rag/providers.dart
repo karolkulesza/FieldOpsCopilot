@@ -1,8 +1,8 @@
 /// Dependency-injection seam for the retrieval half of the slice.
 ///
-/// Tasks 1.2 and 1.4 built `RetrievalRouter` and `PromptCompiler` and left both
-/// without a production call site, for the reason recorded in five task rows: a
-/// router needs a `DatabaseService` and a database needed a key. Task 1.11's
+/// `RetrievalRouter` and `PromptCompiler` were both built without a production
+/// call site, for one recurring reason: a
+/// router needs a `DatabaseService` and a database needed a key.
 /// `seededDatabaseProvider` supplies one, so these are the two lines that were
 /// waiting.
 library;

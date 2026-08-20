@@ -53,7 +53,7 @@ class FtsQuerySanitizer {
   static String sanitize(String raw) => sanitizeTerms(terms(raw));
 
   /// Extracts the sanitized, still-unquoted terms from [raw], in input order and
-  /// capped at [maxTerms]. Exposed so the retrieval router (Task 1.4) can drop
+  /// capped at [maxTerms]. Exposed so the retrieval router can drop
   /// terms it has already handled — e.g. an extracted fault code — before
   /// building the expression with [sanitizeTerms].
   static List<String> terms(String raw) {
@@ -73,7 +73,7 @@ class FtsQuerySanitizer {
   /// list gets exactly the same treatment as raw text: syntax characters are
   /// stripped, a chunk with nothing searchable in it disappears entirely, and the
   /// [maxTerms] cap applies. That keeps this method safe for the retrieval router
-  /// (Task 1.4) to call with terms it assembled itself, and it is idempotent on
+  /// to call with terms it assembled itself, and it is idempotent on
   /// output from [terms] — re-normalising an already-normalised term is a no-op.
   ///
   /// Each surviving term becomes a quoted phrase. Inside an FTS5 string literal

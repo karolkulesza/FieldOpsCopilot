@@ -13,7 +13,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 
-/// Task 1.8's acceptance criteria — TC-LLM-LOAD-01, TC-LLM-GEN-01 and
+/// On-device inference acceptance criteria — TC-LLM-LOAD-01, TC-LLM-GEN-01 and
 /// TC-LLM-TOOLCALL-01 — on a real device, against real weights.
 ///
 /// ```sh
@@ -41,10 +41,11 @@ import 'package:integration_test/integration_test.dart';
 /// right tool and SKU. Decoding is greedy (`topK: 1`), so the run is reproducible
 /// without the assertions having to pin tokens.
 ///
-/// The run also prints the measurements Task 1.8 is expected to produce — load time,
-/// time to first token, tokens per second, resident footprint, and how long the UI
-/// isolate was ever blocked. Those are recorded in the sprint plan; they are printed
-/// rather than asserted because a threshold that fails on a cold cache or a warm
+/// The run also prints the figures this suite exists to produce — load time, time to
+/// first token, tokens per second, resident footprint, and how long the UI isolate
+/// was ever blocked. Those are recorded in `docs/on-device-inference.md`; they are
+/// printed rather than asserted because a threshold that fails on a cold cache or a
+/// warm
 /// device would be a flaky test pretending to be an NFR.
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -122,7 +123,7 @@ void main() {
             'model_provisioning_test.dart does *not* help: each suite '
             're-installs the app and wipes its data container.',
       // Present but unhashed against the current pin. Loading anyway is the one
-      // thing Task 1.7 exists to prevent.
+      // thing provisioning exists to prevent.
       (_, ModelInstallStatus.unverified) =>
         'weights are present but unverified against the pinned SHA-256 — run '
             'provisioning to verify them before loading',
@@ -281,7 +282,7 @@ void main() {
         switch (event) {
           case LlmToken(:final text):
             prose.write(text);
-          case LlmToolCall call:
+          case final LlmToolCall call:
             calls.add(call);
           case LlmDone():
             // Recorded, not `break`ed: a bare `break` here leaves the `switch`, not
@@ -310,7 +311,7 @@ void main() {
         isNotEmpty,
         reason:
             'no structured tool call arrived. If the model answered in prose '
-            'instead, the degraded path is Task 1.6\'s guard — but a Gemma 4 '
+            'instead, the degraded path is the tool-call guard — but a Gemma 4 '
             'bundle with tools_json should emit a native call here.',
       );
       final call = calls.firstWhere(
@@ -337,8 +338,8 @@ void main() {
   testWidgets(
     'a second turn does not inherit the first turn\'s history',
     (tester) async {
-      // Not an AC, but the property Task 1.9 will build on and the one most likely to
-      // break silently: `LlmEngine.generate` is contracted as a *stateless* turn, and
+      // Not an AC, but the property the agent loop is built on and the one most
+      // likely to break silently: `LlmEngine.generate` is contracted as a *stateless* turn, and
       // the fake behaves that way.
       //
       // The question matters more than the assertion. An earlier version asked for
@@ -411,8 +412,8 @@ const String _provisionFlag = 'FIELDOPS_TEST_PROVISION';
 
 const bool _provisionIfMissing = bool.fromEnvironment(_provisionFlag);
 
-/// The tool Task 1.5's registry will own, declared here in the shape the runtime
-/// requires so this task can prove native function calling before 1.5 exists.
+/// The tool the registry owns, declared here in the shape the runtime requires so
+/// this suite can prove native function calling on its own.
 final _inventoryTool = ToolDefinition(
   name: 'get_local_parts_inventory',
   description:
@@ -429,11 +430,11 @@ final _inventoryTool = ToolDefinition(
   ),
 );
 
-/// Stands in for Task 1.4's prompt compiler.
+/// Stands in for the prompt compiler.
 ///
-/// Copied in the shape §5.2 of the spec describes — a `[MANUAL DOCUMENT]` block from
-/// the E-102 seed entry, then the technician's inquiry — so that when 1.4 lands, this
-/// test's input is a compiler output rather than a rewrite.
+/// Copied in the shape the compiler emits — a `[MANUAL DOCUMENT]` block from the
+/// E-102 seed entry, then the technician's inquiry — so this test's input is a
+/// compiler output rather than a rewrite of one.
 const _groundedE102Prompt = '''
 You are an offline Field Service Assistant for Apex-9 smart elevators.
 Answer using ONLY the verified technical manual document below.

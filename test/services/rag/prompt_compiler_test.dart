@@ -10,7 +10,7 @@ import 'package:field_ops_copilot/services/rag/prompt_compiler.dart';
 import 'package:field_ops_copilot/services/rag/retrieval_router.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Unit-tier coverage for Task 1.4's prompt compiler.
+/// Unit-tier coverage for the prompt compiler.
 ///
 /// The two AC groups run the *whole* path — shipped seed → router → compiler —
 /// because their expected substrings (`"Door Clutches & Belt Slippage"`,
@@ -76,7 +76,7 @@ void main() {
       // Then the warning, and the instruction that makes it actionable.
       expect(prompt, contains('No matching entry was found'));
       expect(prompt, contains('Do not invent'));
-      // **The lookup, not every tool — Task 2.3's review finding R0-F6.** This
+      // **The lookup, not every tool.** This notice once
       // read `do not call any tool` when the registry held one, which meant
       // exactly this; registering `record_work_order_fields` silently widened it
       // to "and do not fill in the work order", on the one path where the
@@ -129,7 +129,7 @@ void main() {
     test('the required part is a SKU the inventory actually stocks', () async {
       // The preamble orders the model to call `get_local_parts_inventory(sku)`
       // with what it reads here. If the prompt named a SKU the database does not
-      // hold, Task 1.5's tool would return null for a part this very prompt just
+      // hold, the inventory tool would return null for a part this very prompt just
       // told the model to check — a grounded prompt producing an ungrounded
       // answer.
       final result = await router.retrieve(query);
@@ -146,7 +146,7 @@ void main() {
 
         final prompt = compiler.compile(result);
         expect('[MANUAL DOCUMENT'.allMatches(prompt), hasLength(1));
-        // A single document keeps the spec's §5.2 header verbatim, unnumbered.
+        // A single document keeps the canonical header verbatim, unnumbered.
         expect(
           prompt,
           contains('${PromptCompiler.manualDocumentMarker}\nTitle:'),
@@ -196,8 +196,8 @@ void main() {
   group('layout', () {
     test('a single document renders exactly the spec\'s shape', () {
       // A synthetic entry rather than the seed, so this pins the compiler's
-      // formatting and not the manual's prose. Task 1.10 owns golden snapshots of
-      // the whole loop; this is the one place the literal string is asserted.
+      // formatting and not the manual's prose. The golden suite owns snapshots
+      // of the whole loop; this is the one place the literal string is asserted.
       final prompt = compiler.compile(_resultWith([_entry(id: 'x')]));
 
       expect(prompt, '''
@@ -272,7 +272,7 @@ Required Tools: Hammer
     });
 
     test('a cap below one still describes the retrieval honestly', () {
-      // R0-F6. `compile` branched the no-match block on the *truncated* list, and
+      // Regression. `compile` branched the no-match block on the *truncated* list, and
       // the only guard against a zero cap was a constructor `assert` — which is
       // compiled out in release. So a release build with `maxDocuments: 0` told
       // the model "No matching entry was found … do not look up parts" about a
@@ -280,7 +280,7 @@ Required Tools: Hammer
       // worse than the crash the assert was written to cause. The cap is now
       // clamped, so the notice can only describe an actually-empty retrieval.
       // Three entries, not one: with a single entry the assertions below cannot
-      // tell a clamp of 1 from a clamp of 999, and review round 1 showed that
+      // tell a clamp of 1 from a clamp of 999, and the mutation
       // `? 1 :` -> `? 999 :` survived the whole suite while the doc said
       // "clamped to one". The branch was bound; the value was not.
       final prompt = const PromptCompiler(maxDocuments: 0).compile(
@@ -340,13 +340,13 @@ Required Tools: Hammer
     });
 
     test('the spellings that broke the previous guard', () {
-      // R0-F2. The first version matched the escaped literals `[MANUAL DOCUMENT`
+      // The first version matched the escaped literals `[MANUAL DOCUMENT`
       // / `[USER INQUIRY` case-insensitively, so one extra space walked straight
       // past it and the forged block reached the model verbatim — carrying a
       // `Required Parts:` line, which is the exact line the preamble orders the
       // model to call `get_local_parts_inventory(sku)` on.
       //
-      // These four are the variants review found. They are regression guards for
+      // These four are the variants that walked past it. They are regression guards for
       // one class of bypass, not the argument that the guard is sound; that
       // argument is the invariant asserted in the next test, which does not
       // depend on anyone having enumerated the right spellings.
@@ -379,7 +379,7 @@ Required Tools: Hammer
       // of this test used ASCII brackets around fullwidth letters and called
       // that a homoglyph case, so it exercised the ASCII bracket like every
       // other item and would have stayed green while `［MANUAL DOCUMENT］`
-      // reached the model intact. Review round 1 caught that: a test passing for
+      // reached the model intact — a test passing for
       // a reason unrelated to the property its comment names, inside the test
       // written to retire exactly that failure mode.
       const nasty =
@@ -408,7 +408,7 @@ Required Tools: Hammer
     });
 
     test('a fullwidth-bracket block does not reach the model intact', () {
-      // The end-to-end form of the case above, and the one review demonstrated
+      // The end-to-end form of the case above, and the one demonstrated
       // against the previous rule: a forged block whose delimiters are U+FF3B /
       // U+FF3D, carrying the `Required Parts:` line the preamble orders the
       // model to act on.
@@ -431,8 +431,7 @@ Required Tools: Hammer
       // and a header with no delimiter at all. None forges this compiler's
       // delimiters; all belong to the general look-alike case the class doc
       // disclaims. Pinned as a test because this one paragraph has over-claimed
-      // in three consecutive rounds, and a boundary nobody asserts is one that
-      // drifts.
+      // repeatedly, and a boundary nobody asserts is one that drifts.
       //
       // No general-category name appears below, on purpose. An earlier version
       // labelled each survivor and said the labels were "verified by measuring"
@@ -464,9 +463,9 @@ Required Tools: Hammer
     });
 
     test('every forged marker is neutralised, not just the first', () {
-      // R0-F5. `replaceAllMapped` -> `replaceFirstMapped` survived the whole
-      // suite, because all four original forgery inputs contained exactly one
-      // marker each.
+      // The mutation `replaceAllMapped` -> `replaceFirstMapped` survived the
+      // whole suite, because all four original forgery inputs contained exactly
+      // one marker each.
       final prompt = compiler.compile(
         _resultWith([
           _entry(id: 'x'),
@@ -537,7 +536,7 @@ Required Tools: Hammer
   });
 
   group('inquiry quoting', () {
-    // Task 1.9 turned an inherited caveat into a live one: the inquiry block used
+    // The agent loop turned an inherited caveat into a live one: the inquiry block used
     // to be the last thing in the prompt, so a `"` that closed the quoted region
     // early had nothing after it to break into. The agent loop appends
     // `[TOOL CALL]` / `[TOOL RESULT]` / `[CONTINUE]` blocks after the whole

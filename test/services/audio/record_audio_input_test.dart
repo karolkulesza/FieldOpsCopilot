@@ -5,7 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// What `RecordAudioInput` actually asks the plugin for.
 ///
-/// **This suite exists because of review finding R0-F7.** No test constructed a
+/// **This suite exists because nothing else bound the recording configuration.**
+/// No test constructed a
 /// `RecordAudioInput` at all — only its static `describeFormatMismatch` was
 /// covered — and six mutations to the configuration survived the whole suite,
 /// including `AudioEncoder.pcm16bits` → `aacLc`. That one matters more than any
@@ -83,7 +84,7 @@ void main() {
     });
 
     test('does not ask for effects the demo platform would ignore', () async {
-      // Noise suppression stays in Appendix A. `record_ios` 2.1.1 parses
+      // Noise suppression is deliberately out of scope. `record_ios` 2.1.1 parses
       // `noiseSuppress` and never reads it again, so requesting it would be a flag
       // that looks like a feature on the device this is demoed from.
       final input = RecordAudioInput();
@@ -160,8 +161,8 @@ void main() {
   });
 
   group('the coercion watcher, end to end', () {
-    // Closes the other half of review finding R0-F7, and shrinks handoff known
-    // concern 3: the *decision* was pure and tested, but the wiring from
+    // Closes the other half of the same coverage gap:
+    // the *decision* was pure and tested, but the wiring from
     // `setOnConfigChanged` through the callback to `onCoerced` was bound by
     // nothing, on the grounds that only a platform can trigger it. A platform can
     // be impersonated — the plugin registers its handler on
@@ -208,9 +209,8 @@ void main() {
     test('a substituted channel count reaches the caller', () async {
       // The reachable case, and it is Android's: `FormatCodecSelector` calls
       // `adjustToDeviceCapabilities` before its raw-PCM early return, which
-      // rewrites `numChannels` from the routed input's advertised counts. Review
-      // finding R0-F3 — an earlier claim that neither platform mutates the format
-      // was false here.
+      // rewrites `numChannels` from the routed input's advertised counts. An
+      // earlier claim that neither platform mutates the format was false here.
       await deliverConfig(
         encoder: 'pcm16bits',
         sampleRate: 16000,

@@ -1,9 +1,10 @@
 /// The agent's question to the technician, and the overlay that puts it.
 ///
-/// The spec's §2.3 third bullet: *"If mandatory fields are missing or ambiguous
-/// … the agent dynamically prompts the user: 'Which filter did you use: the
-/// 12-inch mesh or the 14-inch carbon?' using a text-to-speech speaker or inline
-/// UI selector."* Spoken output is Task 2.5; this is the selector.
+/// The design intent this implements: if mandatory fields are missing or
+/// ambiguous, the agent dynamically prompts the user — *"Which filter did you
+/// use: the 12-inch mesh or the 14-inch carbon?"* — through a text-to-speech
+/// speaker or an inline UI selector. Spoken output is future work; this is the
+/// selector.
 ///
 /// **It is modal, which is a decision rather than the default.** An inline card
 /// would be less intrusive, and it was rejected because of where this arrives: the
@@ -162,8 +163,8 @@ Future<String?> showClarificationDialog(
 ///   [WorkOrderFormViewModel.answerClarification] can both clear the request while
 ///   the dialog is up, so a cleared request pops the route rather than leaving a
 ///   question about a form that has moved on. **The same clearing one frame
-///   *earlier* is a different state and used to be handled as if it were this one**
-///   — see [_ClarificationHostState._routeUp], review finding R0-F2. Note that
+///   *earlier* is a different state and must not be handled as if it were this
+///   one** — see [_ClarificationHostState._routeUp]. Note that
 ///   `reset()` has no caller in `lib/` today, so the citation above is a capability
 ///   rather than a live path; it is named because it is what the next "new job"
 ///   button will use.
@@ -174,8 +175,8 @@ Future<String?> showClarificationDialog(
 ///   the state holds.
 ///
 /// **A fifth state was implemented here and then removed, and it is recorded
-/// because the removal is the finding.** Mutation M19 survived, and reasoning about
-/// why produced a plausible three-step sequence — a question answered from outside
+/// because the removal is the lesson.** A surviving mutation prompted reasoning
+/// that produced a plausible three-step sequence — a question answered from outside
 /// the dialog pops the route; the agent's next turn asks something else while that
 /// pop animates; the tail then dismisses the new question. A `_closing` flag and a
 /// request-specific dismissal were written for it. **The sequence cannot happen**,
@@ -184,7 +185,7 @@ Future<String?> showClarificationDialog(
 /// still painting its exit transition, but [_present] has already resumed with
 /// `choice: null` and `pending: null`. There is no window for a later state change
 /// to land in. The flag was reverted rather than kept as an unreachable guard with
-/// a story attached, which is what 1.3 and 1.8 each paid a round for.
+/// a story attached.
 class ClarificationHost extends ConsumerStatefulWidget {
   const ClarificationHost({required this.child, super.key});
 
@@ -204,12 +205,13 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
 
   /// Whether a dialog route is actually on the navigator right now.
   ///
-  /// **Distinct from `_showing != null`, and that gap is review finding R0-F2.**
+  /// **Distinct from `_showing != null`, and the gap between the two was a real
+  /// defect.**
   /// [_showing] is assigned in the listener; the route is pushed one post-frame
   /// callback later. A clarification cleared inside that window took the
   /// `next == null` branch, found `_showing` non-null and popped the **root
   /// navigator** — with no dialog on the stack, so it popped the app's home route
-  /// and left a blank screen. Measured by the reviewer against `reset()`; latent
+  /// and left a blank screen. Measured against `reset()`; latent
   /// only because `reset()` has no caller in `lib/` yet, which is the sort of thing
   /// that stops being true the moment someone adds a "new job" button.
   ///
@@ -247,11 +249,11 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
           Navigator.of(context, rootNavigator: true).pop();
         } else {
           // Cleared in the window between the assignment above and the push one
-          // frame later — review finding R0-F2. There is nothing to pop, and
+          // frame later. There is nothing to pop, and
           // popping anyway takes the app's home route with it. Cancel the pending
           // presentation instead: the callback queued for it is still on the
-          // frame, and it identifies itself by the notifier it was scheduled with
-          // (R1-F2), so clearing `_showing` here is what makes it a no-op.
+          // frame, and it identifies itself by the notifier it was scheduled
+          // with, so clearing `_showing` here is what makes it a no-op.
           _showing = null;
           showing.dispose();
         }
@@ -262,9 +264,9 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
         showing.value = next;
         return;
       }
-      // **The notifier is captured and handed to the callback — review finding
-      // R1-F2.** R0-F2's cancel branch clears `_showing` without unscheduling the
-      // callback queued for it, so a question arriving in the same frame took the
+      // **The notifier is captured and handed to the callback, and the identity
+      // matters.** The cancel branch above clears `_showing` without unscheduling
+      // the callback queued for it, so a question arriving in the same frame took the
       // "nothing open" path and scheduled a *second* presentation. Both then ran,
       // both found a non-null `_showing`, and both pushed a route: two stacked
       // dialogs, and answering the top one stranded the other over a state with no
@@ -282,8 +284,8 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
 
   Future<void> _present(ValueNotifier<ClarificationRequest> scheduled) async {
     // Not the current presentation: this callback was queued for a question that
-    // has since been cancelled (R0-F2's branch, which disposed [scheduled]) or
-    // replaced. Returning is the whole of the fix for R1-F2 — whoever replaced it
+    // has since been cancelled (the branch that disposed [scheduled]) or
+    // replaced. Returning is the whole of the fix — whoever replaced it
     // owns the disposal, so there is nothing to clean up here.
     if (!identical(_showing, scheduled)) return;
     final showing = scheduled;
@@ -294,7 +296,7 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
     }
 
     // Set *before* the await and cleared after it, so the listener can tell a
-    // pending presentation from a route that is actually up — R0-F2.
+    // pending presentation from a route that is actually up.
     _routeUp = true;
     final choice = await showClarificationDialog(context, showing);
     _routeUp = false;
@@ -314,8 +316,8 @@ class _ClarificationHostState extends ConsumerState<ClarificationHost> {
     // is already gone. Checking the state is what tells them apart.
     //
     // **It is belt-and-braces, not a guard, and that is measured rather than
-    // assumed** — mutation M19 replaced this condition with `true` and the suite
-    // stayed green. It is unreachable in the third case because the state is
+    // assumed** — replacing this condition with `true` leaves the suite
+    // green. It is unreachable in the third case because the state is
     // already `null` there, and in the first two the condition is always true. What
     // it costs is one comparison; what it buys is that a future closing path which
     // *does* leave a question pending cannot silently clear it. Recorded as unbound

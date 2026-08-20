@@ -6,7 +6,7 @@ import 'package:field_ops_copilot/services/audio/pcm_audio_format.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:record/record.dart';
 
-/// Unit-tier coverage for Task 2.1.
+/// Unit-tier coverage for microphone capture.
 ///
 /// The device AC (**TC-MIC-01**) asserts the one thing only hardware can answer:
 /// that a real microphone produces real PCM. Everything *around* that — the
@@ -87,9 +87,8 @@ void main() {
       // And the recorder is handed back. `watchFormat` can succeed and
       // `startStream` fail after the platform has already taken the microphone,
       // and a caller told "unavailable" holds no session to stop with — so
-      // without this the input stays open until `dispose`. Raised as a
-      // non-blocking note in review round 0; the first fix for it shipped with
-      // no test and a mutation emptying the cleanup survived.
+      // without this the input stays open until `dispose`. The first fix for it
+      // shipped with no test, and a mutation emptying the cleanup survived.
       expect(input.stopCalls, 1);
     });
 
@@ -99,8 +98,8 @@ void main() {
       // the original reason, not a second failure from the tidying up.
       //
       // An `Exception` specifically, because the recovery is `on Exception` and
-      // not `on Object` — Task 1.5's rule, that an `Error` means the app is broken
-      // and must not be swallowed. The first draft of this test threw a
+      // not `on Object` — this project's rule, that an `Error` means the app is
+      // broken and must not be swallowed. The first draft of this test threw a
       // `StateError` and failed, which is that convention working rather than a
       // defect in the code.
       final input = _ScriptedAudioInput()
@@ -135,9 +134,9 @@ void main() {
     test('drops empty buffers rather than forwarding them', () async {
       // **iOS** can produce one, when a tap buffer carries no frames:
       // `Pcm16BitsEncoder.encode` returns `[bytes]` with `bytes` empty, and
-      // `handleTap` sends every element. Android cannot — review finding R0-F8.3
-      // refuted that half of an earlier version of this comment, because
-      // `RecordThread` guards `if (buffer.isNotEmpty())` before encoding. One
+      // `handleTap` sends every element. Android cannot, which refutes that half of
+      // an earlier version of this comment: `RecordThread` guards
+      // `if (buffer.isNotEmpty())` before encoding. One
       // platform is reason enough: an empty frame is not audio, and a recogniser
       // would have to special-case it if it arrived.
       final harness = await _Harness.start();
@@ -255,7 +254,7 @@ void main() {
       // an app already at 1.67GB RSS. Worth binding on its own account.
       //
       // It is **not** what kills the `hasListener` mutation, and saying so is the
-      // point of this comment. Review finding R0-F4 attributed that mutation's
+      // point of this comment. An earlier reading attributed that mutation's
       // survival to this case, on the reasoning that with no listener the backlog
       // would drain into the controller's unbounded pending-event buffer. Measured,
       // that is not what happens: a single-subscription `StreamController` reports
@@ -307,9 +306,8 @@ void main() {
     });
 
     test('audio dropped after the consumer cancels is still reported', () async {
-      // What actually binds `_pump`'s `hasListener` clause, and the corrected
-      // mechanism for review finding R0-F4. Measured on a single-subscription
-      // `StreamController`:
+      // What actually binds `_pump`'s `hasListener` clause — the corrected mechanism
+      // for the case above. Measured on a single-subscription `StreamController`:
       //
       //   before any listen : hasListener=false isPaused=true
       //   while listening   : hasListener=true  isPaused=false
@@ -467,16 +465,15 @@ void main() {
       await harness.session.stop();
 
       // The `frames` future completing at all is the closure; the content is the
-      // drain. Task 2.2 depends on both: `SttEngine.transcribe` consumes the
-      // stream and cannot emit a final transcript until it ends.
+      // drain. Speech recognition depends on both: `SttEngine.transcribe` consumes
+      // the stream and cannot emit a final transcript until it ends.
       expect(_flatten(await harness.frames), [1, 2, 3, 4]);
       expect(harness.session.isCapturing, isFalse);
       expect(harness.input.stopCalls, 1);
     });
 
     test('stop is prompt when the plugin closes its stream', () async {
-      // Review finding R0-F5. Deleting the `_rawClosed.complete()` in `onDone`
-      // left all 51 tests green — including the grace-period test below, which
+      // Deleting the `_rawClosed.complete()` in `onDone` left all 51 tests green — including the grace-period test below, which
       // asserts `elapsed >= drainGrace` and therefore passes *more* easily when
       // every stop waits the full 250ms. Nothing asserted that the normal case is
       // fast. On a dictation UI a quarter-second added to the end of every
@@ -573,10 +570,9 @@ void main() {
     });
 
     test('the format watcher is registered before the stream opens', () async {
-      // Review finding R1-F3: this ordering was documented as load-bearing in the
-      // round that introduced the comment, and swapping the two statements left all
-      // 73 tests green — a documented invariant with no guard, which is what R0-F7
-      // was. On Android `notifyConfigChanged` fires immediately after the platform
+      // This ordering was documented as load-bearing when the comment was written,
+      // and swapping the two statements left all 73 tests green — a documented
+      // invariant with no guard, which is this file's recurring failure. On Android `notifyConfigChanged` fires immediately after the platform
       // call `startStream` awaits resolves, so a watcher registered afterwards can
       // miss the only notification there will be.
       final input = _ScriptedAudioInput();
@@ -592,9 +588,9 @@ void main() {
     });
 
     test('the session getter tracks the running capture', () async {
-      // Review finding R1-F4. This getter was touched by no test: I had claimed it
-      // was "covered incidentally by the busy path", and it is not — that path reads
-      // the `_session` field directly and never the getter. Reducing it to
+      // This getter was touched by no test. It was claimed to be "covered
+      // incidentally by the busy path", and it is not — that path reads the
+      // `_session` field directly and never the getter. Reducing it to
       // `return _session;` left all 73 green.
       final input = _ScriptedAudioInput();
       final capture = MicCapture(input: input);
@@ -651,9 +647,8 @@ void main() {
 
     test('a plugin that never closes its stream does not hang stop', () async {
       // The drain waits for the plugin's stream close. If that close never comes,
-      // an unbounded wait would freeze whatever tapped "stop" — Task 1.11's
-      // lesson, that a seam which hangs reports nothing and a frozen UI reads as
-      // a crash. Bound instead, and the audio already captured still goes out.
+      // an unbounded wait would freeze whatever tapped "stop" — and a seam which
+      // hangs reports nothing, so a frozen UI reads as a crash. Bound instead, and the audio already captured still goes out.
       final input = _ScriptedAudioInput()..closesStreamOnStop = false;
       final capture = MicCapture(input: input);
       final session = ((await capture.start()) as MicCaptureStarted).session;
@@ -853,8 +848,8 @@ void main() {
   });
 
   group('the stall watchdog', () {
-    // Review findings R0-F1/R0-F2. This is the *only* "the microphone went away"
-    // condition either real platform produces. `record` registers no `onDone` on
+    // This is the *only* "the microphone went away" condition either real platform
+    // produces. `record` registers no `onDone` on
     // the platform stream and neither native side ever ends its event channel, so
     // a stream that closes by itself is not a thing; what iOS actually does on an
     // audio-session interruption is pause the engine and never resume it, leaving
@@ -910,13 +905,13 @@ void main() {
     });
 
     test('it is on by default, at five seconds', () async {
-      // Review finding R1-F1. Two mutations survived all 73 tests: deleting the
-      // default outright (making it `null`, i.e. the watchdog off everywhere) and
+      // Two mutations survived all 73 tests: deleting the default outright (making it `null`, i.e. the watchdog off everywhere) and
       // changing it to 500 seconds. Neither is observable, because `_Harness`
       // deliberately opts out with `null` and every watchdog test passes an explicit
       // duration — so no test ever constructed a `MicCapture` with the watchdog on
-      // by default. The entire R0-F2 remedy could have been disabled in production
-      // with a green suite, which is R0-F7's shape on the feature R0-F2 asked for.
+      // by default. The entire watchdog could have been disabled in production with
+      // a green suite — the same documented-invariant-with-no-guard shape as above,
+      // on the very feature that shape had already been found in.
       expect(
         MicCapture(input: _ScriptedAudioInput()).stallTimeout,
         const Duration(seconds: 5),
@@ -933,8 +928,7 @@ void main() {
       // plumbing while leaving `MicCapture.stallTimeout` correct, is killed by the
       // value assertion together with the millisecond-scale tests below. Five
       // seconds on every CI run for coverage that was already there is not a trade
-      // worth making, and the reviewer had run the suite forty-six times to find
-      // that out.
+      // worth making, and it took forty-six suite runs to find that out.
       final input = _ScriptedAudioInput();
       final capture = MicCapture(input: input);
 
@@ -945,8 +939,8 @@ void main() {
     });
 
     test('a capture that never receives a single buffer still faults', () async {
-      // Review finding R1-F2, and the worst form of the failure the watchdog exists
-      // for: a microphone that produced nothing at all. Deleting the arm in
+      // The worst form of the failure the watchdog exists for: a microphone that
+      // produced nothing at all. Deleting the arm in
       // `_attach` left all 73 tests green, because every other watchdog test emits a
       // buffer first and `_onRawBuffer` re-arms — so what they bound was the
       // *re*-arm. This case is reachable on both platforms: on iOS an interruption
@@ -1274,17 +1268,16 @@ class _ScriptedAudioInput implements AudioInput {
 /// `await harness.frames` resolves through.
 ///
 /// A test that expects a `MicCaptureFault` and does not get one must fail in
-/// seconds rather than hang to `flutter_test`'s 30s default. Review finding R3-F1:
-/// I reported bounding two such waits and had bounded one, and the consequence was
-/// measurable — the reviewer's row that broke the fault path spent most of its wall
-/// clock in the wait I had missed. Named once here so the next one cannot drift, and
+/// seconds rather than hang to `flutter_test`'s 30s default. Two such waits were
+/// once reported as bounded when only one was, and the consequence was measurable:
+/// the mutation row that broke the fault path spent most of its wall clock in the
+/// wait that had been missed. Named once here so the next one cannot drift, and
 /// so `grep` over this file answers "are they all bounded?" with a single count.
 ///
 /// The drains came second, and the sentence that reached for them came before they
 /// did: this doc said "every wait for a fault **or a stream close**" while the
-/// close waits were still unbounded — flagged in review round 4 as a non-blocking
-/// note, and fixed by making the claim true rather than by narrowing it, because
-/// the residue was worth removing. It is what made this file's worst-case mutation
+/// close waits were still unbounded. Fixed by making the claim true rather than by
+/// narrowing it, because the residue was worth removing. It is what made this file's worst-case mutation
 /// row cost minutes: an edit that stops the stream ever closing left thirteen
 /// drains waiting 30s each.
 ///

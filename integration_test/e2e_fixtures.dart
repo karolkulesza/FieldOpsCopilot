@@ -18,7 +18,7 @@
 ///    hydraulic term as the out-of-domain word for an elevator manual was
 ///    simply wrong.
 /// 2. **Stop words match.** `the`, `on` and `is` each retrieve entries on their
-///    own, because Task 1.2's sanitizer joins terms with `OR` and FTS5's
+///    own, because the FTS query sanitizer joins terms with `OR` and FTS5's
 ///    `porter` tokenizer removes no stop words. So the fixture would have
 ///    matched even with `hydraulic` removed — and so does almost any English
 ///    sentence. See the README's note; that is a retrieval finding, not a
@@ -30,7 +30,7 @@ const String e2eGroundedInquiry = 'cabin vibrating, E-102';
 
 /// An inquiry the manual genuinely has no entry for.
 ///
-/// Same input Task 1.4's TC-RAG-COMP-01 uses, and for the same reason — it is
+/// Same input TC-RAG-COMP-01 uses, and for the same reason — it is
 /// the one phrasing verified to leave both retrieval legs empty against the
 /// shipped seed. It reads less like something a technician would type than the
 /// fixture it replaced; that is the trade, and the alternative is a test whose

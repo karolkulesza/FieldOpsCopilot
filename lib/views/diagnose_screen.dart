@@ -1,11 +1,10 @@
 /// The demo screen: typed inquiry → Diagnose → live tokens → grounded answer.
 ///
-/// This is the artefact Task 1.11 exists to produce — the thing that gets
-/// screen-recorded — so a handful of decisions here are about the recording as
-/// much as about the UI.
+/// This is the screen the demo recording captures, so a handful of decisions
+/// here are about the recording as much as about the UI.
 ///
 /// **Nothing on this screen animates while the model works, and that is
-/// deliberate.** Task 1.8 measured two things on the demo device (iPad Air M4,
+/// deliberate.** Two things were measured on the demo device (iPad Air M4,
 /// iOS 26.5, Metal): the UI isolate stalls **1445–1728ms** while the weights load,
 /// and it drops **5–8 frames** (77–135ms worst gap) while tokens stream. A
 /// progress indicator during either one freezes or stutters — and a frozen
@@ -19,8 +18,8 @@
 /// unambiguous evidence of work, it cannot stutter in a way that reads as a hang,
 /// and it is the single most convincing thing in the recording. (One exception is
 /// out of scope and stays: `ModelReadinessBanner` shows a determinate bar while
-/// *downloading* weights. A download is network I/O with no UI-isolate stall, and
-/// that widget is Task 1.7's.)
+/// *downloading* weights. A download is network I/O with no UI-isolate stall, so
+/// a determinate bar there is safe.)
 ///
 /// **All three [AgentStopReason]s render differently.** The loop authors truthful
 /// non-empty text for each, so a screen could render all three identically and
@@ -65,7 +64,7 @@ abstract final class DiagnoseKeys {
   /// The database or the seed could not be prepared — the app cannot retrieve.
   static const Key startupFailure = Key('diagnose-startup-failure');
 
-  /// The microphone toggle. Task 2.3.
+  /// The microphone toggle.
   static const Key dictateButton = Key('diagnose-dictate-button');
 
   /// The line saying what dictation is doing, or why it cannot.
@@ -84,7 +83,7 @@ abstract final class DiagnoseKeys {
       Key('diagnose-outcome-${reason.name}');
 }
 
-/// One screen: the whole Tier 1 slice.
+/// One screen: the whole inquiry-to-answer slice.
 class DiagnoseScreen extends ConsumerStatefulWidget {
   const DiagnoseScreen({super.key});
 
@@ -106,15 +105,14 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
   /// transcript — the state carries what was heard, this carries what it is being
   /// added to, and neither has to know about the other.
   ///
-  /// **`null` also means "released", and that is review finding R0-F1.** The field
-  /// is not read-only while the microphone is open, because a technician watching
-  /// `FALK CODE` land has to be able to fix it — and until R0-F1 that was a claim
-  /// the code refuted: [_onDictation] rebuilds the whole line from `base +
-  /// transcript` on **every** state change, so a correction was overwritten by the
-  /// next partial, and by the capture merely ending. Measured by the reviewer, not
-  /// argued.
+  /// **`null` also means "released", and the release exists for a demonstrated
+  /// reason.** The field is not read-only while the microphone is open, because a
+  /// technician watching `FALK CODE` land has to be able to fix it — but
+  /// [_onDictation] rebuilds the whole line from `base + transcript` on **every**
+  /// state change, so without a release a correction was overwritten by the next
+  /// partial, and by the capture merely ending. Measured, not argued.
   ///
-  /// The rule now is the one the comment always claimed: **typing takes the
+  /// The rule is: **typing takes the
   /// field.** An edit made while a capture is running releases the mirror (this
   /// goes `null`, so [_onDictation] returns) and stops the capture, in that order —
   /// stopping first would flush a final transcript through the mirror and clobber
@@ -141,8 +139,8 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
       }
     });
 
-    // **And again whenever weights become ready, which is the fix for review
-    // finding R0-F1.** The callback above is one-shot, and this screen is
+    // **And again whenever weights become ready.**
+    // The callback above is one-shot, and this screen is
     // `MaterialApp.home` under a `StatelessWidget`, so `initState` never runs
     // twice. Without this listener an operator who used the download button
     // `ModelReadinessBanner` offers got a screen showing "Model ready" from the
@@ -161,15 +159,15 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
     // every transition into `ready`: `warmUp` returns immediately when the state is
     // already `EngineLoading` or `EngineReady`, so the common path — weights
     // already present at launch — costs one early return.
-    // The LLM's family instance specifically (Task 2.0 made the status provider
+    // The LLM's family instance specifically (the status provider is
     // per-model): the STT set becoming ready changes nothing about the engine,
     // and warming up on its edge would be a no-op fired for the wrong reason.
     ref.listenManual(
       modelInstallStatusProvider(ref.read(activeLlmDescriptorProvider).id),
       (previous, next) {
-        // `next.value`, not the `valueOrNull` the review's suggested fix used —
+        // `next.value`, not `valueOrNull` —
         // Riverpod 3's `AsyncValue` exposes a nullable `value` and no `valueOrNull`,
-        // so the suggestion as written does not compile. `ModelReadinessBanner`
+        // so `valueOrNull` does not compile here. `ModelReadinessBanner`
         // already reads `status.value`, which is how the shape was confirmed rather
         // than guessed.
         if (next.value != ModelInstallStatus.ready) return;
@@ -189,8 +187,8 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
   /// See [_dictationBase]: an edit during a capture releases the mirror and then
   /// stops the capture. The order is load-bearing — `stop()` flushes the
   /// recogniser's last utterance, and a mirror still attached would write
-  /// `base + that` over the words just typed, which is R0-F1 arriving through the
-  /// other door.
+  /// `base + that` over the words just typed — the same overwrite the release
+  /// exists to prevent, arriving through the other door.
   void _onInquiryEdited() {
     if (_dictationBase != null &&
         ref.read(dictationControllerProvider).isActive) {
@@ -361,8 +359,8 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
                           //
                           // A `suffixIcon` rather than another button in the row
                           // beside the microphone: the row is already tight at
-                          // the demo device's width, and Task 2.3 has one
-                          // recorded overflow from adding chrome to this column.
+                          // the demo device's width, and adding chrome to this
+                          // column has already caused one recorded overflow.
                           suffixIcon: _inquiry.text.isEmpty
                               ? null
                               : IconButton(
@@ -379,7 +377,7 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
                         // `onChanged` fires for a *user* edit only — never for the
                         // programmatic write in [_onDictation] — which is what
                         // makes it safe to treat it as "the technician took the
-                        // field" (R0-F1).
+                        // field".
                         onChanged: (_) => _onInquiryEdited(),
                       ),
                     ),
@@ -419,7 +417,7 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
                 ),
                 const SizedBox(height: 16),
                 // Three parts to two, and the split is what makes the form fill
-                // *visible* — Task 2.3's whole demo is fields populating while the
+                // *visible* — the demo moment is fields populating while the
                 // answer streams, which a collapsed section would hide. The panel
                 // is outside the answer's scroll view for the reason
                 // `work_order_form_panel.dart` gives.
@@ -439,13 +437,13 @@ class _DiagnoseScreenState extends ConsumerState<DiagnoseScreen> {
 ///
 /// **A toggle rather than press-and-hold**, which is the one interaction decision
 /// here and it is made for the technician rather than for the test: this app's
-/// persona is someone in heavy gloves (§2.1), and holding a soft key steady for
+/// persona is someone in heavy gloves, and holding a soft key steady for
 /// fifteen seconds through a glove is exactly the thing gloves are bad at. A
 /// toggle also makes the "stop" moment observable, which press-and-hold leaves to
 /// a pointer-up nothing records.
 ///
 /// **Static in every state, like everything else on this screen.** No pulsing
-/// record dot: Task 1.8 measured the UI isolate dropping 5–8 frames while tokens
+/// record dot: the UI isolate measurably drops 5–8 frames while tokens
 /// stream, and a recogniser decode step runs on its own isolate but the *state
 /// updates* land here — an animation that stutters exactly when the microphone is
 /// working reads as the microphone failing.
@@ -466,11 +464,10 @@ class _DictateButton extends ConsumerWidget {
 
     return IconButton.filledTonal(
       key: DiagnoseKeys.dictateButton,
-      // **Live during `starting` too**, which it was not. The comment here used to
-      // argue that a second tap in that window "would reach `start`'s own re-entry
-      // guard and do nothing, which reads as a dead button" — true when it was
-      // written, and no longer: review findings R1-F1 and R2-F1 gave `start` a
-      // cancellation edge, so a stop during the load now genuinely stops. With the
+      // **Live during `starting` too.** A second tap in that window once did
+      // nothing — it only reached `start`'s own re-entry guard, which reads as a
+      // dead button — but `start` now has a cancellation edge, so a stop during
+      // the load genuinely stops. With the
       // wait made visible (it is 1227ms of microphone plus 458ms of model on the
       // demo device), a button that cannot be taken back during it is worse than
       // one that can.
@@ -620,7 +617,7 @@ class _EngineStatusRow extends StatelessWidget {
 /// A startup failure — a malformed seed asset, or a key that does not open the
 /// existing database.
 ///
-/// Rendered rather than thrown, because Task 1.3 asked for a malformed asset to
+/// Rendered rather than thrown, because a malformed asset is required to
 /// fail *loudly*, and a grey screen with a stack trace in the console is quiet.
 /// The message is included: both causes are build or configuration mistakes, and
 /// the person who can fix them is the person looking at the screen.
@@ -662,9 +659,9 @@ class _StartupFailure extends StatelessWidget {
 /// Everything about the current diagnosis: what grounded it, what the agent did,
 /// and the answer.
 ///
-/// **Stateful only to follow the stream, which is review finding R0-F6.** The panel
-/// was a bare `SingleChildScrollView` pinned at offset 0 while the content extent
-/// grew, so a long answer streamed *below the fold*: the measured device answer is
+/// **Stateful only to follow the stream.** Without following, the panel is a bare
+/// `SingleChildScrollView` pinned at offset 0 while the content extent
+/// grows, so a long answer streams *below the fold*: the measured device answer is
 /// 1401 characters in a panel that also carries the grounding line, a divider and a
 /// completed-lookup line. That breaks the claim this whole screen rests on — "the
 /// live token stream is the progress indicator" — precisely when the answer gets
@@ -684,12 +681,11 @@ class _ResultPanelState extends State<_ResultPanel> {
 
   /// Whether a finger is on the panel right now.
   ///
-  /// **This exists because [R1-F1]'s fix closed the case its test simulates and not
-  /// the case the finding described** — review finding **R12-F0**, found on device
-  /// by a technician who reported "I could not scroll anything" while the answer
-  /// streamed, which reads as the app being busy rather than as a defect.
+  /// **The offset check below is necessary and was not sufficient** — found on
+  /// device by a tester who reported "I could not scroll anything" while the
+  /// answer streamed, which reads as the app being busy rather than as a defect.
   ///
-  /// The offset check below is necessary and was not sufficient. `jumpTo` begins
+  /// The mechanism: `jumpTo` begins
   /// with `goIdle()` (`scroll_position_with_single_context.dart`), and `goIdle`
   /// **disposes the active drag**. So every token cancelled the reader's in-flight
   /// gesture before it could accumulate the [_followSlack] pixels that would have
@@ -698,10 +694,10 @@ class _ResultPanelState extends State<_ResultPanel> {
   /// drag moved the offset 1692 → 1404 with no tokens arriving, and 1692 → 1980
   /// (pinned to the extent) with tokens arriving.
   ///
-  /// R1-F1's regression test could not see it, and that is the lesson worth keeping:
-  /// it scrolls with `_scroll.jumpTo(0)`, a *programmatic* move with no drag to
-  /// dispose, so it exercises the offset guard and never the mechanism that failed.
-  /// The test now beside it drives a real [TestGesture] instead.
+  /// The first regression test could not see it, and that is the lesson worth
+  /// keeping: it scrolls with `_scroll.jumpTo(0)`, a *programmatic* move with no
+  /// drag to dispose, so it exercises the offset guard and never the mechanism
+  /// that failed. The test now beside it drives a real [TestGesture] instead.
   bool _readerIsDragging = false;
 
   @override
@@ -713,12 +709,10 @@ class _ResultPanelState extends State<_ResultPanel> {
   /// A reader within this many pixels of the bottom still counts as following the
   /// stream, so the panel keeps scrolling for them.
   ///
-  /// **A deliberate comfort band, not a correction for measurement error** — review
-  /// finding R2-F4. The first version of this comment called 48px "the smallest gap
-  /// that is plainly a deliberate scroll rather than a rounding artefact of the
-  /// previous jump", and there is no such artefact to defend against: R1-F4
-  /// established that the jump lands *exactly* on the extent, asserted one screen
-  /// away in the same test file. Defending an imaginary hazard is how a magic number
+  /// **A deliberate comfort band, not a correction for measurement error.** There
+  /// is no rounding artefact of the previous jump to defend against: the jump
+  /// lands *exactly* on the extent, asserted one screen away in the same test
+  /// file. Defending an imaginary hazard is how a magic number
   /// acquires a respectable-looking justification.
   ///
   /// What it is actually for: a reader who nudges the panel up by a line — a
@@ -732,12 +726,10 @@ class _ResultPanelState extends State<_ResultPanel> {
   @override
   void didUpdateWidget(_ResultPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Three conditions, and the third one is review finding **R1-F1**.
-    //
-    // The first two — the run is in flight, and the text actually *grew* — were
-    // here already. The comment also claimed a third property it did not
-    // implement: that a technician who scrolls up mid-generation is not yanked
-    // back. It was not true, and the review proved it rather than arguing it: with
+    // Three conditions. The first two — the run is in flight, and the text
+    // actually *grew* — are the obvious ones. The third exists because without
+    // it a technician who scrolls up mid-generation is yanked straight back —
+    // measured, not argued: with
     // the panel scrolled to offset 0 mid-generation, one more token returned it to
     // 1716.0, exactly `maxScrollExtent`. During generation the text grows on every
     // token, so "grew" is satisfied constantly and the reader loses the scroll
@@ -769,9 +761,9 @@ class _ResultPanelState extends State<_ResultPanel> {
 
     // After the frame, because the extent this jumps to does not exist until the
     // new text has been laid out. `jumpTo` rather than `animateTo`: an animation
-    // during generation is the thing this screen refuses to do — Task 1.8 measured
-    // frames being dropped while tokens stream, and a smooth-scroll through that
-    // stutters visibly in a recording.
+    // during generation is the thing this screen refuses to do — frames are
+    // measurably dropped while tokens stream (see the library doc), and a
+    // smooth-scroll through that stutters visibly in a recording.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scroll.hasClients) return;
       _scroll.jumpTo(_scroll.position.maxScrollExtent);
@@ -885,7 +877,7 @@ class _GroundingLine extends StatelessWidget {
         Expanded(
           child: Text(
             entries.isEmpty
-                // The honest wording for the no-match case. Task 1.9's device run
+                // The honest wording for the no-match case. A device run
                 // found this path is far less reachable than the design assumes —
                 // stop words match, so almost any English sentence retrieves
                 // something — which is recorded in the README rather than papered
@@ -906,7 +898,7 @@ class _GroundingLine extends StatelessWidget {
 
 /// "Checking inventory…" — a tool the agent is running right now.
 ///
-/// Static, like everything else here. Task 1.9 emits `AgentToolCallStarted`
+/// Static, like everything else here. The agent loop emits `AgentToolCallStarted`
 /// *before* the query is in flight precisely so this can be on screen while it
 /// runs.
 class _ToolActivity extends StatelessWidget {
@@ -941,8 +933,8 @@ class _ToolActivity extends StatelessWidget {
   /// A technician-facing sentence for a tool call.
   ///
   /// Falls back to the tool's own name for anything unmapped, rather than to a
-  /// generic "working…": one tool exists today and three more are in the spec's
-  /// §2.2, and a wrong-but-specific label is easier to notice than a vague one.
+  /// generic "working…": one tool exists today and more are planned,
+  /// and a wrong-but-specific label is easier to notice than a vague one.
   static String _labelFor(AgentToolCallStarted started) {
     final sku = started.call.arguments[GetPartsInventoryTool.skuParameter];
     return switch (started.call.name) {
@@ -996,13 +988,13 @@ class _CompletedTool extends StatelessWidget {
   /// Reads the payload rather than restating the arguments, because the payload is
   /// what the model was told and therefore what the answer should agree with — a
   /// viewer comparing this line to the answer is checking the grounding by eye.
-  /// Task 1.5's two success shapes are kept apart here for the reason it kept them
-  /// apart there: "we do not carry this part" and "we carry it and have none" are
-  /// different sentences to a technician.
+  /// The tool's two success shapes are kept apart here for the reason the tool
+  /// keeps them apart: "we do not carry this part" and "we carry it and have none"
+  /// are different sentences to a technician.
   ///
   /// **Every branch below reads the inventory tool's payload shape, so the tool is
-  /// checked first.** One tool is registered today and the spec's §2.2 lists three
-  /// more; without this gate the first of them renders as "null: null in stock",
+  /// checked first.** One tool is registered today and more are
+  /// planned; without this gate the first of them renders as "null: null in stock",
   /// which is worse than useless because it looks like data. [_ToolActivity] already
   /// had a generic fallback for an unrecognised tool and this did not — an asymmetry
   /// between two functions doing the same job one line apart.
@@ -1071,8 +1063,7 @@ class _Body extends StatelessWidget {
     }
 
     // Finished. **The advice-vs-failure decision is [FieldJobState.isDiagnosis]
-    // and nothing else**, which is review finding R0-F2: four documents claimed
-    // this screen branched on that getter while `_Body` in fact re-derived the
+    // and nothing else.** An earlier version of `_Body` re-derived the
     // decision from `stopReason` on its own. Two representations of one fact is
     // exactly what `FieldJobState.activeTool` refuses to allow one layer down, so
     // the duplication is removed rather than the claim softened — the colour and

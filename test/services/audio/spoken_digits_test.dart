@@ -42,8 +42,8 @@ void main() {
     });
 
     test('one word short of the unprefixed floor is left alone', () {
-      // `LEVEL TWO ONE` used to become `LEVEL 21`. It no longer does, and the reason
-      // is R0-F3: a two-word run with an ordinary English word in front of it is
+      // `LEVEL TWO ONE` used to become `LEVEL 21`. It no longer does, because a
+      // two-word run with an ordinary English word in front of it is
       // where the fabricated codes came from.
       expect(normalizeSpokenDigits('LEVEL TWO ONE'), 'LEVEL TWO ONE');
     });
@@ -120,10 +120,10 @@ void main() {
     });
   });
 
-  group('the false positives that refuted the old rule (R0-F3)', () {
-    // Every input here came from the reviewer running the *shipped* function, and
+  group('the false positives that refuted the old rule', () {
+    // Every input here came from running the *shipped* function, and
     // every one of them produced digits under the old floor of two. Two of them then
-    // produced a fault-code candidate through Task 1.4's real pattern — which is
+    // produced a fault-code candidate through the router's real pattern — which is
     // strictly worse than the harm the floor existed to prevent, because it turns
     // "silently skips the structured lookup" into "runs the structured lookup on a
     // code nobody said".
@@ -161,7 +161,7 @@ void main() {
       }
     });
 
-    // **The residue, pinned at the width it has — review finding R1-F2.** This group
+    // **The residue, pinned at the width it has.** This group
     // used to be one line asserting `A ONE TWO` → `A 12`, which described the leak as
     // a curiosity about the article "a". Measured, it is a class: the approximation
     // idiom of the measurement register this app is used in, the *other* single-letter
@@ -215,7 +215,7 @@ void main() {
     });
   });
 
-  group('nothing inside an accepted run is deleted (R0-F7)', () {
+  group('nothing inside an accepted run is deleted', () {
     // The doc says everything outside an accepted run survives verbatim. It used to
     // say "everything", and these three inputs were the counter-examples: a run
     // swallowed the separators between its digit words whatever they were.
@@ -257,7 +257,7 @@ void main() {
   });
 
   group('the router is what has to accept the output — so ask it', () {
-    test("the real faultCodePattern resolves the normalised text to E-102", () {
+    test('the real faultCodePattern resolves the normalised text to E-102', () {
       // The claim in `spoken_digits.dart` is that joining `E 102` into `E-102`
       // would be cosmetic, because the router's own pattern already spans the
       // space. This runs that pattern rather than restating the claim.

@@ -241,7 +241,7 @@ final class ModelAbsent extends ModelProvisionResult {
 /// provision re-hashes in place — and if any file fails that hash, re-fetches
 /// the **whole set**, not just the hole. No per-file download skip exists;
 /// deliberate at this artifact size (43.65MB), and recorded here so the doc
-/// matches the code rather than a nicer design (R0-F4).
+/// matches the code rather than a nicer design.
 ///
 /// It is also the client half of the OTA-model-delivery design in the README:
 /// the server half (bucket layout, device-capability-based selection, staged
@@ -274,9 +274,8 @@ class ModelProvisioner {
   /// process-wide**, so two isolates in one process both produce
   /// `<pid>-0` — the shared staging path whose consequences this whole design
   /// exists to prevent (inode-preserving `rename` lets the loser's open sink write
-  /// into the installed artifact). Nothing in `lib/` runs on an isolate today, but
-  /// Task 1.8 puts inference on one and is also the task that will call
-  /// `provision()`.
+  /// into the installed artifact). Inference runs on an isolate, and the same code
+  /// path calls `provision()`.
   ///
   /// Dart has no `O_EXCL` file creation, so uniqueness cannot be *enforced* by the
   /// filesystem; it is made overwhelmingly likely instead. The pid and timestamp
@@ -601,7 +600,7 @@ class ModelProvisioner {
           // Only where the descriptor says the token belongs — it was supplied
           // as a pair with the *configured* model's URI, and sending it to a
           // committed source's host would hand the credential to a third
-          // party. See [ModelDescriptor.sendsAuthToken] (R0-F3).
+          // party. See [ModelDescriptor.sendsAuthToken].
           authToken: descriptor.sendsAuthToken ? _authToken : null,
         );
       } on ModelDownloadException catch (error) {

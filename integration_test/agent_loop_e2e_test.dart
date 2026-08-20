@@ -20,7 +20,7 @@ import 'package:integration_test/integration_test.dart';
 
 import 'e2e_fixtures.dart';
 
-/// TC-AGENT-E2E-01 — the whole Tier 1 slice on a real device, against real
+/// TC-AGENT-E2E-01 — the whole retrieve-to-answer slice on a real device, against real
 /// weights and the real seeded database.
 ///
 /// ```sh
@@ -34,8 +34,8 @@ import 'e2e_fixtures.dart';
 /// file's header. What is different is what is under test: 1.8 proved the model
 /// emits a structured tool call from a *hand-written* grounded prompt, and this
 /// suite replaces every hand-written part with the real one. The prompt comes
-/// from Task 1.4's compiler over Task 1.3's seeded database, the tool is Task
-/// 1.5's over that same database, and the round trip is Task 1.9's loop.
+/// from the real prompt compiler over the seeded database, the tool is the real
+/// registry's over that same database, and the round trip is the real agent loop.
 ///
 /// **Assertions are fuzzy, and deliberately so.** A model's wording is not a
 /// contract. What is asserted is that the loop completed rather than hitting its
@@ -45,8 +45,8 @@ import 'e2e_fixtures.dart';
 /// its weights cannot satisfy by luck, because 2 units in Aisle 4, Shelf B is
 /// not a fact about elevators.
 ///
-/// It also prints the measurement Task 1.9 owes the plan: the character length
-/// of both turns' prompts against `InferenceConfig.defaultContextTokens`. The
+/// It also prints the one measurement only a device can settle: the character
+/// length of both turns' prompts against `InferenceConfig.defaultContextTokens`. The
 /// host suite bounds those characters; only this run can say whether the window
 /// holds them.
 void main() {
@@ -92,8 +92,8 @@ void main() {
     if (skipReason.isNotEmpty) return;
 
     // A throwaway database per run, seeded from the bundled asset through the
-    // real `rootBundle` path. Task 1.11 owns the durable one and the key that
-    // goes with it; this suite only needs the seed to be the shipped one.
+    // real `rootBundle` path. The demo flow owns the durable database and the key
+    // that goes with it; this suite only needs the seed to be the shipped one.
     tempDir = await Directory.systemTemp.createTemp('fieldops_agent_e2e');
     final database = DatabaseService.encrypted(
       file: File('${tempDir!.path}/agent_e2e.db'),
@@ -145,10 +145,10 @@ void main() {
 
       // Timed per turn as well as overall. The first device run reported only
       // a total (11332ms for two turns), which cannot be turned into a
-      // throughput figure — and the sprint plan still lists throughput as
-      // unmeasured, with 1.8's "2.7 tok/s" recorded as arithmetic rather than a
-      // measurement. A per-turn split plus the generated character count is
-      // what makes the next run able to close that.
+      // throughput figure — and throughput is still unmeasured, with the recorded
+      // "2.7 tok/s" being arithmetic rather than a measurement. A per-turn split
+      // plus the generated character count is what makes the next run able to
+      // close that.
       final stopwatch = Stopwatch()..start();
       final turnElapsed = <int>[];
       var lastMark = 0;
@@ -235,8 +235,8 @@ void main() {
       final database = db!;
 
       // The other half of grounding, and the half a happy-path test cannot see:
-      // Task 1.4's no-match block tells the model there is no entry and not to
-      // call any tool. If the loop still produces a confident procedure, the
+      // the prompt compiler's no-match block tells the model there is no entry and
+      // not to call any tool. If the loop still produces a confident procedure, the
       // grounding is decorative.
       // The fixture is shared with the host suite, which pins this premise in
       // CI. It had to be: the first one — "the hydraulic ram on the loading

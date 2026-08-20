@@ -2,7 +2,7 @@ import 'package:field_ops_copilot/views/components/answer_markdown.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Unit coverage for the answer formatter — review finding R0-F5.
+/// Unit coverage for the answer formatter.
 ///
 /// The formatter exists because Gemma 4 E2B emits Markdown unprompted and the demo
 /// screen was rendering it with a plain `Text`, so the screen recording showed raw
@@ -172,10 +172,10 @@ void main() {
     });
 
     // **The invariant above strips `-` from both sides, so it cannot see a hyphen
-    // being eaten inside a bullet's content** — review finding R1-F5 measured that:
-    // making the bullet rewrite delete every `-` from the rest of the line survived
-    // the whole suite, and a SKU is `BRK-990-XP`. This case preserves markers, so it
-    // is the one that would catch it.
+    // being eaten inside a bullet's content** — making the bullet rewrite delete
+    // every `-` from the rest of the line survived the whole suite, and a SKU is
+    // `BRK-990-XP`. This case preserves markers, so it is the one that would
+    // catch it.
     test('a hyphen inside a bullet line survives the rewrite', () {
       expect(
         rendered('*   BRK-990-XP, 2 in stock'),

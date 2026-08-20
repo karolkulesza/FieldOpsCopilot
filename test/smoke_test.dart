@@ -4,10 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// TC-APP-BOOT-01, retargeted by Task 1.11.
+/// TC-APP-BOOT-01, retargeted at the real home screen.
 ///
-/// The home screen is now `DiagnoseScreen`; the Tier 0 skeleton is gone. That
-/// makes this test stronger than it was, and it is worth saying why: it pumps the
+/// The home screen is `DiagnoseScreen`, not the placeholder this test first
+/// targeted. That makes it stronger, and it is worth saying why: it pumps the
 /// app with **no overrides at all**, so every startup provider runs for real and
 /// every one of them fails — `getApplicationSupportDirectory()` and the
 /// model-status platform channel have no host implementation. The AC says "no
@@ -26,9 +26,9 @@ void main() {
   });
 
   // The half the old smoke test could not have: every platform dependency is
-  // missing here, and the screen still has to be a screen. Without Task 1.11's
-  // `noRetry` policy this would also have sat in a loading state for half a minute
-  // before settling.
+  // missing here, and the screen still has to be a screen. Without the startup
+  // providers' `noRetry` policy this would also have sat in a loading state for
+  // half a minute before settling.
   testWidgets('a host boot with no platform channels renders, does not throw', (
     tester,
   ) async {

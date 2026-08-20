@@ -7,11 +7,11 @@ import '../stt_engine.dart';
 /// incoming audio. Used for unit tests and the skeleton UI.
 ///
 /// **Its refusals mirror `SherpaSttEngine`'s, including when they fire — and so does
-/// its stream lifecycle.** Task 1.8 recorded the rule the hard way: a rule enforced
+/// its stream lifecycle.** This repo learned the rule the hard way: a rule enforced
 /// in the real backend but not in the fake is a rule that does not exist, because
-/// every downstream task is unit-tested against the fake. So this fake refuses a
+/// everything downstream is unit-tested against the fake. So this fake refuses a
 /// second concurrent transcription, refuses use after disposal, refuses to be
-/// re-initialised after disposal, and — the part review finding **R0-F1** caught —
+/// re-initialised after disposal, and — the easily missed part —
 /// **releases on cancel instead of hanging.**
 ///
 /// That last one is why this class owns a subscription rather than being the four-line
@@ -29,7 +29,7 @@ import '../stt_engine.dart';
 /// stops dictating mid-utterance deadlocks. `sherpa_stt_engine.dart` documents that
 /// exact hazard at length and avoids it; this file asserted parity with it while
 /// containing it, and **`sttEngineProvider` binds this class**, so the deadlock was in
-/// the engine the app actually ships. The lesson is the one 1.8 already recorded, one
+/// the engine the app actually ships. The lesson is the same one, one
 /// level further in: the parity claim was prose, and the asymmetry that made it false
 /// was in the *tests* — the real engine's suite had a cancel test and this one had
 /// none.
@@ -69,8 +69,8 @@ class FakeSttEngine implements SttEngine {
 
   /// The same shape as `SherpaSttEngine._transcribe`, for the reason in the class doc.
   ///
-  /// The in-flight slot is taken in `onListen` rather than in [transcribe] — review
-  /// finding **R0-F6** — so a stream that is built and never listened to does not
+  /// The in-flight slot is taken in `onListen` rather than in [transcribe],
+  /// so a stream that is built and never listened to does not
   /// wedge the engine until disposal.
   Stream<SttTranscript> _transcribe(Stream<MicFrame> frames) {
     final out = StreamController<SttTranscript>();

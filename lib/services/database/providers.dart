@@ -6,13 +6,14 @@
 /// implementations and tests override these rather than reaching for concrete
 /// types.
 ///
-/// **Why this file did not exist until Task 1.11.** Task 1.1 shipped
-/// `DatabaseService.openDefault` with nothing binding it, and Task 1.3 shipped
+/// **Why this file arrived late.** `DatabaseService.openDefault` shipped
+/// with nothing binding it, and
 /// `DatabaseInitializer` with no call site, both for the same reason: opening the
 /// database needs an encryption key and nothing had decided where the key comes
-/// from. Tasks 1.4, 1.5, 1.6, 1.9 and 1.10 each inherited that gap and recorded
-/// it. This is the first task that needs a database *at runtime*, so it is the
-/// task that decides — see [databaseEncryptionKeyProvider], which is that
+/// from. Every layer built in between inherited that gap and recorded
+/// it. The demo screen is the first thing that needs a database *at runtime*, so
+/// this is where the decision lands — see [databaseEncryptionKeyProvider], which
+/// is that
 /// decision written down rather than a literal for someone to find later.
 ///
 /// **Seeding is a dependency here, not a call order.** Everything on the
@@ -32,8 +33,8 @@ import 'database_service.dart';
 
 /// The passphrase used when no `--dart-define=FIELDOPS_DB_KEY` was supplied.
 ///
-/// **Named, exported and spelled "not-a-secret" on purpose.** Task 1.11's brief
-/// permits a hardcoded key for the demo and requires that it be a deliberate,
+/// **Named, exported and spelled "not-a-secret" on purpose.** A hardcoded key
+/// is acceptable for the demo only as a deliberate,
 /// recorded decision. Hiding it behind an innocuous-looking constant would
 /// satisfy the letter and invert the intent, so the constant says what it is.
 const String demoDatabaseKey = 'fieldops-demo-key-not-a-secret';
@@ -46,13 +47,14 @@ const String demoDatabaseKey = 'fieldops-demo-key-not-a-secret';
 /// — so a database file lifted off the device is ciphertext. The *key management*
 /// is not real: a passphrase compiled into the binary is obfuscation, because
 /// anyone who can read the app bundle can read the key. So this protects a stolen
-/// **file** and not a stolen **device**, and §3.2's "sensitive data remains
-/// sandboxed on the physical device" is true of the storage and only partly true
+/// **file** and not a stolen **device**, and the design goal that "sensitive data
+/// remains sandboxed on the physical device" is true of the storage and only
+/// partly true
 /// of the threat model. Stated here rather than implied, because the gap between
 /// "encrypted at rest" and "encrypted against the person holding the phone" is
 /// exactly the gap a demo makes invisible.
 ///
-/// The fleet answer is Appendix A's, and it slots in behind this provider without
+/// The fleet-deployment answer slots in behind this provider without
 /// touching anything downstream: a random key generated on first launch, held in
 /// the iOS Keychain or the Android Keystore behind device-passcode protection,
 /// and never present in the binary at all. Nothing above this line would change.
@@ -94,17 +96,17 @@ final appDatabaseProvider = FutureProvider<DatabaseService>(retry: noRetry, (
   return database;
 });
 
-/// The first-launch seed — Task 1.3's `ensureSeeded()`, finally called.
+/// The first-launch seed — where `ensureSeeded()` is finally called.
 ///
 /// Exposed as the outcome rather than as a `void` future because the outcome is
-/// informative and Task 1.3 built it to be: [SeedApplied] versus [SeedSkipped]
+/// informative by design: [SeedApplied] versus [SeedSkipped]
 /// distinguishes a first launch from every later one, and
 /// [SeedApplied.wasFirstLaunch] distinguishes a genuine first launch from a
 /// re-seed onto a bumped asset revision.
 ///
 /// Failures are deliberately *not* caught. A `SeedFormatException` means the
 /// bundled asset is malformed, which is a build defect and not a runtime
-/// condition — Task 1.3's own docs say it should fail loudly rather than start
+/// condition — `DatabaseInitializer`'s own docs say it should fail loudly rather than start
 /// with an empty manual. It arrives here as an errored `AsyncValue`, which the
 /// demo screen renders as a startup failure with the message attached, so
 /// "loudly" means legible rather than a crash into a grey screen.

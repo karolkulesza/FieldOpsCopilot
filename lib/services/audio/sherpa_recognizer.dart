@@ -7,7 +7,7 @@
 /// the host against [SttRecognizerRuntime] without any native library present.
 ///
 /// **Everything in the plugin's Dart API is synchronous, blocking FFI.** That is
-/// not an incidental detail, it is the reason Task 2.2 owns an isolate at all:
+/// not an incidental detail, it is the reason the STT path owns an isolate at all:
 ///
 /// * `OnlineRecognizer(config)` is a *constructor* that loads three ONNX graphs on
 ///   the calling thread — see [SherpaRecognizerRuntime.load] for the measurement
@@ -16,7 +16,7 @@
 /// * `acceptWaveform` allocates native memory and copies the samples into it.
 ///
 /// None of it hands work to a background thread the way `flutter_gemma`'s LiteRT-LM
-/// path does. So where Task 1.8's isolate was insurance against a plugin changing
+/// path does. So where the inference isolate was insurance against a plugin changing
 /// its threading, this one is load-bearing on the first call: run it on the UI
 /// isolate and every decode step is a dropped frame.
 ///
@@ -128,16 +128,16 @@ class SherpaRecognizerRuntime implements SttRecognizerRuntime {
 
   /// Builds the recogniser, synchronously, on this isolate.
   ///
-  /// **Load is 359–530 ms, median 384**, over ten consecutive runs on this host
-  /// (Apple-silicon macOS), against 371–476 ms over four runs on the reviewer's:
+  /// **Load is 359–530 ms, median 384**, over ten consecutive runs on one
+  /// Apple-silicon macOS host, against 371–476 ms over four runs on a second:
   ///
   /// ```sh
   /// flutter test test/services/audio/sherpa_recognizer_live_test.dart \
   ///   --dart-define=FIELDOPS_STT_MODEL_DIR=… --dart-define=FIELDOPS_SHERPA_LIB=…
   /// ```
   ///
-  /// **One figure with its command beside it — review finding R0-F11.** Two ranges for
-  /// one quantity were in circulation, `466–471ms` in two source comments and
+  /// **One figure with its command beside it.** Two ranges for
+  /// one quantity were once in circulation, `466–471ms` in two source comments and
   /// `456–773ms` in the README, neither with a command recorded and the narrow band a
   /// far tighter claim than its runs could support. Individual runs during development
   /// reached 773 ms, but those were taken while other suites were running; the ten
@@ -153,7 +153,7 @@ class SherpaRecognizerRuntime implements SttRecognizerRuntime {
     // Per-isolate, and this is the isolate that will do the decoding. Cheap to
     // repeat — it re-opens an already-open dynamic library.
     //
-    // **Idempotent in its effect but not in its argument — review finding R0-F9.**
+    // **Idempotent in its effect but not in its argument.**
     // `sherpa_onnx.dart:107` is `_path ??= p`, so the *first* `initBindings` call in
     // an isolate fixes that isolate's search root for its lifetime and every later
     // argument is silently discarded. Harmless here, because a worker loads once; it
@@ -361,8 +361,8 @@ class SherpaRecognizerRuntime implements SttRecognizerRuntime {
     //
     // **What holds this line in place is that test's *property* assertion** — no
     // partial repeats its predecessor within a segment — plus a bound below **half**
-    // the frame count. An earlier version of this comment said the guard was a ratio
-    // "below 1:1", and review finding R0-F2 refuted it by deleting this clause and
+    // the frame count. A ratio "below 1:1" would not hold it: that claim was
+    // refuted by deleting this clause and
     // watching all five tests pass at 101 → 90: a chunk emits nothing until decoding
     // begins, so the count is structurally under the frame count whatever this does.
     // Deleting the clause now fails at partial 1.

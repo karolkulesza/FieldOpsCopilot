@@ -1,12 +1,12 @@
 /// The agent loop as UI state: one technician inquiry, from typed text to a
 /// grounded answer.
 ///
-/// This is the bridge Task 1.11's brief names — "Riverpod viewmodel bridges agent
-/// loop to UI" — and the composition the last five tasks each deferred:
+/// This is the bridge — the Riverpod viewmodel that connects the agent loop to
+/// the UI — and the composition every layer below deferred:
 /// retrieval → compilation → loop is three lines, and they are in [diagnose].
 ///
 /// **What belongs here and what does not.** `AgentLoop.run` already streams
-/// everything this screen needs (Task 1.9 built the stream for it); the viewmodel's
+/// everything this screen needs (its stream exists for this); the viewmodel's
 /// job is to fold that stream into something a widget can rebuild from, and to make
 /// the handful of *presentation* decisions the loop deliberately left open. Three
 /// of those are worth reading before changing anything:
@@ -25,7 +25,7 @@
 ///    hand a technician a report of failure dressed as advice. [FieldJobState.isDiagnosis]
 ///    is the single question the widget asks.
 /// 3. **A tool in flight is state, not an event.** [FieldJobState.activeTool] is
-///    set by [AgentToolCallStarted] — which Task 1.9 emits *before* the query runs,
+///    set by [AgentToolCallStarted] — which the loop emits *before* the query runs,
 ///    precisely so "checking inventory…" is on screen while it happens — and
 ///    cleared by the completion.
 ///
@@ -51,7 +51,7 @@ import 'work_order_form_viewmodel.dart';
 
 /// Where one diagnosis is in its life.
 ///
-/// The three the AC names ([idle], [thinking], [done]) plus [failed], because
+/// The expected three ([idle], [thinking], [done]) plus [failed], because
 /// something that threw is not a diagnosis and must not render as one.
 enum FieldJobPhase {
   /// Nothing has been asked yet.
@@ -94,13 +94,13 @@ class FieldJobState {
   /// Tokens of the turn **currently** generating, in arrival order.
   ///
   /// Reset at each turn boundary; see the library doc for why. Empty until the
-  /// first token, which is the ~340-550ms of prefill Task 1.8 measured.
+  /// first token, which is the ~340-550ms of prefill measured on an iPad Air M4.
   final String streamedText;
 
   /// The tool call in flight, or `null`.
   ///
   /// The event itself rather than a parallel "tool activity" type, on the argument
-  /// Task 1.5 used to delete `AgentTool.name`: a second representation of one fact
+  /// that deleted `AgentTool.name`: a second representation of one fact
   /// is a second thing that can disagree with the first.
   final AgentToolCallStarted? activeTool;
 
@@ -192,7 +192,7 @@ class FieldJobViewModel extends Notifier<FieldJobState> {
   ///
   /// Ignores a blank inquiry and a call made while one is already running. The
   /// second guard is not only tidiness: both engine implementations refuse an
-  /// overlapping `generate` with a `StateError` (Task 1.8 made the fake refuse it
+  /// overlapping `generate` with a `StateError` (the fake refuses it
   /// too, so the host suite cannot be more permissive than the device), so a
   /// double tap without this guard is a crash rather than a wasted run.
   Future<void> diagnose(String rawInquiry) async {
@@ -221,7 +221,7 @@ class FieldJobViewModel extends Notifier<FieldJobState> {
       final registry = await ref.read(toolRegistryProvider.future);
       final compiler = ref.read(promptCompilerProvider);
 
-      // The composition. Three lines, as the plan said, and this is them.
+      // The composition. Three lines, and this is them.
       final retrieval = await router.retrieve(inquiry);
       final prompt = compiler.compile(retrieval);
       final loop = AgentLoop(engine: warmup.engine, registry: registry);
@@ -237,7 +237,7 @@ class FieldJobViewModel extends Notifier<FieldJobState> {
         if (!ref.mounted) return;
         // **The one side effect in this loop, and it is here rather than in
         // [applyEvent] because [applyEvent] is pure** — it is a table, and a table
-        // that writes to a second provider is not one. Task 2.3's form lives on
+        // that writes to a second provider is not one. The work-order form lives on
         // its own viewmodel because it outlives a diagnosis, so a completion has to
         // reach it explicitly; `applyInvocation` ignores everything that is not a
         // form recording, which is most of them.

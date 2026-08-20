@@ -50,18 +50,18 @@ class WorkOrderFormViewModel extends Notifier<WorkOrderFormState> {
   /// does not need the form to react to the model mis-spelling an argument.
   ///
   /// **The `ToolSuccess` check is unreachable today, and is recorded as unbound
-  /// rather than dressed up as a guard.** Mutation M12 deletes it and the suite
-  /// stays green, which is correct and not a coverage gap: `ToolOutcome` is sealed,
+  /// rather than dressed up as a guard.** Deleting it leaves the suite
+  /// green, which is correct and not a coverage gap: `ToolOutcome` is sealed,
   /// so a failure is a `ToolFailure`, and `ToolFailure.payload` is a computed
   /// `{error, parameter?, message}` — it carries **none** of the three keys
   /// [applyPayload] reads (`recorded`, `refused`, `asked`), so that method already
   /// answers `false` for one. Stated over all three rather than over `recorded`
-  /// alone, because review finding R0-F4 added the second and the narrower sentence
-  /// would have gone quietly stale.
+  /// alone, because the narrower sentence would go quietly stale as readers of
+  /// the other keys were added.
   ///
   /// It is kept because it puts the rule where the decision belongs instead of
   /// making this method depend on a payload shape defined one file away. The name
-  /// check above is a different matter and *is* bound (M11).
+  /// check above is a different matter and *is* bound by a test.
   ///
   /// Returns whether anything changed, so a caller can tell "no form call" from
   /// "a form call that recorded nothing". Nothing in the app branches on it today;
@@ -70,13 +70,13 @@ class WorkOrderFormViewModel extends Notifier<WorkOrderFormState> {
     if (invocation.call.name != RecordWorkOrderFieldsTool.toolName) {
       return false;
     }
-    // **A replay is not a second recording — review finding R1-F3.** `AgentLoop`
+    // **A replay is not a second recording.** `AgentLoop`
     // re-announces a repeated call with the outcome it recorded the first time
     // (that is the short circuit, not a re-execution), and `FieldJobViewModel`
     // forwards every completion. Applying it twice is invisible for the fields —
     // writing the same value again changes nothing — and wrong for the other two
     // things this reads: refusals **append**, so one refused field counted twice
-    // and the panel line R0-F4 added read "2 values"; and a clarification the
+    // and the panel's refusal line read "2 values"; and a clarification the
     // technician had already dismissed would be re-asked by a call the model did
     // not actually repeat asking. `unknown_tool_repeated` is in the goldens
     // precisely because models repeat calls.
@@ -95,7 +95,7 @@ class WorkOrderFormViewModel extends Notifier<WorkOrderFormState> {
   bool applyPayload(Map<String, Object?> payload) {
     final recorded = recordedFieldsOf(payload);
     final asked = askedClarificationOf(payload);
-    // **Read rather than discarded — review finding R0-F4.** This used to pass
+    // **Read rather than discarded.** This used to pass
     // `rejected: const []`, so `WorkOrderFormState.rejected` was dead on every
     // production path while its docstring claimed to be what someone debugging a
     // demo reads. The refusals are the model's mistakes, and they are worth seeing
@@ -161,8 +161,8 @@ final workOrderFormProvider =
 /// One `TextEditingController` per field, kept in step with
 /// [workOrderFormProvider].
 ///
-/// **Why the controllers are a provider rather than widget state.** The AC
-/// (TC-VM-FORM-01) is a unit-tier assertion that the `fault_code` controller holds
+/// **Why the controllers are a provider rather than widget state.**
+/// TC-VM-FORM-01 is a unit-tier assertion that the `fault_code` controller holds
 /// `"E-102"` after the agent recorded it, and a controller owned by a `State`
 /// object can only be reached by pumping a widget. More usefully: the sync has to
 /// happen whether or not the form is on screen, because the agent records fields

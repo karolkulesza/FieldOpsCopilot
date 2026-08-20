@@ -102,8 +102,8 @@ class SeedSkipped extends SeedOutcome {
 
 /// Applies the bundled seed dataset to the database on first launch.
 ///
-/// Two invariants shape the implementation, and both come out of the Task 1.2
-/// review:
+/// Two invariants shape the implementation, and both come out of how the schema
+/// treats manual entries:
 ///
 /// * **Manual rows go through [DatabaseService.upsertManualEntries]**, never a raw
 ///   insert. Two things ride on that, and only one of them is the obvious one.

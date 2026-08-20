@@ -23,10 +23,10 @@ import 'package:integration_test/integration_test.dart';
 /// up.
 ///
 /// Scope note, stated plainly: the AC's wording is "engine can load the installed
-/// model", and the engine does not exist yet — it is Task 1.8. What this asserts
-/// is everything provisioning owns: the bytes arrive, hash to the pinned digest,
-/// land at the path an engine will load from, survive an independent re-hash, and
-/// are marked no-backup. The load handshake attaches in 1.8's
+/// model", and loading is not this suite's job. What this asserts is everything
+/// provisioning owns: the bytes arrive, hash to the pinned digest, land at the path
+/// an engine will load from, survive an independent re-hash, and are marked
+/// no-backup. The load handshake is asserted in
 /// `integration_test/llm_inference_test.dart` (TC-LLM-LOAD-01), which consumes
 /// this artifact.
 void main() {
@@ -40,7 +40,7 @@ void main() {
     (tester) async {
       if (issue != null) {
         // Reported as a skip with the exact remedy rather than a bare `skip:`
-        // flag, so a reviewer running this sees *why* it did not execute.
+        // flag, so whoever runs this sees *why* it did not execute.
         markTestSkipped(
           'model source not configured (${issue.name}) — pass '
           'FIELDOPS_MODEL_URI, FIELDOPS_MODEL_SHA256 and '
@@ -94,8 +94,8 @@ void main() {
       // either set `NSURLIsExcludedFromBackupKey` or reported a failure. On Android
       // the exclusion is declared in the manifest and applied by the OS at backup
       // time, so this flag is a constant there — asserting it would be a test that
-      // passes whether or not the rules work, which is precisely the trap that
-      // Task 1.2's review taught this repo to avoid. Evidence for the Android leg
+      // passes whether or not the rules work, which is precisely the trap this
+      // repo has learned to avoid. Evidence for the Android leg
       // is the merged manifest at build time (`android:fullBackupContent` and
       // `android:dataExtractionRules`), checked in the build, not here.
       switch (PlatformBackupExclusion.mechanismFor()) {

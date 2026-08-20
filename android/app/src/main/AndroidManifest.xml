@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Task 2.1: microphone capture for on-device dictation. A runtime
+    <!-- Microphone capture for on-device dictation. A runtime
          permission since API 23, requested by `record`'s hasPermission(); the
          manifest entry is what makes that request possible at all — without it
          the request is denied immediately, with no dialog and nothing for the
@@ -11,7 +11,7 @@
          Android 11 and below, dataExtractionRules Android 12+, so both are
          needed to cover the supported range. -->
     <application
-        android:label="field_ops_copilot"
+        android:label="Field Ops Copilot"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:fullBackupContent="@xml/backup_rules"

@@ -9,9 +9,9 @@ import 'package:field_ops_copilot/viewmodels/dictation_viewmodel.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Task 2.3's voice half at the unit tier: the microphone and the recogniser,
-/// already built and already tested, finally joined to something that shows words
-/// on a screen.
+/// The voice half of dictation at the unit tier: the microphone and the
+/// recogniser, already built and already tested, finally joined to something
+/// that shows words on a screen.
 ///
 /// Both seams are scripted here — a `_ScriptedAudioInput` in place of `record`, a
 /// `_ScriptedSttEngine` in place of sherpa — because what this file is about is the
@@ -255,12 +255,12 @@ void main() {
     });
   });
 
-  // **Review finding R1-F1.** R0-F1's fix stops the capture when a technician
-  // types, and that half never fired during `DictationPhase.starting`: `stop()`
-  // returned at its first line while `_session` was null, and `_session` is
-  // assigned only at the *end* of `start()`. The window is the recogniser load —
-  // 359–530ms, measured in Task 2.2 — which is exactly when a technician who
-  // tapped the mic by accident reaches for the keyboard.
+  // Typing stops the capture, and that half never fired during
+  // `DictationPhase.starting`: `stop()` returned at its first line while
+  // `_session` was null, and `_session` is assigned only at the *end* of
+  // `start()`. The window is the recogniser load — 359–530ms, measured on the
+  // demo device — which is exactly when a technician who tapped the mic by
+  // accident reaches for the keyboard.
   group('a stop during the load', () {
     /// Holds `initialize()` open so the whole test sits in `starting`.
     Completer<void> gateTheLoad() {
@@ -320,8 +320,8 @@ void main() {
 
     // **The defect this ordering exists to fix, reported from the demo iPad:
     // "cabin vibrating" came back as "IN VIBRATING".** The microphone used to
-    // open *after* `initialize()`, so the 359–530ms of ONNX loading (Task 2.2's
-    // measurement, on that device) happened with no input open — and every word
+    // open *after* `initialize()`, so the 359–530ms of ONNX loading (measured
+    // on that device) happened with no input open — and every word
     // spoken in that window was never recorded. The second utterance of a session
     // was always clean, because `initialize()` returns immediately once ready,
     // which is exactly the asymmetry the report described.
@@ -361,7 +361,7 @@ void main() {
           bytes,
           320,
           reason:
-              'the backlog Task 2.1 built for this must replay what was captured '
+              'the capture backlog built for this must replay what was captured '
               'before the recogniser attached',
         );
         expect(
@@ -473,9 +473,9 @@ void main() {
       expect(stateOf(c).message, contains('no audio'));
     });
 
-    // **Review finding R2-F1, and the reachable row of it.** R1-F1's counter was
-    // read on the way *forward*, after each await — but three of `start`'s exits
-    // report a failure and return before the next such check, so a cancelled start
+    // The cancellation counter used to be read only on the way *forward*, after
+    // each await — but three of `start`'s exits report a failure and return
+    // before the next such check, so a cancelled start
     // still repainted. A device with no verified STT set is exactly the device the
     // message is written for, and `dictationEngineProvider` awaits a status
     // provider that hashes files, so the window is real rather than theoretical.
@@ -548,8 +548,8 @@ void main() {
       expect(stateOf(c).message, contains('No verified speech model'));
     });
 
-    // **The other half of R2-F1's guard, which the reviewer measured by hand and
-    // left unbound.** The control above settles "it has not simply stopped
+    // **The half of that guard the control above cannot bind.**
+    // The control settles "it has not simply stopped
     // reporting", but it runs on a fresh controller where the generation is 1 and
     // matches trivially — so it cannot catch a guard comparing against something
     // staler than the live counter. The case that can: cancel a capture, then let a
@@ -564,15 +564,14 @@ void main() {
             ref.onDispose(capture.dispose);
             return capture;
           }),
-          // **One resolution, not two — review finding R4-F1.** This was written as
-          // a counter and a ternary, under a comment claiming the second capture got
-          // a fresh answer. It does not: `start()` reads
+          // **One resolution, not two.** This was written as a counter and a
+          // ternary, under a comment claiming the second capture got a fresh
+          // answer. It does not: `start()` reads
           // `dictationEngineProvider.future`, which creates no lasting subscription
-          // and is served the *cached, already-completed* future the second time. The
-          // reviewer measured it two ways — the body ran once across both captures,
-          // and handing the phantom second branch a working engine changed nothing.
-          // An inert fixture argument reads as coverage, which is this repo's own
-          // R6-F3 one file over.
+          // and is served the *cached, already-completed* future the second time.
+          // Measured two ways — the body ran once across both captures, and
+          // handing the phantom second branch a working engine changed nothing.
+          // An inert fixture argument reads as coverage, and this one did.
           //
           // What actually happens, and it is still exactly the case the property
           // needs: held open so the stop lands inside it, completed with `null`, and
@@ -647,8 +646,8 @@ void main() {
 
     // The reason `stop` awaits the transcript stream and not only the session: a
     // streaming zipformer will not emit its last words until the input closes
-    // (Task 2.2's tail padding), so returning at the session's stop hands a caller
-    // a state one utterance short of what was said.
+    // (the engine's tail padding), so returning at the session's stop hands a
+    // caller a state one utterance short of what was said.
     test('stop waits for the final transcript the flush produces', () async {
       final c = container();
       await controllerOf(c).start();
@@ -850,7 +849,7 @@ class _ScriptedSttEngine implements SttEngine {
   Object? initializeError;
 
   /// Held open to keep `initialize()` pending, so a test can sit inside the
-  /// recogniser load the way a device does for 359–530ms (R1-F1).
+  /// recogniser load the way a device does for 359–530ms.
   Completer<void>? initializeGate;
 
   int initializeCalls = 0;
@@ -931,7 +930,7 @@ class _ScriptedAudioInput implements AudioInput {
   Object? startError;
 
   /// Held open to keep `startStream` pending — the other window a stop can land
-  /// in while a start is in flight (R1-F1).
+  /// in while a start is in flight.
   Completer<void>? startGate;
 
   /// Pushes raw PCM as the plugin would. Even-length only: `MicCapture` emits

@@ -300,7 +300,7 @@ void main() {
       );
     });
 
-    // R0-F4: the refusals reach the state and the panel, so the reader has to be
+    // The refusals reach the state and the panel, so the reader has to be
     // exact in the same way `recordedFieldsOf` is.
     test('every refusal survives execute → refusedUpdatesOf', () async {
       final payload = await run(const {

@@ -10,10 +10,10 @@ import '../tool_schema.dart';
 /// **It is deliberately no more permissive than the device engine.** Every rule
 /// `GemmaLlmEngine` enforces is enforced here, at the same moment, with the same kind of
 /// error: the tool-schema contract, one turn at a time, and no revival after disposal.
-/// The reason is structural rather than tidy — Task 1.9's agent loop and Task 1.10's
+/// The reason is structural rather than tidy — the agent loop and the
 /// golden suite are unit-tested against *this* class, so anything the fake tolerates and
 /// the device refuses is a defect that passes the whole host suite and surfaces on the
-/// demo device at 1.11. A fake that is easier to satisfy than the thing it stands in for
+/// demo device. A fake that is easier to satisfy than the thing it stands in for
 /// is not a fake, it is a trap.
 class FakeLlmEngine implements LlmEngine {
   FakeLlmEngine({List<List<LlmEvent>>? turns}) : _turns = [...?turns];
@@ -40,7 +40,7 @@ class FakeLlmEngine implements LlmEngine {
   /// precisely how an agent loop is written. That is the direction that matters, because a
   /// permissive fake lets such a loop pass on the host and throw on device, which is the
   /// trap this whole contract exists to close. Erring strict costs a cheap false failure;
-  /// erring eager ships a defect to Task 1.11. Dart also cannot detect a stream that will
+  /// erring eager ships a defect to the demo. Dart also cannot detect a stream that will
   /// never be subscribed, so a consumer that asks for a turn and abandons it without
   /// cancelling is surfaced here, where it is cheap to find.
   bool _turnInFlight = false;

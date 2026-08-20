@@ -33,7 +33,7 @@ import 'package:integration_test/integration_test.dart';
 /// ```
 ///
 /// **No `--dart-define`s.** The STT source and its four SHA-256 pins are committed
-/// on Task 2.0's catalog entry, and this test provisions the 43.65MB set if it is
+/// on the catalog entry, and this test provisions the 43.65MB set if it is
 /// absent. It does not need the LLM: the screen renders and dictates whether or not
 /// the model is installed, which is itself worth having on the record.
 ///
@@ -46,15 +46,24 @@ import 'package:integration_test/integration_test.dart';
 /// depend on the room, which is the same reason `stt_test.dart` gives for using the
 /// fixture.
 ///
-/// The substitution is exactly one class deep: `AudioInput`, Task 2.1's seam. Above
+/// The substitution is exactly one class deep: `AudioInput`, the capture seam. Above
 /// it `MicCapture` normalises frames, bounds the backlog and accounts for gaps
 /// exactly as it does on a live capture, so what is bypassed is the driver and not
 /// the pipeline.
 ///
-/// ⚠️ **This has never run on hardware.** What is written here is the test; what it
-/// asserts on the host is nothing, because the recogniser cannot load there without
-/// a `nativeLibraryPath` and production always passes null. It belongs to the same
-/// owed-device-run category as TC-MIC-01 was, and the README says so.
+/// ✅ **This passes on hardware, and it did not on the first attempt.** The failure
+/// is worth keeping: `_FixtureAudioInput` opened a stream and delivered nothing
+/// until `playToEnd()` was called, which happens *after* the assertion that the
+/// screen has reached `DictationPhase.listening` — and since that phase means
+/// *audio is arriving*, the screen was correct and the double was not. Playback now
+/// starts on `onListen`, when the pipeline subscribes, because that is when a
+/// microphone starts delivering; and the waits after the tap are conditions rather
+/// than fixed durations. **A double gentler than the hardware is a test that cannot
+/// fail**, which is the same gap, in the same direction, that let a `RangeError`
+/// reach a device two commits earlier.
+///
+/// It asserts nothing on the host, because the recogniser cannot load there without
+/// a `nativeLibraryPath` and production always passes null.
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -142,8 +151,9 @@ void main() {
   testWidgets(
     'a dictated inquiry leaves the work order untouched until the agent fills it',
     (tester) async {
-      // Not an AC. It exists because the two halves of Task 2.3 are wired into the
-      // same screen and the cheapest way for the voice half to be wrong is for it
+      // Not an AC. It exists because dictation and the work-order form are wired
+      // into the same screen, and the cheapest way for the voice half to be wrong is
+      // for it
       // to write somewhere it should not — the form is filled by the *tool*, never
       // by the transcript.
       await _installSttModel();
@@ -221,8 +231,8 @@ Future<void> _settle(WidgetTester tester, {int rounds = 10}) async {
 /// the tap to the recogniser attaching — 190ms of it opening the microphone and
 /// 536ms loading the model — and a fixed settle that happens to exceed that on one
 /// machine is a test that passes by luck and fails on a colder run or a slower
-/// disk. Task 2.2's own row records the load varying 359–530ms across ten runs on
-/// one host.
+/// disk. The recogniser's load has been measured varying 359–530ms across ten runs
+/// on one host.
 Future<void> _waitFor(
   WidgetTester tester,
   bool Function() condition, {
@@ -311,8 +321,7 @@ class _FixtureAudioInput implements AudioInput {
   /// first hardware run of this file failed on it with the app behaving correctly.
   ///
   /// The same gap, in the same direction, that let a crash reach a device: a double
-  /// gentler than the hardware is a test that cannot fail. Recorded on Task 2.3's
-  /// row in the sprint plan.
+  /// gentler than the hardware is a test that cannot fail.
   ///
   /// `onListen` rather than a call inside [startStream], and the difference is not
   /// stylistic — this is a **broadcast** controller, so anything added before the

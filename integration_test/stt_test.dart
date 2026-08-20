@@ -21,7 +21,7 @@ import 'package:integration_test/integration_test.dart';
 /// ```
 ///
 /// **No `--dart-define` is needed.** The STT model's source and its four SHA-256
-/// pins are committed on the catalog entry (Task 2.0), because the repository is
+/// pins are committed on the catalog entry, because the repository is
 /// ungated `apache-2.0` — unlike the LLM, whose URI and hash are build-time
 /// defines. If the weights are not installed yet this test provisions them first,
 /// which takes as long as 43.65MB takes on the device's network.
@@ -41,14 +41,15 @@ import 'package:integration_test/integration_test.dart';
 ///    build. The plugin documents that FFI binding state is per-isolate; the host
 ///    exercises it too, but on the host the loader is the desktop dyld.
 /// 3. It loads and decodes within a usable time on arm64 mobile silicon, next to
-///    whatever the LLM has resident. Task 1.8 measured process RSS reaching
-///    1.67GB with Gemma loaded, so this is the run that says whether a 43MB
+///    whatever the LLM has resident. Process RSS was measured reaching 1.67GB
+///    with Gemma loaded, so this is the run that says whether a 43MB
 ///    recogniser alongside it is free or not.
 ///
 /// The audio is the committed fixture rather than the microphone. That is
 /// deliberate and it is what makes the assertion an assertion: TC-MIC-01 owns
 /// "real hardware produces real PCM", and a live microphone here would make the
-/// transcript depend on the room. Wiring the two together is Task 2.3's.
+/// transcript depend on the room. `voice_inquiry_test.dart` wires the two
+/// together.
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -115,8 +116,8 @@ void main() {
       debugPrint('[TC-STT-STRM-01] raw:  "${last.rawText}"');
       debugPrint('[TC-STT-STRM-01] text: "${last.text}"');
 
-      // **Fuzzy containment, not exact equality** — the sprint plan's own
-      // instruction, and the right one: a 20M int8 model mis-hears "okay" as
+      // **Fuzzy containment, not exact equality**, and it is the right call: a
+      // 20M int8 model mis-hears "okay" as
       // "U K" and "fault code" as "FALK CODE" on this fixture, and pinning the
       // whole string would turn a library upgrade into a failure.
       final text = last.text.toLowerCase();
@@ -124,7 +125,7 @@ void main() {
       expect(text, contains('error'));
       expect(last.isFinal, isTrue);
 
-      // **The bound the filter's deletion actually crosses — review finding R0-F2.**
+      // **The bound the filter's deletion actually crosses.**
       // This was `lessThan(frames.length)` under a comment claiming it showed the
       // filter working. It does not: a chunk emits nothing until decoding begins, so
       // the count is structurally under the frame count whatever `_drain` does, and
@@ -167,7 +168,7 @@ void main() {
       );
 
       // And the end of the chain that motivates the whole normalisation step: the
-      // transcript has to resolve to a fault code through Task 1.4's real pattern,
+      // transcript has to resolve to a fault code through the router's real pattern,
       // or the dictated path silently skips the structured lookup.
       final match = RetrievalRouter.faultCodePattern.firstMatch(last.text);
       expect(match, isNotNull);

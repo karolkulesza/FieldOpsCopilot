@@ -19,8 +19,8 @@ void main() {
     });
 
     test('an empty token produces nothing', () {
-      // Empty chunks carry no information and would appear as spurious items in the
-      // golden snapshots Task 1.10 commits.
+      // Empty chunks carry no information and would appear as spurious items in
+      // the committed golden snapshots.
       expect(llmEventsFor(const TextResponse('')), isEmpty);
     });
 

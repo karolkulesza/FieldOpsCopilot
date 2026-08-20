@@ -37,7 +37,7 @@ enum InferenceBackend {
 ///   declaration into the prompt and parses JSON back out of the generated text.
 ///
 /// Both arrive at this app as the same structured `LlmToolCall`, which is the
-/// whole point of the [LlmEngine] seam: the low-RAM fallback the sprint plan keeps
+/// whole point of the [LlmEngine] seam: the low-RAM fallback kept
 /// in reserve changes the mechanism, not the interface.
 enum GemmaModelFamily {
   /// Gemma 4 E2B/E4B — the primary target, native function calling.
@@ -62,8 +62,8 @@ class InferenceConfig {
 
   /// Absolute path to the `.litertlm` weights.
   ///
-  /// Always a file Task 1.7 has already downloaded, hashed against the pinned
-  /// SHA-256 and installed by atomic rename. This task never fetches weights: the
+  /// Always a file the provisioner has already downloaded, hashed against the pinned
+  /// SHA-256 and installed by atomic rename. The engine never fetches weights: an
   /// engine loading unverified bytes would make "the model is ready" a claim about
   /// a file that merely exists.
   final String modelPath;
@@ -113,7 +113,7 @@ class InferenceConfig {
   ///
   /// Chosen over the plugin's 1024 default because the grounded prompt is not
   /// small: the E-102 manual entry alone is ~200 tokens of procedure, and the agent
-  /// loop (Task 1.9) adds a tool declaration, a tool result and a second model turn
+  /// loop adds a tool declaration, a tool result and a second model turn
   /// on top of it. Costs a few MB of extra KV cache, which is cheap next to a
   /// mid-turn context overflow.
   static const int defaultContextTokens = 2048;
@@ -204,7 +204,7 @@ class InferenceConfig {
 ///
 /// The requested backend and the live one are different facts — the engine falls
 /// back silently — so the app records what it was given rather than what it asked
-/// for. [loadMillis] is the number the sprint plan wants measured on the demo
+/// for. [loadMillis] is the number worth measuring on the demo
 /// device: the spike's whole question is whether a 2.6GB model loads and runs
 /// acceptably on real hardware.
 class LoadedRuntime {

@@ -12,9 +12,10 @@ import 'package:flutter_test/flutter_test.dart';
 /// Collects every provider-override site: `overrideWith…(…)` calls and any
 /// `overrides:` argument (which is how `ProviderScope` takes them).
 ///
-/// The other half of **R6-F1**. These names are Riverpod's API, not this project's
-/// convention — which is what makes the set closed. A fake cannot reach the running
-/// app without one of them, whatever it is called and wherever it lives.
+/// The other half of the sink check at the bottom of this file. These names are
+/// Riverpod's API, not this project's convention — which is what makes the set
+/// closed. A fake cannot reach the running app without one of them, whatever it is
+/// called and wherever it lives.
 class _OverrideCollector extends RecursiveAstVisitor<void> {
   final sites = <(int offset, String what)>[];
 
@@ -41,38 +42,37 @@ class _OverrideCollector extends RecursiveAstVisitor<void> {
 /// because a fallback produces an app that answers a technician fluently, in
 /// well-formatted prose, from a scripted list — on a device where the model never
 /// ran. That is indistinguishable from success in a screen recording, which is the
-/// artefact Task 1.11 exists to produce.
+/// artefact this project's demo exists to produce.
 ///
 /// **Why a source test rather than a mutation or a behavioural one.** A behavioural
 /// test cannot reach the real `agentEngineProvider` on a host: its chain ends in
 /// `ModelStorage.openDefault()`, a platform channel, and every host test that touches
 /// the seam overrides it. A mutation cannot express the defect either, because adding
-/// the fallback needs an added import *and* a changed body, and the harness applies
-/// one contiguous replacement (review mutation M36).
+/// the fallback needs an added import *and* a changed body, and the mutation harness
+/// applies one contiguous replacement.
 ///
 /// **This file has been wrong three times, and every time the same way. That history
 /// is the design.**
 ///
 /// 1. It scanned for the string `FakeLlmEngine` outside an allow-list that included
 ///    `lib/engines/providers.dart`, whose *job* is binding fakes — so a fake bound
-///    there under a new name was invisible (M36, retargeted).
+///    there under a new name was invisible.
 /// 2. It added an import check over a hand-listed set of "production" directories
 ///    that omitted **`lib/main.dart`** — the file holding the app's only root
-///    `ProviderScope`, and therefore the likeliest home for exactly this override
-///    (**R1-F3**).
+///    `ProviderScope`, and therefore the likeliest home for exactly this override.
 /// 3. Inverting to "scan everything, exempt `lib/engines/`" fixed *which files are
 ///    scanned* — permanently, and there is a coverage test for it — but not *what
 ///    counts as reaching a fake*. That was still an enumeration: one directory and one
 ///    filename. So the exempt zone was a subtree while the boundary into it named a
-///    single file, which is an inclusion list of size one. **R2-F2** demonstrated two
-///    ways through: a *second* fake-binding file inside the exemption
+///    single file, which is an inclusion list of size one. Two ways through were
+///    demonstrated: a *second* fake-binding file inside the exemption
 ///    (`engines/demo_seam.dart`) consumed by the real `main.dart`, and an `export`
 ///    barrel, since `startsWith('import ')` does not match `export`.
 ///
 /// **So the boundary is now computed, not listed.** Two passes over one walk:
 ///
 /// * **Pass 1** finds every file *inside* the exemption that mentions a fake. Those
-///   are the fake-bearing files. Today that is the four fakes and
+///   are the fake-bearing files. Today that is the two fakes and
 ///   `engines/providers.dart`; nothing names them.
 /// * **Pass 2** flags any file *outside* the exemption that either mentions a fake
 ///   itself, or has an `import`/`export`/`part` directive resolving to one of pass
@@ -85,10 +85,10 @@ class _OverrideCollector extends RecursiveAstVisitor<void> {
 /// barrel does not launder the reference, it becomes the offender.
 ///
 /// What the exemption still buys is only what it always did: `lib/engines/` may name
-/// fakes, because the Tier 0 DI seam legitimately binds them for `SttEngine`,
-/// `VisionEngine` and `PlatformTelemetry`, none of which has a real backend yet. The
-/// *exemption* never acquired a hole — both R1-F3 and R2-F1 came from the other side
-/// of the boundary, which is the sentence the earlier version of this doc got wrong.
+/// fakes, because the DI seam legitimately binds them as the host-side default. The
+/// *exemption* never acquired a hole — both of the misses above came from the other
+/// side of the boundary, which is the sentence the earlier version of this doc got
+/// wrong.
 void main() {
   /// The subtree production may not reach into, except for [openFiles].
   const exemptPrefix = 'lib/engines/';
@@ -96,19 +96,18 @@ void main() {
   /// **The only files inside the exemption production is allowed to reach**, each
   /// with the reason it is allowed.
   ///
-  /// This is the fix for review finding **R5-F1**, and it inverts the seed the same
-  /// way R2-F1 inverted the scanned set. Pass 1 used to ask *"does this exempt file
-  /// name a fake?"* — two string literals matched against line text. That found **2
-  /// of the 11 files** in `lib/engines/`, missed three of the four fakes outright,
-  /// and worked at all only because the seam happens to contain the literal
-  /// `FakeLlmEngine`. A fifth fake under any other name — the reviewer used
-  /// `ScriptedLlmEngine` — was invisible, and a `main.dart` binding it into
-  /// `agentEngineProvider` passed the whole suite with a scripted engine answering
-  /// every inquiry.
+  /// This inverts the seed the same way the scanned set was inverted one level up.
+  /// Pass 1 used to ask *"does this exempt file name a fake?"* — two string literals
+  /// matched against line text. That found **2 of the files** in `lib/engines/`,
+  /// missed most of the fakes outright, and worked at all only because the seam
+  /// happens to contain the literal `FakeLlmEngine`. A further fake under any other
+  /// name — `ScriptedLlmEngine`, say — was invisible, and a `main.dart` binding it
+  /// into `agentEngineProvider` passed the whole suite with a scripted engine
+  /// answering every inquiry.
   ///
   /// So the question is no longer "which of these is a fake" (an open set, guessed
-  /// by name) but **"which of these may production touch"** (a closed set, five
-  /// files since Task 2.3, each justified). Everything else under `lib/engines/` is
+  /// by name) but **"which of these may production touch"** (a closed set of five
+  /// files, each justified). Everything else under `lib/engines/` is
   /// off-limits
   /// whether or not it names a fake, whether or not it is a fake at all.
   ///
@@ -124,7 +123,7 @@ void main() {
     'lib/engines/tool_schema.dart',
     // The device engine — the one implementation production is *supposed* to reach.
     'lib/engines/impl/gemma_llm_engine.dart',
-    // **Task 2.3 put speech on the answer path**, so the same two files exist for
+    // **Speech is on the answer path**, so the same two files exist for
     // the recogniser as for the model: the interface `DictationController` is
     // written against, and the one implementation production is supposed to reach.
     // Everything else under `lib/engines/` stays restricted — including
@@ -136,7 +135,7 @@ void main() {
 
   /// Comments are where the *reason* for this rule is written down, so they must be
   /// able to name the class. Only code counts — and this is `startsWith`, not
-  /// `contains`, so a trailing `// …` cannot hide a live line (R2-F3).
+  /// `contains`, so a trailing `// …` cannot hide a live line.
   bool isComment(String line) => line.startsWith('//');
 
   /// A code line that names a fake engine directly.
@@ -147,15 +146,15 @@ void main() {
   /// parser, not a regular expression.**
   ///
   /// **This is the fifth version of this logic, and the first that is not an
-  /// enumeration.** The previous four were regexes, and each review round found the
-  /// case adjacent to the one just fixed:
+  /// enumeration.** The previous four were regexes, and each round of review found
+  /// the case adjacent to the one just fixed:
   ///
-  /// | round | what got through |
-  /// |---|---|
-  /// | R2-F1 | a wrapper, and an `export` barrel (`startsWith('import ')`) |
-  /// | R3-F1 | a conditional import — only the first URI was read |
-  /// | R4 addendum | a directive `dart format` had wrapped across lines |
-  /// | R4-F1/F2/F3 | a `;` or an apostrophe **inside a comment**; adjacent-string URI concatenation; `import'x';` with no space |
+  /// | what got through |
+  /// |---|
+  /// | a wrapper, and an `export` barrel (`startsWith('import ')`) |
+  /// | a conditional import — only the first URI was read |
+  /// | a directive `dart format` had wrapped across lines |
+  /// | a `;` or an apostrophe **inside a comment**; adjacent-string URI concatenation; `import'x';` with no space |
   ///
   /// The last row is the one that settles the design. Joining lines until a `;` and
   /// pairing quotes across the result cannot work, because neither step knows what a
@@ -168,12 +167,12 @@ void main() {
   ///
   /// A parser knows what a comment is, what an adjacent-string literal is, and where
   /// a directive ends. `uri.stringValue` also folds `'package:…/engines/'
-  /// 'providers.dart'` into one URI, which R4-F2 showed the extraction never could.
-  /// This is the same move R2-F1's fix made one level up: compute the answer rather
-  /// than enumerate the ways of getting it wrong.
+  /// 'providers.dart'` into one URI, which string extraction never could. This is the
+  /// same move the scanned-set fix made one level up: compute the answer rather than
+  /// enumerate the ways of getting it wrong.
   /// The narrowing is [UriBasedDirective], **not a list of the two subtypes that
-  /// happen to implement it today.** Raised as a non-blocking review note after
-  /// round 5, and taken because it is the same mistake as R5-F1 one level down:
+  /// happen to implement it today.** That is the same mistake as the name-matched
+  /// seed one level down:
   /// `is NamespaceDirective || is PartDirective` is exhaustive by *inspection of one
   /// package version*, so a future `UriBasedDirective` subtype would be skipped in
   /// silence — this file's signature failure. Asking the supertype is closed by
@@ -189,7 +188,7 @@ void main() {
       final line = unit.lineInfo.getLocation(directive.offset).lineNumber;
       final uri = directive.uri.stringValue;
       if (uri != null) yield (line, uri);
-      // Every `if (…)` configuration too — which is where R3-F1's fake-bearing URI
+      // Every `if (…)` configuration too — which is where a fake-bearing URI once
       // hid. Only `import`/`export` can carry them, so the narrowing stays here.
       if (directive is NamespaceDirective) {
         for (final configuration in directive.configurations) {
@@ -209,8 +208,8 @@ void main() {
     // This package's own `package:` form addresses the scan root — `lib/` for the
     // real tree. Resolved against [root] rather than a hard-coded `lib/` so a probe
     // tree can exercise this branch at all; the first version hard-coded it and the
-    // probe silently tested nothing (R2-F3). Normalised like the relative branch,
-    // which it was not in R3-F1.
+    // probe silently tested nothing. Normalised like the relative branch, which it
+    // was not until a `./` in the middle of a URI slipped past the membership check.
     const self = 'package:field_ops_copilot/';
     if (uri.startsWith(self)) {
       return p
@@ -224,7 +223,7 @@ void main() {
   /// Offenders under [root], as `path -> [line numbers]`.
   ///
   /// Takes its root and exemption as parameters so the positive path is testable: a
-  /// detector that has only ever returned empty is not a detector (R1-F2).
+  /// detector that has only ever returned empty is not a detector.
   Map<String, List<int>> scan({
     required String root,
     required String exempt,
@@ -245,14 +244,14 @@ void main() {
     // **Pass 1 — what inside the exemption production may not reach.**
     //
     // Everything under the exemption except [open], rather than "whatever names a
-    // fake" (R5-F1). Closed by construction and failing closed: a new file is
-    // restricted until someone justifies it.
+    // fake". Closed by construction and failing closed: a new file is restricted
+    // until someone justifies it.
     final restricted = <String>{
       for (final path in sources.keys)
         if (isExempt(path) && !open.contains(path)) path,
     };
 
-    // The closure R3-F1 bought, applied to what remains: an *open* file that reaches
+    // The closure, applied to what remains: an *open* file that reaches
     // a restricted one is itself restricted, so the exceptions cannot be used as a
     // doorway. Iterated, because an open file could reach another open file
     // that later becomes restricted.
@@ -316,8 +315,8 @@ void main() {
   });
 
   group('the detector can actually detect', () {
-    // R1-F2: a scan only ever run over a tree with nothing to find cannot be told
-    // from a dead one. Every case below runs it over a tree that has something.
+    // A scan only ever run over a tree with nothing to find cannot be told from a
+    // dead one. Every case below runs it over a tree that has something.
     test('it reports a file that names a fake directly', () {
       final root = probeTree('direct', {
         'offender.dart': 'final e = FakeLlmEngine();\n',
@@ -326,7 +325,7 @@ void main() {
       expect(scan(root: root, exempt: '')['$root/offender.dart'], [1]);
     });
 
-    // **R2-F1 Evidence A.** A *second* fake-binding file inside the exemption,
+    // **Evidence A.** A *second* fake-binding file inside the exemption,
     // consumed from outside it. The old scan missed this because the boundary named
     // one filename; the computed boundary finds it because pass 1 discovers the file
     // rather than being told about it.
@@ -366,7 +365,7 @@ void main() {
       );
     });
 
-    // **R2-F1 Evidence B.** `export` rather than `import`.
+    // **Evidence B.** `export` rather than `import`.
     test('it reports an export barrel, not just an import', () {
       final root = probeTree('evidence_b', {
         'engines/providers.dart': 'final p = FakeLlmEngine();\n',
@@ -396,7 +395,7 @@ void main() {
             "import 'package:field_ops_copilot/engines/providers.dart';\n",
       });
 
-      // No `open:` set, and no comment claiming one. R6-F3: this case used to pass
+      // No `open:` set, and no comment claiming one. This case used to pass
       // `open: {seam.dart, stub.dart}` — two files this probe tree does not contain —
       // under a comment describing a wrapped directive that is not here either. Both
       // were copied from the wrapped-directive case below. Deleting the argument left
@@ -408,7 +407,7 @@ void main() {
       ]);
     });
 
-    // **R3-F1's wrapper — the shape that broke the transitivity argument.** An
+    // **The wrapper — the shape that broke the transitivity argument.** An
     // exempt file that *reaches* a fake without naming one. Pass 2 skips it for being
     // exempt; the single-sweep pass 1 declined to flag it for not naming a fake, so
     // the reference was laundered and the consumer was invisible.
@@ -423,10 +422,10 @@ void main() {
       });
 
       // `demo_seam.dart` declared **open**, so the closure is the only thing that
-      // can restrict it. R6-F2: without this the wrapper was restricted by
-      // *location* under R5-F1's inversion, so this test — R3-F1's own regression
-      // test, the finding that cost a round — passed with the closure deleted. Its
-      // stated reason had stopped being true of what executed.
+      // can restrict it. Without that, the wrapper was restricted by *location* under
+      // the inverted seed, so this test — the wrapper's own regression test — passed
+      // with the closure deleted. Its stated reason had stopped being true of what
+      // executed.
       final found = scan(
         root: root,
         exempt: '$root/engines/',
@@ -467,7 +466,7 @@ void main() {
       );
     });
 
-    // **R3-F1's conditional import.** The regex captured only the first URI, and
+    // **The conditional import.** The regex captured only the first URI, and
     // `dart.library.io` is the branch taken on iOS and Android — so the miss was on
     // the device and the hit on a platform this app does not ship to.
     test('it reads every URI of a conditional import', () {
@@ -486,8 +485,8 @@ void main() {
       );
     });
 
-    // **The wrapped directive — round 4's finding, and the one that matters most of
-    // these because the *formatter* produces it.** A conditional import with a long
+    // **The wrapped directive — the one that matters most of these, because the
+    // *formatter* produces it.** A conditional import with a long
     // `package:` URI does not fit on one line, so `dart format` wraps it; the
     // fake-bearing URI then sits on a continuation line that does not start with
     // `import`, and a per-line scan never sees it. Verified against the real
@@ -500,7 +499,7 @@ void main() {
         // Exactly the shape `dart format` emits.
         'main.dart':
             "import 'seam_stub.dart'\n"
-            "    if (dart.library.io) "
+            '    if (dart.library.io) '
             "'package:field_ops_copilot/engines/providers.dart';\n",
       });
 
@@ -525,10 +524,11 @@ void main() {
         'main.dart': "import 'engines/seam.dart';\n",
       });
 
-      // `seam.dart` open — R6-F2 again, and this is the one whose vacuity my own
-      // R5-F2 answer diagnosed without recognising: the 7→6 drop happened because
-      // this file stopped needing its conditional import to be seeded. That was the
-      // vacuity, recorded as an explanation of a count.
+      // `seam.dart` open, so only the closure can restrict it. This is the case
+      // whose vacuity hid inside a count: after the seed was inverted, this file
+      // stopped needing its conditional import to be seeded at all, and the drop from
+      // seven seeded files to six was recorded as an explanation rather than read as
+      // the warning it was.
       expect(
         scan(
           root: root,
@@ -542,8 +542,8 @@ void main() {
     // **The four shapes that defeated the regex, and the reason this uses a
     // parser.** Every one of these is valid Dart, `dart format`-stable, and was
     // demonstrated in the real `lib/main.dart` binding `agentEngineProvider` to the
-    // fake with the whole suite green (review round 4: R4-F1, R4-F2, R4-F3). Three
-    // of the four turn on a single character — inside a *comment*.
+    // fake with the whole suite green. Three of the four turn on a single character —
+    // inside a *comment*.
     //
     // They are grouped deliberately: no one of them is interesting on its own, and
     // together they are the argument for `package:analyzer`. Any of them can be
@@ -608,7 +608,7 @@ void main() {
       });
     }
 
-    // **R3-F1's normalisation gap.** Relative URIs were normalised and `package:`
+    // **The normalisation gap.** Relative URIs were normalised and `package:`
     // ones were not, so a `./` in the middle slipped past the set membership check.
     test('it normalises this package\'s package: URIs too', () {
       final root = probeTree('normalise', {
@@ -622,7 +622,7 @@ void main() {
       ]);
     });
 
-    // R2-F3: the comment skip is `startsWith`, not `contains`. Under `contains` any
+    // The comment skip is `startsWith`, not `contains`. Under `contains` any
     // code line with a trailing comment would be invisible — and the clean-probe
     // case below cannot tell the two apart, because it uses a `///` line.
     test('a trailing comment does not hide a live line', () {
@@ -666,9 +666,9 @@ void main() {
       );
     });
 
-    // …and the same file, *not* declared open, is off-limits. This is R5-F1's
-    // inversion in one pair: membership of the open set is the whole question, and
-    // nothing about the file's name or contents enters into it.
+    // …and the same file, *not* declared open, is off-limits. This is the inverted
+    // seed in one pair: membership of the open set is the whole question, and nothing
+    // about the file's name or contents enters into it.
     test('the same import IS an offence when the file is not open', () {
       final root = probeTree('not_open', {
         'engines/llm_engine.dart': 'abstract class LlmEngine {}\n',
@@ -681,9 +681,10 @@ void main() {
     });
   });
 
-  group('R5-F1: the seed is a closed set, and it fails closed', () {
-    // The reviewer's shape: a fifth engine that never contains the word the old
-    // seed looked for, outside `fakes/`, bound into `agentEngineProvider` from
+  group('the seed is a closed set, and it fails closed', () {
+    // The shape that defeated the name-matched seed: a fifth engine that never
+    // contains the word it looked for, outside `fakes/`, bound into
+    // `agentEngineProvider` from
     // `main.dart`. Under the name-matching seed this passed the entire suite with a
     // scripted engine answering every technician inquiry.
     test('a fake under a novel name, outside fakes/, is still restricted', () {
@@ -730,8 +731,8 @@ void main() {
     });
 
     // The open set is a doorway only for itself: an open file that reaches a
-    // restricted one becomes restricted, which is R3-F1's closure surviving the
-    // seed's inversion.
+    // restricted one becomes restricted, which is the closure surviving the seed's
+    // inversion.
     test('an open file that reaches a restricted one loses its exemption', () {
       final root = probeTree('open_doorway', {
         'engines/secret.dart': 'class ScriptedLlmEngine {}\n',
@@ -753,7 +754,7 @@ void main() {
     });
 
     // The real tree's classification, asserted rather than assumed — the old seed
-    // found 2 of 11 and missed three of the four fakes, and nothing said so.
+    // found two files and missed most of the fakes, and nothing said so.
     test('every fake in the real tree is restricted', () {
       final fakes = Directory('lib/engines/fakes')
           .listSync()
@@ -762,7 +763,7 @@ void main() {
           .where((path) => path.endsWith('.dart'))
           .toList();
 
-      expect(fakes, hasLength(4), reason: 'four fakes ship today');
+      expect(fakes, hasLength(2), reason: 'two fakes ship today');
       for (final fake in fakes) {
         expect(openFiles, isNot(contains(fake)), reason: fake);
       }
@@ -771,8 +772,8 @@ void main() {
 
     // The open set is five files and growing it must be a deliberate, visible
     // edit — each entry carries its justification in the constant's doc. The count
-    // in this comment went stale when Task 2.3 added the two STT entries, which is
-    // review finding R0-F5 and exactly the failure this file specialises in.
+    // in this comment once went stale when the two STT entries were added, which is
+    // exactly the failure this file specialises in.
     test('the open set is exactly the five production needs', () {
       expect(openFiles, {
         'lib/engines/llm_engine.dart',
@@ -785,8 +786,9 @@ void main() {
   });
 
   group('the scan covers what it claims to', () {
-    // R1-F3's root cause was coverage: the file that mattered was not in the scanned
-    // set. Asserted directly, so narrowing it is a visible edit.
+    // The `main.dart` miss had coverage as its root cause: the file that mattered
+    // was not in the scanned set. Asserted directly, so narrowing it is a visible
+    // edit.
     test('the scanned set includes main.dart and app.dart', () {
       final scanned = Directory('lib')
           .listSync(recursive: true)
@@ -801,9 +803,9 @@ void main() {
       expect(scanned, contains('lib/services/inference/providers.dart'));
       expect(scanned, contains('lib/viewmodels/field_job_viewmodel.dart'));
       expect(scanned, contains('lib/views/diagnose_screen.dart'));
-      // Task 2.3's additions, for R1-F3's reason: the file that matters has to be
-      // in the scanned set, and the two that now decide whether a *transcript*
-      // comes from a script are these.
+      // The speech path, for the same reason: the file that matters has to be in
+      // the scanned set, and the two that decide whether a *transcript* comes from
+      // a script are these.
       expect(scanned, contains('lib/services/audio/providers.dart'));
       expect(scanned, contains('lib/viewmodels/dictation_viewmodel.dart'));
     });
@@ -824,7 +826,8 @@ void main() {
 
     // Pass 1 must actually find something in the real tree, or pass 2 has an empty
     // set to compare against and the whole guard is vacuous. This is the assertion
-    // that would have caught a pass-1 regression before R2-F1's shape reopened.
+    // that would have caught a pass-1 regression before the second fake-binding file
+    // reopened the hole.
     test('pass 1 finds the real fake-bearing files', () {
       // Re-derived rather than asserted from a list, so adding a fake does not
       // require editing this test — only that at least the seam is found.
@@ -843,7 +846,7 @@ void main() {
       expect(
         fakeBearing,
         contains('lib/engines/providers.dart'),
-        reason: 'the Tier 0 seam binds the fake, so it must be discovered',
+        reason: 'the DI seam binds the fake, so it must be discovered',
       );
       expect(
         fakeBearing,
@@ -852,22 +855,22 @@ void main() {
       );
     });
 
-    // **`throwIfDiagnostics: false` fails open, and nothing used to notice.** Raised
-    // as a non-blocking review note after round 5 and taken, because the failure mode
-    // it describes is the one this file specialises in: a file the parser cannot read
+    // **`throwIfDiagnostics: false` fails open, and nothing used to notice.** The
+    // failure mode it describes is the one this file specialises in: a file the
+    // parser cannot read
     // yields whatever `unit.directives` survived recovery, and the scan reports it
     // clean — silently, with the suite green.
     //
     // It is not reachable today (syntax garbage still recovers directives, and
-    // `flutter analyze` gates malformed source anyway), which is why it was a note
-    // and not a finding. But `analyzer` is pinned `^12.1.0` against an SDK constraint
+    // `flutter analyze` gates malformed source anyway). But `analyzer` is pinned
+    // `^12.1.0` against an SDK constraint
     // of `^3.12.2` and those move independently: a language feature the bundled front
     // end accepts and analyzer 12 does not would degrade this guard to silence. This
     // converts that degradation into a failing test.
     //
     // Kept as a separate assertion rather than a throw inside [directiveUris],
-    // deliberately — the probe trees deliberately feed it malformed source (P2/P2b
-    // are *about* recovery), so the parse must stay tolerant. What must not be
+    // deliberately — some probe trees feed it deliberately malformed source and are
+    // *about* recovery, so the parse must stay tolerant. What must not be
     // tolerant is the parse of the **real tree**, which is what this asserts.
     test('the parser reads every real production file without recovering', () {
       final unreadable = <String, List<String>>{};
@@ -894,11 +897,11 @@ void main() {
     });
   });
 
-  // **The sink, which six rounds of this file never looked at (R6-F1).**
+  // **The sink, which six revisions of this file never looked at.**
   //
   // Everything above asks where an engine comes *from*: which file is a fake, which
   // directive reaches it, which URI form hides the reach. Six times that question has
-  // been answered and six times the next round moved the fake somewhere the answer did
+  // been answered and six times the next attempt moved the fake somewhere the answer did
   // not cover — a new name, a new directory, a new directive shape. The seventh hole
   // was a `ScriptedDemoEngine` in `lib/services/inference/`, importing only the *open*
   // `llm_engine.dart`: outside the exemption, so nothing classified it at all.
@@ -915,20 +918,17 @@ void main() {
   //   rule: a scripted engine returned from `agentEngineProvider`'s **body** needs no
   //   override anywhere, is analyze-clean, and leaves the override test green. That
   //   one is caught by the contract sink, not by this one.
-  // * *"Every fake has to implement `LlmEngine` to be usable at all."* R9-F1
-  //   falsified it — a scripted `InferenceHost` answers through the *real*
+  // * *"Every fake has to implement `LlmEngine` to be usable at all."* Falsified by
+  //   compiling one — a scripted `InferenceHost` answers through the *real*
   //   `GemmaLlmEngine`, which is a state machine over an injected collaborator.
   //
   // So neither test is closed by construction on its own, and saying so is the point:
   // the override sink catches the wiring, the contract sink catches the type, and
   // **the two are complementary rather than each sufficient.**
   //
-  // **This used to continue "and every fake has to implement `LlmEngine` to be usable
-  // at all", and R9-F1 falsified it by compiling one that does not.** A scripted
-  // `InferenceHost` answers through the *real* `GemmaLlmEngine`, because that engine
-  // is a state machine over an injected collaborator. So the guarded surface is
-  // [scriptableContracts] — the whole token path — and the honest claim is narrower:
-  // an implementation of *any* contract on that path must live in an approved file.
+  // So the guarded surface is [scriptableContracts] — the whole token path — and the
+  // honest claim is narrower than "every fake implements `LlmEngine`": an
+  // implementation of *any* contract on that path must live in an approved file.
   group('the sink: how an engine reaches the running app', () {
     /// Every `.dart` under `lib/`, as path → source.
     Map<String, String> productionSources() {
@@ -941,11 +941,11 @@ void main() {
     }
 
     // Production wires its graph by *declaring* providers, never by overriding them.
-    // Overriding is a test's tool, and the doc has said so in prose since round 0 —
-    // "the fake is still exactly one line away from any *test* that wants it … a
-    // deliberate act in a test file". It had simply never been asserted, and it was
-    // the statement all seven exploits *known at the time* went through — not, as an
-    // earlier version of this line said, the one every exploit needs. See the group
+    // Overriding is a test's tool, and this file's doc has said so in prose from the
+    // start — "the fake is still exactly one line away from any *test* that wants it
+    // … a deliberate act in a test file". It had simply never been asserted, and it
+    // was the statement all seven exploits *known at the time* went through — not, as
+    // an earlier version of this line said, the one every exploit needs. See the group
     // doc above: a scripted engine returned from `agentEngineProvider`'s own body
     // needs no override at all, and is caught by the contract sink instead.
     //
@@ -953,12 +953,12 @@ void main() {
     // production override should be a conversation rather than an entry in a set.
     /// Override sites in [sources], as `path -> ['overrideWith(…)', …]`.
     ///
-    /// Takes its sources as a parameter for the reason `scan` does, and R7-F3 is what
-    /// it cost not to: both sink detectors used to read `lib/` directly, so neither
-    /// had a positive path and **both could be disabled with the file green.** That
-    /// is R1-F2 verbatim, on new code, five rounds later — and it is *how* R7-F1 and
-    /// R7-F2 survived. A detector that has only ever returned empty is not a
-    /// detector.
+    /// Takes its sources as a parameter for the reason `scan` does, and not doing so
+    /// had a cost: both sink detectors used to read `lib/` directly, so neither had a
+    /// positive path and **both could be disabled with the file green.** That is the
+    /// dead-detector problem verbatim, on new code, five revisions later — and it is
+    /// *how* the second-declaration and declaration-form misses survived. A detector
+    /// that has only ever returned empty is not a detector.
     Map<String, List<String>> overrideSites(Map<String, String> sources) {
       final offenders = <String, List<String>>{};
       sources.forEach((path, source) {
@@ -979,37 +979,38 @@ void main() {
         overrideSites(productionSources()),
         isEmpty,
         reason:
-            'overriding a provider in lib/ is how every fake in this review reached '
+            'overriding a provider in lib/ is how every demonstrated fake reached '
             'the app; production declares its graph, tests override it',
       );
     });
 
-    // **Every interface a scripted answer can enter through, not just the top one —
-    // R9-F1.** The guard watched `LlmEngine` for four rounds while the actual seam
-    // was one interface down. `GemmaLlmEngine` is a state machine over an *injected*
+    // **Every interface a scripted answer can enter through, not just the top one.**
+    // The guard watched `LlmEngine` for four revisions while the actual seam was one
+    // interface down. `GemmaLlmEngine` is a state machine over an *injected*
     // collaborator — its own doc says it "takes an `InferenceHost` rather than
     // building one", `initialize()` is `_host.start(config)` and `generate()` is
     // `return _host.generate(…)` verbatim. So an `InferenceHost` returning canned
     // tokens produces a scripted demo through the **real** `GemmaLlmEngine`, and
-    // `InferenceHost` is not an `LlmEngine`, so nothing here saw it. The reviewer ran
-    // it end to end: with no verified weights the real `agentEngineProvider` returned
-    // a ready engine reporting a `gpu` backend and answered from a script.
+    // `InferenceHost` is not an `LlmEngine`, so nothing here saw it. Demonstrated end
+    // to end: with no verified weights the real `agentEngineProvider` returned a ready
+    // engine reporting a `gpu` backend and answered from a script.
     //
     // The lesson is the one this file keeps relearning at a new level: *dependency
     // injection means every injected interface is a seam*, so the guarded set is the
     // set of contracts an answer can be scripted through, not the one at the top.
     //
-    // **So this is the whole token path, not just the one the reviewer named** —
-    // adding only `InferenceHost` would be patching the instance instead of asking
-    // the question, which is the move that has bought exactly one round, five times.
+    // **So this is the whole token path, not just the one interface that was
+    // demonstrated** — adding only `InferenceHost` would be patching the instance
+    // instead of asking the question, which is the move that has bought exactly one
+    // revision, five times.
     // `InferenceRuntime` is the same seam one level further down, injected at
     // `inference_isolate.dart:462` and `:547`, and its own doc says the host can be
     // "driven on the host against a scripted [InferenceRuntime]" — the evasion is
     // written in the source as an intended capability.
     //
-    // **`SttEngine` and its two seams joined the set in Task 2.3, on the condition
-    // the previous version of this comment stated: "If a future feature puts one of
-    // them there, it belongs here."** 2.3 is that feature. A transcript is now the
+    // **`SttEngine` and its two seams joined the set when speech landed, on the
+    // condition the previous version of this comment stated: "If a future feature puts
+    // one of them there, it belongs here."** A transcript is now the
     // *inquiry* — it is what `RetrievalRouter` searches on, what `PromptCompiler`
     // grounds, and what reaches the model — so a scripted recogniser produces a
     // genuine answer, genuinely grounded, to a question nobody asked. That is worse
@@ -1020,8 +1021,8 @@ void main() {
     // one layer up — `SherpaSttEngine` is a state machine over an injected
     // `SttHost`, and `IsolateSttHost` drives an injected `SttRecognizerRuntime`
     // whose own doc offers scripting as a capability. Guarding only the top
-    // interface would be R9-F1 repeated on new code, which is the move this file
-    // records buying exactly one round, five times.
+    // interface would repeat the `InferenceHost` miss on new code, which is the move
+    // this file records buying exactly one revision, five times.
     //
     // **What is deliberately *not* here, and why.** `SeedSource` and `AgentTool` can
     // both feed the model false input, but the model still generates the answer, so
@@ -1029,9 +1030,9 @@ void main() {
     // and a different one. `AudioInput` is the closest call and stays out: it is the
     // *microphone*, and a scripted one feeding the real recogniser produces whatever
     // that audio really says — the transcript is still the model's own work on
-    // supplied sound, which is the same category as a supplied corpus. `VisionEngine`,
-    // `PlatformTelemetry`, `ModelDownloader` and `BackupExclusion` are not on the
-    // answer path at all. If a future feature puts one of them there, it belongs here.
+    // supplied sound, which is the same category as a supplied corpus.
+    // `ModelDownloader` and `BackupExclusion` are not on the answer path at all. If
+    // a future feature puts one of them there, it belongs here.
     const scriptableContracts = {
       'LlmEngine',
       'InferenceHost',
@@ -1043,10 +1044,10 @@ void main() {
 
     // The interface is a far smaller and more stable surface than the fake's name.
     // `LlmEngine` cannot be renamed without a compile error at every call site,
-    // whereas `FakeLlmEngine` was only ever a convention — which is exactly how R5-F1
-    // and R6-F1 got through.
+    // whereas `FakeLlmEngine` was only ever a convention — which is exactly how the
+    // name-matched seed and the missing sink got through.
     //
-    // **Keyed on `(file, declaration)`, not on file — R7-F1.** A set of *files* while
+    // **Keyed on `(file, declaration)`, not on file.** A set of *files* while
     // the property is per-*declaration* means appending a second class to an
     // already-approved file is invisible: `declarations.keys` is unchanged, so even
     // the anti-rot equality below still passed. A scripted engine appended to
@@ -1057,11 +1058,11 @@ void main() {
       ('lib/engines/impl/gemma_llm_engine.dart', 'GemmaLlmEngine'),
       // The fake, which lives inside the exemption where the scan above confines it.
       ('lib/engines/fakes/fake_llm_engine.dart', 'FakeLlmEngine'),
-      // The real host `GemmaLlmEngine` delegates to — R9-F1. The only one in `lib/`.
+      // The real host `GemmaLlmEngine` delegates to. The only one in `lib/`.
       ('lib/services/inference/inference_isolate.dart', 'IsolateInferenceHost'),
       // The real runtime the host drives, one seam further down.
       ('lib/services/inference/gemma_runtime.dart', 'GemmaRuntime'),
-      // **The speech path, added by Task 2.3** — the same four roles as above:
+      // **The speech path** — the same four roles as above:
       // the device engine, the fake (confined by the scan), the real host, and the
       // real runtime.
       ('lib/engines/impl/sherpa_stt_engine.dart', 'SherpaSttEngine'),
@@ -1073,25 +1074,25 @@ void main() {
     /// Every `(file, declaration)` under [root] whose type reaches `LlmEngine`,
     /// **asked of the resolved type system rather than of the syntax.**
     ///
-    /// This is the fix for **R8-F1**, and it is the move round 5 made one level up
-    /// when it replaced the directive regex with a parser. The syntactic version
-    /// asked "which declarations name `LlmEngine` in a supertype clause", and that
-    /// question has an unbounded number of spellings: it lost to a fifth declaration
-    /// form (R7-F2), to four unbound collector arms (R8-F2), and finally to
+    /// This is the same move made one level up when a directive regex was replaced
+    /// by a parser. The syntactic version asked "which declarations name `LlmEngine`
+    /// in a supertype clause", and that question has an unbounded number of
+    /// spellings: it lost to a fifth declaration form, to four unbound collector
+    /// arms, and finally to
     /// `typedef DemoEngineContract = LlmEngine;` — because the seed was a *name*, and
     /// Dart has a keyword for renaming a type. `allSupertypes` has no spellings. It
     /// is transitive by construction, so there is no closure to iterate; it covers
     /// every declaration form, so there is no list to keep; and it resolves aliases,
     /// so the seed is the type rather than the identifier.
     ///
-    /// **The reviewer was asked whether the cost was worth paying and said yes.**
-    /// Both objections in the previous round are settled: it costs ~10s against a
-    /// ~15s suite, which is the price of the last enumeration in this file; and the
-    /// SDK path is *derived*, not hardcoded — `FLUTTER_ROOT` is set inside
-    /// `flutter test` (verified: `/opt/homebrew/share/flutter`), which was the
-    /// factual error in my argument for keeping the syntax version.
+    /// **The cost is worth paying.** Both objections raised against it are settled:
+    /// it costs ~10s against a ~15s suite, which is the price of retiring the last
+    /// enumeration in this file; and the SDK path is *derived*, not hardcoded —
+    /// `FLUTTER_ROOT` is set inside `flutter test` (verified:
+    /// `/opt/homebrew/share/flutter`), which was the factual error in the argument
+    /// for keeping the syntax version.
     ///
-    /// Takes [root] as a parameter so it has a positive path (**R7-F3**), and a probe
+    /// Takes [root] as a parameter so it has a positive path, and a probe
     /// tree resolves without any package config as long as it declares its own
     /// `LlmEngine` and imports it relatively.
     Future<Set<(String, String)>> engineDeclarations(String root) async {
@@ -1147,10 +1148,9 @@ void main() {
     // **A tripwire, and it is worth being exact about what it is not.** Deriving the
     // corpus from [scriptableContracts] stops a contract being added without being
     // probed — but it also means *removing* one removes its probe, so the corpus can
-    // never catch a narrowing. That is the pairwise weakness R9's note N3 identified,
-    // and I made it worse before I made it better: dropping `'InferenceRuntime'`
-    // together with its approved pair is one coherent edit that left every other test
-    // green.
+    // never catch a narrowing. That is a pairwise weakness, and the first attempt
+    // made it worse before making it better: dropping `'InferenceRuntime'` together
+    // with its approved pair is one coherent edit that left every other test green.
     //
     // Nothing computable defends against that, because "which contracts can script an
     // answer" is a judgement about this app rather than a property of the code. So
@@ -1169,13 +1169,13 @@ void main() {
           'SttRecognizerRuntime',
         },
         reason:
-            'narrowing this set is exactly how R9-F1 shipped: the guard watched '
-            'LlmEngine while a scripted InferenceHost answered through the real '
-            'engine. Removing a name here needs an argument, not an edit.',
+            'narrowing this set is exactly how the last miss shipped: the guard '
+            'watched LlmEngine while a scripted InferenceHost answered through the '
+            'real engine. Removing a name here needs an argument, not an edit.',
       );
     });
 
-    // Two of the four fakes now implement a *guarded* contract, so confinement by
+    // Both fakes implement a *guarded* contract, so confinement by
     // the scan is no longer their only protection — the sink has to know about
     // them too, or the resolved detector reports them as unapproved.
     test(
@@ -1208,7 +1208,7 @@ void main() {
       timeout: const Timeout(Duration(minutes: 5)),
     );
 
-    // **The positive path for both sinks — R7-F3.** Everything above asserts the real
+    // **The positive path for both sinks.** Everything above asserts the real
     // tree is clean, which a detector that never fires satisfies perfectly. These run
     // the same two functions over trees built to offend, and over one built not to.
     group('the sinks can actually detect', () {
@@ -1243,27 +1243,27 @@ void main() {
       });
 
       // **One corpus, resolved once, covering every shape this sink has ever lost
-      // to.** Each line is a finding: the two-hop chain is the case that defeated
-      // round 7's one-hop check; the three-hop chain is one deeper than a
-      // single-sweep closure reached; the second declaration in an approved file is
-      // R7-F1; the five declaration forms are R7-F2; the `with`-a-mixin route is
-      // R8-F2's exploit; and the typedef is R8-F1, the one that retired the
-      // syntactic version entirely.
+      // to.** Each line is a defect that shipped: the two-hop chain defeated a
+      // one-hop check; the three-hop chain is one deeper than a single-sweep closure
+      // reached; a second declaration beside an approved one was invisible to a
+      // set keyed on files; the five declaration forms each escaped a syntactic
+      // collector in turn; `with`-a-mixin had no positive path; and the typedef is
+      // what retired the syntactic version entirely.
       //
       // A probe tree resolves with no package config because it declares its own
       // `LlmEngine` and imports it relatively — which is the only reason the
-      // resolved detector could keep the positive path R7-F3 bought.
+      // resolved detector could keep its positive path.
       test(
         'every route to LlmEngine is reported, and nothing else is',
         () async {
           final dir = Directory.systemTemp.createTempSync('fieldops_sink');
           addTearDown(() => dir.deleteSync(recursive: true));
-          // **Every guarded contract, derived from the set rather than named here —
-          // R9-F1's note N3.** The corpus used to declare `LlmEngine` alone, so only
-          // that entry was bound independently. The rest were bound *pairwise*:
-          // dropping `'InferenceRuntime'` from [scriptableContracts] together with
-          // its approved pair is one coherent edit that left the guard green and
-          // silently narrowed it back to where R9-F1 lived. Generating the corpus
+          // **Every guarded contract, derived from the set rather than named here.**
+          // The corpus used to declare `LlmEngine` alone, so only that entry was
+          // bound independently. The rest were bound *pairwise*: dropping
+          // `'InferenceRuntime'` from [scriptableContracts] together with its
+          // approved pair is one coherent edit that left the guard green and silently
+          // narrowed it back to where the last miss lived. Generating the corpus
           // from the set closes **half** of that, and only half: a contract added to
           // the set is probed automatically, so coverage cannot lag the set. A
           // contract *removed* takes its probe with it, so this test cannot catch a
@@ -1286,17 +1286,17 @@ void main() {
             // two hops, and three — a single sweep declared child-first misses these
             'class AsExtends extends AsImplements {}\n'
             'class AsExtendsDeeper extends AsExtends {}\n'
-            // R7-F1: a second declaration beside an approved one
+            // a second declaration beside an approved one
             'class SecondInFile implements LlmEngine {}\n'
-            // the remaining declaration forms (R7-F2)
+            // the remaining declaration forms
             'mixin AsMixinOn on AsImplements {}\n'
             'enum AsEnum implements LlmEngine { one }\n'
             'extension type AsExtensionType(int v) implements LlmEngine {}\n'
             'class AsAlias = Object with AsMixinImplements;\n'
-            // R8-F2: reached through `with`, which had no positive path
+            // reached through `with`, which had no positive path
             'mixin AsMixinImplements implements LlmEngine {}\n'
             'class AsWith with AsMixinImplements {}\n'
-            // R8-F1: the interface under another name
+            // the interface under another name
             'typedef Contract = LlmEngine;\n'
             'class AsTypedef implements Contract {}\n'
             // and one that is not an engine at all

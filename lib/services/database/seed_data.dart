@@ -1,6 +1,6 @@
 /// Parsing for the first-launch seed asset (`assets/elevator_manual_seed.json`).
 ///
-/// The asset is a **build input**, like Task 1.7's model URL and digest: it ships
+/// The asset is a **build input**, like the pinned model URL and digest: it ships
 /// inside the bundle and nothing at runtime can repair it. So it is validated
 /// *before* a single row is written — a malformed asset must be a typed
 /// [SeedFormatException] at parse time, not a half-applied seed discovered later

@@ -17,7 +17,7 @@ import 'package:integration_test/integration_test.dart';
 
 import 'e2e_fixtures.dart';
 
-/// TC-UI-DEMO-01 — the whole Tier 1 slice, driven through the real UI on a real
+/// TC-UI-DEMO-01 — the whole retrieve-to-answer slice, driven through the real UI on a real
 /// device, against real weights and the app's own durable database.
 ///
 /// ```sh
@@ -34,8 +34,8 @@ import 'e2e_fixtures.dart';
 /// top of it.** That suite builds the router, the compiler, the registry and the
 /// loop by hand, over a throwaway database it seeds itself. This one builds
 /// *nothing*: it pumps `FieldOpsApp` with no overrides at all and taps a button. So
-/// it is the only test in the repo that exercises Task 1.11's three deferred wirings
-/// as the app actually performs them —
+/// it is the only test in the repo that exercises the app's three deferred wirings
+/// as it actually performs them —
 ///
 /// 1. `DatabaseService.openDefault` in the real application-support directory, keyed
 ///    with the real `databaseEncryptionKeyProvider`;
@@ -46,8 +46,8 @@ import 'e2e_fixtures.dart';
 ///
 /// Any one of those failing on device is invisible to the whole host suite — no
 /// count here, because the one this line first carried went stale in the very next
-/// commit (review finding R0-F7). `flutter test` is the source of truth, which is
-/// the rule the README already adopted for the same reason.
+/// commit. `flutter test` is the source of truth, which is the rule the README
+/// already adopted for the same reason.
 ///
 /// **Assertions are fuzzy, as the tier requires.** A model's wording is not a
 /// contract. What is asserted is that the run ended because the model answered, that
@@ -57,9 +57,10 @@ import 'e2e_fixtures.dart';
 /// is not a fact about elevators, so a model answering from its weights cannot
 /// satisfy it by luck.
 ///
-/// **It also measures the two things only this run can.** Task 1.8 left throughput
-/// unmeasured (a one-token reply makes tokens-per-second a restatement of TTFT) and
-/// left the load-time UI stall diagnosed only as far as eliminating Metal. This suite
+/// **It also measures the two things only this run can.** The bare-engine device
+/// suite leaves throughput unmeasured (a one-token reply makes tokens-per-second a
+/// restatement of TTFT) and diagnoses the load-time UI stall only as far as
+/// eliminating Metal. This suite
 /// generates a real multi-sentence answer through the real screen, and ticks a 16ms
 /// timer on the UI isolate across both the warm-up and the generation — so it reports
 /// characters per second and the worst frame gap *for the flow being screen-recorded*
@@ -143,7 +144,7 @@ void main() {
       // --- wiring 3: the weights, loaded before the UI needs to be interactive --
       //
       // The screen's post-frame callback has already started this. Ticking a 16ms
-      // timer on the UI isolate across the wait is what turns Task 1.8's stall
+      // timer on the UI isolate across the wait is what turns the bare-engine stall
       // measurement into a statement about *this* flow: the stall is the same
       // stall, but here it lands while the static "loading" row is on screen.
       // Counted so the per-frame assertion below cannot pass by never running — a
@@ -164,8 +165,7 @@ void main() {
               return;
             }
             loadingFrames++;
-            // The load is where Task 1.8 measured 1445-1728ms of blocked UI
-            // isolate. The whole design is that it lands behind a *static* row, so
+            // The load is where 1445-1728ms of blocked UI isolate was measured. The whole design is that it lands behind a *static* row, so
             // this is asserted on the device, while the stall is happening, rather
             // than inferred from the state afterwards: a frozen indicator reads as
             // a crashed app.
@@ -348,7 +348,7 @@ Future<void> _pumpUntil(
 /// The same instrument as `llm_inference_test.dart`'s, pointed at the UI flow rather
 /// than at a bare engine call. A gap far above 16ms is the UI isolate having been
 /// blocked, which at 16.7ms per frame is dropped frames — visible in a recording,
-/// which is the whole reason Task 1.11 cares.
+/// which is the whole reason the demo screen cares.
 class _UiIsolateProbe {
   _UiIsolateProbe(this.worstGap, this.ticks, this.elapsed);
 

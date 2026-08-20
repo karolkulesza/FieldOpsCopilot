@@ -1,15 +1,15 @@
 /// The unit of audio that travels from the microphone to the STT engine.
 ///
-/// **Moved here by Task 2.2, out of `mic_capture.dart` where Task 2.1 wrote it.**
-/// The type itself is unchanged; what changed is who needs to name it.
+/// **Declared here rather than in `mic_capture.dart`, where it started.** The type
+/// itself is unchanged; what changed is who needs to name it.
 /// `SttEngine.transcribe` is now declared over `Stream<MicFrame>`, and
 /// `lib/engines/` may not depend on `mic_capture.dart` — that file imports
 /// `package:record` and holds `RecordAudioInput`, so an engine *interface*
 /// importing it would put a recorder plugin in the import graph of the layer whose
 /// whole purpose is to keep plugins out. This file has no dependency beyond
 /// `dart:typed_data`, so both sides can name the shared vocabulary without either
-/// reaching into the other. `mic_capture.dart` re-exports it, so every Task 2.1
-/// import still resolves.
+/// reaching into the other. `mic_capture.dart` re-exports it, so every import
+/// written against the old location still resolves.
 library;
 
 import 'dart:typed_data';
@@ -26,8 +26,9 @@ import 'pcm_audio_format.dart';
 /// frame that follows it puts the fact in the consumer's hands at the moment it
 /// becomes relevant, rather than in a counter someone has to remember to read.
 ///
-/// Task 2.2 is the consumer that was anticipated, and it does act on it: the STT
-/// worker bridges the gap with silence of its own duration before decoding the
+/// Speech recognition is the consumer that was anticipated, and it does act on it:
+/// the STT worker bridges the gap with silence of its own duration before decoding
+/// the
 /// frame, so the recogniser sees a pause rather than two non-adjacent moments
 /// spliced into one phrase.
 class MicFrame {

@@ -20,7 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// Everything else in `test/` stops at a scripted runtime, because the native
 /// library and a 43MB model are not things a unit test should need. This suite is
 /// the exception, and it exists because the alternative was shipping
-/// TC-STT-STRM-01 written and unrun the way Task 2.1 had to ship TC-MIC-01. It is
+/// TC-STT-STRM-01 written and unrun, the way TC-MIC-01 once had to ship. It is
 /// **not** a substitute for the device run — `integration_test/stt_test.dart` is
 /// still owed — but it moves everything except "the arm64 device can load this"
 /// from unverified to measured.
@@ -32,7 +32,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// **Opt-in, and skipped by default**, so CI stays hermetic. To run it:
 ///
 /// ```sh
-/// # 43.6MB, ungated, apache-2.0 — the same four files Task 2.0 provisions.
+/// # 43.6MB, ungated, apache-2.0 — the same four files the app provisions.
 /// R=https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17/resolve/main
 /// mkdir -p /tmp/fieldops-stt && cd /tmp/fieldops-stt
 /// for f in encoder-epoch-99-avg-1.int8.onnx decoder-epoch-99-avg-1.int8.onnx \
@@ -156,7 +156,7 @@ void main() {
       // Generous, because this is a claim about the handshake completing rather than
       // about a number. The measurement and the command that produced it live on
       // `SherpaRecognizerRuntime.load` — deliberately in one place, and this comment
-      // used to carry a second, staler copy of it (R0-F11) two lines above the `print`
+      // used to carry a second, staler copy of it two lines above the `print`
       // that emits the real figure. An assertion tight enough to pin a load time would
       // fail on a slower disk for no useful reason.
       expect(ready.loadMillis, lessThan(30000));
@@ -405,12 +405,12 @@ void main() {
         'out, final "${transcripts.last.text}"',
       );
 
-      // **The property, not a proxy for it — review finding R0-F2.** This used to be
+      // **The property, not a proxy for it.** This used to be
       // `expect(transcripts.length, lessThan(frames.length))` under a comment claiming
       // it was "what would fail if this filter were deleted". It was not: a chunk
       // produces no text until decoding has begun, so the count is structurally below
-      // the frame count whatever the filter does, and the reviewer deleted the filter
-      // and watched all five tests pass at 101 → 90 transcripts.
+      // the frame count whatever the filter does — deleting the filter
+      // left all five tests passing at 101 → 90 transcripts.
       //
       // What the filter actually guarantees is that no partial repeats its
       // predecessor within a segment. Asserting that is asserting the thing, and it

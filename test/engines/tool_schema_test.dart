@@ -10,7 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// Dart stack to read. Either way the symptom appears in the agent loop as a bad model
 /// rather than a bad registration.
 void main() {
-  /// The tool Task 1.5 will register first, in the shape the runtime requires.
+  /// The first tool the registry registers, in the shape the runtime requires.
   final inventoryTool = ToolDefinition(
     name: 'get_local_parts_inventory',
     description: 'Check offline warehouse stock and shelf location for a SKU.',

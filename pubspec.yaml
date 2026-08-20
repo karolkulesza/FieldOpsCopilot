@@ -1,38 +1,15 @@
 name: field_ops_copilot
 description: "Offline-first field-service copilot for smart-elevator maintenance technicians."
-# The following line prevents the package from being accidentally published to
-# pub.dev using `flutter pub publish`. This is preferred for private packages.
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
-
-# The following defines the version and build number for your application.
-# A version number is three numbers separated by dots, like 1.2.43
-# followed by an optional build number separated by a +.
-# Both the version and the builder number may be overridden in flutter
-# build by specifying --build-name and --build-number, respectively.
-# In Android, build-name is used as versionName while build-number used as versionCode.
-# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
-# In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
-# Read more about iOS versioning at
-# https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
-# In Windows, build-name is used as the major, minor, and patch parts
-# of the product and file versions while build-number is used as the build suffix.
+publish_to: 'none'
 version: 1.0.0+1
 
 environment:
   sdk: ^3.12.2
 
-# Dependencies specify other packages that your package needs in order to work.
-# To automatically upgrade your package dependencies to the latest versions
-# consider running `flutter pub upgrade --major-versions`. Alternatively,
-# dependencies can be manually updated by changing the version numbers below to
-# the latest version available on pub.dev. To see which dependencies have newer
-# versions available, run `flutter pub outdated`.
 dependencies:
   flutter:
     sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   flutter_riverpod: ^3.3.2
   drift: ^2.34.1
@@ -40,14 +17,14 @@ dependencies:
   path_provider: ^2.1.6
   path: ^1.9.1
 
-  # Streaming SHA-256 for model-weight verification (Task 1.7): a 2.4GB artifact
-  # is hashed chunk-by-chunk as it is written, never buffered in memory.
+  # Streaming SHA-256 for model-weight verification: a 2.4GB artifact is hashed
+  # chunk-by-chunk as it is written, never buffered in memory.
   crypto: ^3.0.7
   flutter_gemma: ^1.4.1
   flutter_gemma_litertlm: ^1.3.1
   record: ^7.1.1
 
-  # Task 2.2: on-device streaming ASR. `sherpa_onnx` is a thin `dart:ffi`
+  # On-device streaming ASR. `sherpa_onnx` is a thin `dart:ffi`
   # binding over the next-gen Kaldi C API; the native libraries arrive as the
   # per-platform packages it depends on (`sherpa_onnx_ios`, the four Android
   # ABIs, …), so no extra entry is needed here.
@@ -56,7 +33,8 @@ dependencies:
 # Bundle SQLite3MultipleCiphers (encryption-enabled SQLite) via the sqlite3
 # package's build hooks instead of the legacy sqlcipher_flutter_libs. This gives
 # every platform — including host unit tests — an encryption-capable sqlite3 and
-# makes cipher PRAGMAs (`PRAGMA key`, `PRAGMA cipher`) available. See Task 1.1.
+# makes cipher PRAGMAs (`PRAGMA key`, `PRAGMA cipher`) available. See
+# docs/data-persistence-and-encryption.md.
 hooks:
   user_defines:
     sqlite3:
@@ -66,43 +44,32 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
-  # The "flutter_lints" package below contains a set of recommended lints to
-  # encourage good coding practices. The lint set provided by the package is
-  # activated in the `analysis_options.yaml` file located at the root of your
-  # package. See that file for information about deactivating specific lint
-  # rules and activating additional ones.
+  # The base lint set. `analysis_options.yaml` layers the analyzer's strict modes
+  # and a chosen rule set on top of it, and says why for each.
   flutter_lints: ^6.0.0
   drift_dev: ^2.34.0
   build_runner: ^2.15.1
   # Test-only, and it earns its place by ending a sequence rather than shortening
   # it. `test/services/inference/no_fake_in_production_test.dart` guards the one
   # property this app cannot lose — that production never answers from a fake — by
-  # reading Dart source. Four review rounds found four ways past a regex doing that
-  # job, each the case adjacent to the last: a wrapper, an export barrel, a
-  # conditional import, a directive `dart format` had wrapped. The fifth round found
-  # three more, and all of them turned on a single character inside a *comment*. A
+  # reading Dart source. Four ways were found past a regex doing that job, each
+  # the case adjacent to the last: a wrapper, an export barrel, a conditional
+  # import, a directive `dart format` had wrapped — and then three more, all
+  # turning on a single character inside a *comment*. A
   # regex cannot know what a comment is; the parser does. Already present
   # transitively via `drift_dev`; declared here because the guard imports it.
   analyzer: ^12.1.0
-  # Harness for the integration tier (Task 1.7's TC-PROV-E2E-01 onward). Lives in
+  # Harness for the on-device integration tier (TC-PROV-E2E-01 onward). Lives in
   # `integration_test/`, which `flutter test` does not run, so CI stays host-only.
   integration_test:
     sdk: flutter
 
-# For information on the generic Dart part of this file, see the
-# following page: https://dart.dev/tools/pub/pubspec
-
-# The following section is specific to Flutter packages.
 flutter:
-
-  # The following line ensures that the Material Icons font is
-  # included with your application, so that you can use the icons in
-  # the material Icons class.
   uses-material-design: true
 
   assets:
     - assets/elevator_manual_seed.json
-    # Task 2.2's recorded utterance, bundled so `integration_test/stt_test.dart`
+    # A recorded test utterance, bundled so `integration_test/stt_test.dart`
     # can read it. An integration test runs *inside the app* on the device, and the
     # app cannot reach the repository's `test/` directory — so a fixture that is
     # not an asset is a fixture the device AC cannot use, which is how TC-MIC-01
@@ -123,29 +90,3 @@ flutter:
     # reader, and `stt_primer_test.dart` asserts these bytes are still the head of
     # the WAV above — so the two cannot drift apart unnoticed.
     - assets/audio/stt_primer.pcm
-
-  # An image asset can refer to one or more resolution-specific "variants", see
-  # https://flutter.dev/to/resolution-aware-images
-
-  # For details regarding adding assets from package dependencies, see
-  # https://flutter.dev/to/asset-from-package
-
-  # To add custom fonts to your application, add a fonts section here,
-  # in this "flutter" section. Each entry in this list should have a
-  # "family" key with the font family name, and a "fonts" key with a
-  # list giving the asset and other descriptors for the font. For
-  # example:
-  # fonts:
-  #   - family: Schyler
-  #     fonts:
-  #       - asset: fonts/Schyler-Regular.ttf
-  #       - asset: fonts/Schyler-Italic.ttf
-  #         style: italic
-  #   - family: Trajan Pro
-  #     fonts:
-  #       - asset: fonts/TrajanPro.ttf
-  #       - asset: fonts/TrajanPro_Bold.ttf
-  #         weight: 700
-  #
-  # For details regarding fonts from package dependencies,
-  # see https://flutter.dev/to/font-from-package
