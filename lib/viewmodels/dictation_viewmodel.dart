@@ -1,7 +1,7 @@
 /// Voice input as UI state: microphone → recogniser → the words on screen.
 ///
-/// This is the wiring Task 2.2's row says nothing performs yet — *"nothing today
-/// consumes a transcript"* — and it is deliberately the last hop rather than a
+/// This is the wiring that finally consumes a transcript — nothing below this
+/// file does — and it is deliberately the last hop rather than a
 /// re-implementation of anything below it. `MicCapture` already owns the
 /// permission gate, frame normalisation and the bounded backlog; `SherpaSttEngine`
 /// already owns the isolate, the endpointer and the spoken-digit repair. What is
@@ -41,10 +41,10 @@ enum DictationPhase {
 
   /// The recogniser is loading, or the microphone is opening.
   ///
-  /// Its own phase rather than folded into [listening] because Task 2.2 measured
-  /// the recogniser's constructor at 359–530ms and this is the first tap of the
-  /// demo: a button that looks unresponsive for half a second is the thing Task
-  /// 1.11's whole screen is written to avoid.
+  /// Its own phase rather than folded into [listening] because the recogniser's
+  /// constructor measures at 359–530ms on the demo iPad and this is the first
+  /// tap of the demo: a button that looks unresponsive for half a second is the
+  /// thing the whole demo screen is written to avoid.
   starting,
 
   /// **Audio is actually arriving.**
@@ -153,7 +153,7 @@ class DictationController extends Notifier<DictationState> {
 
   /// Whether speech-loud audio has been seen in this capture.
   ///
-  /// **The measurement two rounds of guessing were missing.** The timings say when
+  /// **The measurement two failed code-reasoned fixes were missing.** The timings say when
   /// the microphone opened and when the recogniser attached, but not when the
   /// *technician started talking* — and without that, "the first word was lost"
   /// cannot be told apart from "the first word was mis-heard". If onset lands
@@ -167,10 +167,9 @@ class DictationController extends Notifier<DictationState> {
 
   /// Which capture attempt is current.
   ///
-  /// **A `stop()` during [DictationPhase.starting] had nothing to stop — review
-  /// finding R1-F1, and it is the half of R0-F1's fix that did not fire.**
+  /// **A `stop()` during [DictationPhase.starting] had nothing to stop.**
   /// `_session` is assigned at the *end* of [start], after the recogniser has
-  /// loaded (359–530ms, measured in Task 2.2), so a stop arriving during that load
+  /// loaded (359–530ms on the demo iPad), so a stop arriving during that load
   /// returned at its first line while the start went on to open the microphone
   /// anyway. What a technician got for typing while the recogniser loaded was a
   /// live microphone, a status line reading "Listening", and nothing they said
@@ -187,7 +186,7 @@ class DictationController extends Notifier<DictationState> {
   /// when this sentence was first written: three of [start]'s exits reported a
   /// failure before reaching the next check. The guard now sits inside
   /// [_unavailable], so it covers every exit rather than the ones someone
-  /// remembered (review finding R2-F1).
+  /// remembered.
   int _generation = 0;
 
   /// Completes when the transcript stream has finished — normally or by error.
@@ -255,15 +254,15 @@ class DictationController extends Notifier<DictationState> {
     if (!ref.mounted || _generation != generation) return;
 
     // **Step 2 — open the microphone *before* the recogniser loads, which is the
-    // whole point of this ordering.** The load is 359–530ms (Task 2.2 measured it
+    // whole point of this ordering.** The load is 359–530ms (measured
     // on this device) and it used to happen first, so every word spoken in that
     // window was never *recorded* — not mis-heard, absent. On the demo device
     // "cabin vibrating" came back as "IN VIBRATING": the leading "cab" fell in the
     // gap between the tap and the input opening. The second utterance of a session
     // was always fine, because `initialize()` returns immediately once ready.
     //
-    // Nothing new is needed to hold that audio: Task 2.1 built
-    // `MicCaptureSession` with a bounded 2s backlog for exactly this, and says so
+    // Nothing new is needed to hold that audio:
+    // `MicCaptureSession` carries a bounded 2s backlog for exactly this, and says so
     // — *"buffers up to the backlog bound while nothing is listening, so audio
     // captured between `MicCapture.start` and the first `listen` is not lost"*.
     // The capability existed; the call order defeated it. 500ms of 16 kHz mono
@@ -311,7 +310,7 @@ class DictationController extends Notifier<DictationState> {
     _log('microphone open');
 
     // **Step 3 — load the recogniser while the microphone fills the backlog.**
-    // This is the await R1-F1 lived under, and it is still the long one; what has
+    // This is still the long await; what has
     // changed is that audio is now being captured throughout it.
     try {
       await engine.initialize();
@@ -357,7 +356,7 @@ class DictationController extends Notifier<DictationState> {
     _closed = closed;
     // `map` rather than a change to `MicCaptureSession`: it preserves the
     // single-subscription contract and propagates pause/resume, so the
-    // back-pressure Task 2.2 relies on is untouched. One closure per frame, and
+    // back-pressure the STT engine relies on is untouched. One closure per frame, and
     // the body only does anything on the first.
     final frames = session.frames.map((frame) {
       final peak = _peakOf(frame.bytes);
@@ -393,7 +392,7 @@ class DictationController extends Notifier<DictationState> {
               state = state.copyWith(phase: DictationPhase.idle);
             }
           },
-          // A fault arrives *after* the audio it interrupted (Task 2.1's
+          // A fault arrives *after* the audio it interrupted (`MicCapture`'s
           // ordering), and `_onError` closes the run itself, so there is nothing
           // for `cancelOnError` to do except race it.
           cancelOnError: false,
@@ -445,8 +444,8 @@ class DictationController extends Notifier<DictationState> {
   /// transcript arrives *after* the frames close — returning at the session's stop
   /// would hand a caller a state that is one utterance short of what was said.
   Future<void> stop() async {
-    // **Bumped before anything else, so a start still in flight abandons itself**
-    // — R1-F1. Unconditional: a bump with no start running costs nothing, and
+    // **Bumped before anything else, so a start still in flight abandons
+    // itself.** Unconditional: a bump with no start running costs nothing, and
     // making it conditional would need exactly the "is a start in flight" state
     // this counter *is*.
     _generation++;
@@ -496,8 +495,8 @@ class DictationController extends Notifier<DictationState> {
   /// Reports why this capture cannot run — **unless it is no longer the current
   /// one.**
   ///
-  /// The generation check lives here rather than at each call site, which is review
-  /// finding **R2-F1**. R1-F1 added the counter and read it after each `await` on
+  /// The generation check lives here rather than at each call site. The counter
+  /// was originally read only after each `await` on
   /// the way *forward*; three of [start]'s six exits report a failure and return
   /// *before* the next such check, so a cancelled start still repainted the screen.
   /// The reachable one is a fresh install with no STT set: tap the mic, type while
@@ -552,8 +551,8 @@ class DictationController extends Notifier<DictationState> {
   /// One diagnostic line, timestamped from the tap.
   ///
   /// `debugPrint` rather than a logger: it is what every other device
-  /// investigation in this repo uses, and 1.11 recorded that the log transport
-  /// below it can corrupt long lines — so these are kept short and the
+  /// investigation in this repo uses, and the log transport
+  /// below it has been seen corrupting long lines — so these are kept short and the
   /// authoritative reading is still what the screen shows.
   void _log(String message) {
     debugPrint('[Dictation ${_sinceTap?.elapsedMilliseconds ?? 0}ms] $message');

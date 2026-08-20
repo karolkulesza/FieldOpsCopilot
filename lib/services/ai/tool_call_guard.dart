@@ -2,8 +2,8 @@
 /// whatever the model actually produced and a call the registry can route.
 ///
 /// **Why this is small.** With native function calling the runtime hands the app a
-/// structured `LlmToolCall` on the happy path — Task 1.8 verified that on the device,
-/// so the v2 premise for this task ("coerce noisy model output into valid JSON") is
+/// structured `LlmToolCall` on the happy path — verified on the device — so the
+/// original premise for this layer ("coerce noisy model output into valid JSON") is
 /// mostly gone. What is left is the degraded path, and it has exactly two shapes:
 ///
 /// 1. a **native event that is malformed** — a name that is not usable, or an
@@ -49,7 +49,7 @@ enum GuardSource {
 ///
 /// These are **not** wire strings. Unlike `ToolFailureCode`, nothing here is written
 /// into a payload the model reads: [GuardFailure.message] is the model-facing text and
-/// this enum is for the agent loop's own branching. Task 1.9 decides what a failure
+/// this enum is for the agent loop's own branching. The loop decides what a failure
 /// *means* for a turn — feed the message back, or treat the turn as a plain answer —
 /// and if it ever puts one of these names in a prompt it owns the stable mapping.
 /// (A `wireName` here today would be decoration, and decoration rots.)
@@ -70,9 +70,9 @@ enum GuardFailureReason {
 
   /// A call's argument map holds a value `jsonEncode` would refuse.
   ///
-  /// Reachable from **both** paths, which is not what this docstring first said: a
-  /// native event can carry any Dart value, and a decoded text argument can carry
-  /// `Infinity` from an overflowing numeric literal (R0-F1).
+  /// Reachable from **both** paths: a native event can carry any Dart value, and a
+  /// decoded text argument can carry `Infinity` from an overflowing numeric
+  /// literal.
   argumentsNotEncodable,
 }
 
@@ -194,16 +194,18 @@ class ToolCallGuard {
     // A native event's argument map is ordinary Dart `Object?` and nothing upstream
     // constrains its values: the isolate wire's `decodeEvent` checks that the arguments
     // *are* a `Map` and never inspects them, and `FakeLlmEngine` scripts whatever a test
-    // hands it. What breaks downstream is Task 1.9 putting the attempted call into the
-    // next turn's context: `jsonEncode` throws `JsonUnsupportedObjectError`, an
-    // **`Error`**, which is not something the loop's `on Exception` recovery catches.
+    // hands it. What breaks downstream is the agent loop putting the attempted call
+    // into the next turn's context: `jsonEncode` throws `JsonUnsupportedObjectError`,
+    // an **`Error`**, which is not something the loop's `on Exception` recovery
+    // catches.
     //
     // Checked structurally rather than by encoding-and-catching, for that same reason:
-    // catching it would mean `on Error`, the shape Task 1.5 rejected on purpose.
+    // catching it would mean `on Error`, the shape `ToolRegistry.dispatch` rejects on
+    // purpose.
     //
     // The text path runs the same probe — see `_callFromObject`. It used to skip it on
     // the grounds that decoded arguments are "JSON-encodable by construction", which is
-    // false (R0-F1).
+    // false.
     if (!_isJsonEncodable(call.arguments)) {
       return const GuardFailure(
         reason: GuardFailureReason.argumentsNotEncodable,
@@ -232,7 +234,7 @@ class ToolCallGuard {
   /// One call per turn. A turn emitting two textual calls yields the first; parallel
   /// calls are a native-path feature (`llmEventsFor` already flattens
   /// `ParallelFunctionCallResponse` into separate events) and multiplexing them on the
-  /// degraded path is Task 1.9's loop, not this guard's.
+  /// degraded path is the agent loop's job, not this guard's.
   ///
   /// **One residual, recorded rather than engineered around.** A model that echoes a
   /// tool *declaration* back as text — `{"name": …, "description": …, "parameters":
@@ -240,21 +242,19 @@ class ToolCallGuard {
   /// because a declaration and a call share both key names. The guard does not try to
   /// tell them apart: the outcome is a `missing_parameter` from the registry, which is
   /// a recoverable turn, and the discriminators available (a `description` key, a
-  /// `type: object` argument map) are exactly the enumerate-the-attack shape Task 1.4
-  /// learned to avoid.
+  /// `type: object` argument map) are exactly the enumerate-the-attack shape that name
+  /// resolution in this file deliberately avoids.
   ///
   /// When nothing is usable the *most specific* failure wins: a candidate that was
   /// clearly a call attempt but unusable ([GuardFailureReason.emptyToolName],
   /// [GuardFailureReason.argumentsUnreadable] or
   /// [GuardFailureReason.argumentsNotEncodable]) is reported ahead of the generic
   /// [GuardFailureReason.noToolCallFound], because "your call was malformed" and "you
-  /// did not call anything" are different things to tell a model. The third entry was
-  /// missing from this list in the very commit that made it reachable from here (R1-F5);
-  /// the *behaviour* was right — `a specific failure outranks noToolCallFound` covers it —
-  /// but the doc was not. Named exactly because the earlier wording, "the precedence test",
-  /// matches **no** test in the suite, while two adjacent tests could each answer to that
-  /// description (the one named above and `a usable candidate outranks an earlier malformed
-  /// one`). An unresolvable reference is worse than a wrong one: nobody can check it.
+  /// did not call anything" are different things to tell a model. Pinned by
+  /// `a specific failure outranks noToolCallFound` and, for the ordering against usable
+  /// candidates, `a usable candidate outranks an earlier malformed one` — tests named
+  /// exactly, because an unresolvable reference is worse than a wrong one: nobody can
+  /// check it.
   GuardResult inspectText(String text) {
     GuardFailure? specific;
     for (final candidate in _jsonObjectCandidates(text)) {
@@ -272,16 +272,15 @@ class ToolCallGuard {
 
   /// Reads a decoded JSON object as a tool call.
   ///
-  /// **Nested envelopes need no code here, and this is the second version of that
-  /// sentence.** The OpenAI-shaped `{"type": "function", "function": {"name": …,
-  /// "arguments": …}}` resolves because [_jsonObjectCandidates] starts a candidate at
-  /// *every* `{` in the text, so the inner object is offered on its own after the outer
-  /// one is rejected for having no name string. The first version of this method also
-  /// recursed into any object found under a name key, and a mutation deleting that
-  /// recursion killed **nothing** — the scan had been doing the work the whole time,
-  /// while a test comment credited the recursion. It is deleted rather than kept and
-  /// re-documented: unreachable leniency is machinery this task's brief rules out, and
-  /// a second path to the same answer is a second thing to keep true.
+  /// **Nested envelopes need no code here.** The OpenAI-shaped `{"type": "function",
+  /// "function": {"name": …, "arguments": …}}` resolves because
+  /// [_jsonObjectCandidates] starts a candidate at *every* `{` in the text, so the
+  /// inner object is offered on its own after the outer one is rejected for having no
+  /// name string. An earlier version of this method also recursed into any object
+  /// found under a name key, and deleting that recursion killed **nothing** — the scan
+  /// had been doing the work the whole time, while a test comment credited the
+  /// recursion. It is deleted rather than kept and re-documented: unreachable leniency
+  /// is a second path to the same answer, a second thing to keep true.
   GuardResult _callFromObject(Map<String, Object?> object) {
     final rawName = _firstStringUnder(object, _nameKeys);
     if (rawName == null) {
@@ -334,14 +333,14 @@ class ToolCallGuard {
     // throws `JsonUnsupportedObjectError`. So `{"tool": …, "arguments": {"qty": 1e400}}`
     // used to produce a `GuardedCall` carrying precisely the value whose serialisation
     // throws the uncatchable `Error` this file spends fifteen lines guarding against on
-    // the other path (review finding R0-F1). Model text is the *more* likely source of
-    // such a literal, not the less.
+    // the other path. Model text is the *more* likely source of such a literal, not
+    // the less.
     //
     // The subject is `arguments`, **not** `object`, and the difference is load-bearing:
     // both are `Map<String, Object?>` and both are in scope, but the outer object's
     // `arguments` value can be a *JSON string* whose contents this probe would never look
     // through — a `String` is perfectly encodable. Probing `object` compiles and reopens
-    // R0-F1 for that shape (R1-F4). Pinned by
+    // the overflow hole for exactly that shape. Pinned by
     // 'an overflow inside arguments-as-a-JSON-string is caught too'.
     if (!_isJsonEncodable(arguments)) {
       return const GuardFailure(
@@ -361,8 +360,8 @@ class ToolCallGuard {
 
   /// The arguments carried by [object], or `null` when a present key is unreadable.
   ///
-  /// The asymmetry here is deliberate, and it is Task 1.5's blank-SKU reasoning one
-  /// layer up. **Absent** (or explicitly `null`) arguments become `{}`: a tool may
+  /// The asymmetry here is deliberate, and it is the tool layer's blank-SKU reasoning
+  /// one layer up. **Absent** (or explicitly `null`) arguments become `{}`: a tool may
   /// legitimately take none, and for one that does not, `{}` reaches the registry as
   /// `missing_parameter` — an accurate report, since the model named no value.
   /// **Present but unreadable** is a failure instead of `{}`, because the model *did*
@@ -426,11 +425,11 @@ class ToolCallGuard {
   /// Whether [value] is a plain JSON value tree — `null`, `String`, `bool`, `int`, a
   /// finite `double`, or a `List`/`Map` (with `String` keys) of those.
   ///
-  /// **Deliberately narrower than what `jsonEncode` accepts**, and the docstring used to
-  /// say "something `jsonEncode` will accept", which is false in one direction: with no
-  /// `toEncodable`, `jsonEncode` falls back to calling `toJson()` on an unknown object,
-  /// so a class defining one encodes fine while this returns `false` for it (measured —
-  /// R0-F5). Narrower is the right way round here: the arguments are JSON in origin, and
+  /// **Deliberately narrower than what `jsonEncode` accepts** — "something `jsonEncode`
+  /// will accept" would be false in one direction: with no `toEncodable`, `jsonEncode`
+  /// falls back to calling `toJson()` on an unknown object, so a class defining one
+  /// encodes fine while this returns `false` for it (measured).
+  /// Narrower is the right way round here: the arguments are JSON in origin, and
   /// a tool argument that is only serialisable via someone's `toJson()` is not something
   /// the model can have sent.
   ///
@@ -460,8 +459,8 @@ class ToolCallGuard {
   ///
   /// **These are a judgement about model *text*, and the entries that were only a
   /// judgement about nothing have been deleted.** `'function'`, `'recipient_name'` and
-  /// (below) `'parameter_values'` were removed in review, because no test bound them and
-  /// nothing attested them as a key holding a *name string* (R0-F3):
+  /// (below) `'parameter_values'` were removed, because no test bound them and
+  /// nothing attested them as a key holding a *name string*:
   ///
   /// * `'recipient_name'` and `'parameter_values'` appear nowhere in `flutter_gemma`
   ///   1.4.1 or `flutter_gemma_litertlm` 1.3.1.
@@ -469,20 +468,19 @@ class ToolCallGuard {
   ///   `raw['function']` — but only ever as a **Map**, which [_firstStringUnder] ignores,
   ///   so the entry aimed at a shape nothing produces.
   ///
-  /// Split into two bullets because the single sentence this replaces claimed the plugins
-  /// "use none of those spellings anywhere" and then conceded the `function` hit twenty
-  /// words later, contradicting itself inside one sentence (R1-F2). The narrow claim was
-  /// true and the broad one was not, which is the recurring shape in this repo: **state
-  /// the claim at the width you checked.** Decoration rots; deleting beats maintaining.
+  /// Two bullets rather than one sentence, because the broad claim ("the plugins use
+  /// none of those spellings anywhere") is false while each narrow one is true — the
+  /// recurring shape in this repo: **state the claim at the width you checked.**
+  /// Decoration rots; deleting beats maintaining.
   ///
   /// What is left is deliberate leniency, and the honest justification is *not* the
   /// plugin's key list: that list says what the plugin **parses**, which is weak evidence
-  /// about what weights **emit**. The proof is in this task's own AC — TC-GUARD-TXT-01's
-  /// input uses `"tool"`, a key the plugin never reads as a name. `name`/`arguments`/
-  /// `args`/`parameters` are what the plugin reads; `tool` is what the spec expects; the
-  /// remainder are conventional spellings bound by tests rather than attested by a
-  /// runtime, kept because the cost of an unused alias is one list entry and the cost of
-  /// a missing one is a dropped call.
+  /// about what weights **emit**. The proof is TC-GUARD-TXT-01's own input, which uses
+  /// `"tool"`, a key the plugin never reads as a name. `name`/`arguments`/
+  /// `args`/`parameters` are what the plugin reads; `tool` is what TC-GUARD-TXT-01
+  /// requires; the remainder are conventional spellings bound by tests rather than
+  /// attested by a runtime, kept because the cost of an unused alias is one list entry
+  /// and the cost of a missing one is a dropped call.
   static const List<String> _nameKeys = [
     'tool',
     'tool_name',
@@ -499,7 +497,7 @@ class ToolCallGuard {
   ];
 
   /// Separators a namespaced tool name may use. `:` was here too and nothing bound or
-  /// attested it, so it went the same way as the dead alias keys (R0-F3); `.` and `/` are
+  /// attested it, so it went the same way as the dead alias keys; `.` and `/` are
   /// each bound by a resolution test.
   static final RegExp _scopeSeparator = RegExp(r'[./]');
   static final RegExp _nonAlphanumeric = RegExp('[^a-z0-9]');

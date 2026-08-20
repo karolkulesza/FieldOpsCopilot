@@ -1,7 +1,7 @@
 /// The contract a Dart-native agent tool implements, and the typed result the
 /// registry hands back for one tool call.
 ///
-/// Task 1.5's job is the seam between two things that speak different languages: a
+/// This file is the seam between two things that speak different languages: a
 /// model that emits a *structured tool-call event* (`LlmToolCall` — a name plus a
 /// JSON-decoded argument map, produced by weights and therefore untrusted), and a
 /// Dart executor with a real signature. Everything in this file exists to make that
@@ -12,16 +12,16 @@
 ///
 /// * **A bad call is data, not an exception.** A hallucinated tool name, a missing
 ///   argument, a SKU that does not exist — these are ordinary outcomes of asking a
-///   language model to call a function, and the agent loop (Task 1.9) recovers from
+///   language model to call a function, and the agent loop recovers from
 ///   them by feeding the result back so the model can correct itself. So they are
-///   [ToolFailure] values with a JSON payload, not thrown objects. Task 1.3 already
-///   applied the same reasoning one layer down: `inventoryPartBySku` returns `null`
-///   for an unknown SKU instead of throwing.
+///   [ToolFailure] values with a JSON payload, not thrown objects. The database
+///   layer already applies the same reasoning one level down: `inventoryPartBySku`
+///   returns `null` for an unknown SKU instead of throwing.
 /// * **Everything that reaches the model is a payload, and payloads are curated.**
 ///   [ToolFailure.payload] carries a stable error key, the parameter at fault and a
 ///   message written for the model. It deliberately does **not** carry
 ///   [ToolFailure.cause] — an underlying `SqliteException` can quote file paths and
-///   SQL, and this app's whole premise (§3.2) is that nothing sensitive leaves the
+///   SQL, and this app's whole premise is that nothing sensitive leaves the
 ///   device boundary. The prompt is a boundary too.
 library;
 
@@ -31,8 +31,8 @@ import '../../engines/llm_engine.dart';
 /// in Dart by [execute].
 ///
 /// Not sealed and not `base`: `ToolRegistry` is tested with small purpose-built
-/// tools (one that throws, one that takes no arguments), and future tools from the
-/// spec's §2.2 list (`schedule_followup_appointment`,
+/// tools (one that throws, one that takes no arguments), and envisioned future
+/// tools (`schedule_followup_appointment`,
 /// `raise_safety_hazard_alert`) live outside this library.
 abstract class AgentTool {
   const AgentTool();
@@ -49,8 +49,7 @@ abstract class AgentTool {
   /// recompute this getter per call, so a definition whose `name` changed between
   /// calls would reintroduce exactly the declaration-vs-dispatch divergence that
   /// deleting `AgentTool.name` removed. Every tool here uses a `final` field; this
-  /// says so out loud because nothing enforces it. (Raised as a non-blocking review
-  /// note in round 1.)
+  /// says so out loud because nothing enforces it.
   ToolDefinition get definition;
 
   // There is deliberately **no `name` getter here.** An earlier version had one,
@@ -58,7 +57,7 @@ abstract class AgentTool {
   // "every declared tool is dispatchable" invariant depend on a subclass not
   // overriding a single getter, on a class this very docstring says is left open for
   // subclassing. Override it and the tool is declared under one name and routed under
-  // another: permanently `unknown_tool` (review finding R0-F2, demonstrated with a
+  // another: permanently `unknown_tool` (demonstrated with a
   // probe). Rather than check that the two names agree, the second one is gone: the
   // registry reads `definition.name` and nothing else — the only string the model is
   // ever told. Callers that want the name ask for `tool.definition.name`.
@@ -109,9 +108,9 @@ class ToolArgumentException implements Exception {
   /// True by construction rather than by documentation: there are only the two named
   /// constructors above, so a caller cannot build one carrying
   /// [ToolFailureCode.unknownTool] and have `dispatch` faithfully report
-  /// `error: unknown_tool` for a tool that plainly exists. (Raised as a non-blocking
-  /// review note, which suggested an `assert`; an `assert` is compiled out in release
-  /// and Task 1.4 already paid for that lesson, so the shape is closed instead.)
+  /// `error: unknown_tool` for a tool that plainly exists. (An `assert` would be
+  /// the weaker guard here: asserts are compiled out in release, so the shape is
+  /// closed instead.)
   final ToolFailureCode code;
 
   /// Written for the model: says what was wrong and what to send instead.
@@ -190,7 +189,7 @@ class ToolArguments {
 
   /// Reads [name] as a JSON object, or throws [ToolArgumentException].
   ///
-  /// Added by Task 2.3, whose `record_work_order_fields` takes a *nested* map
+  /// Added for `record_work_order_fields`, which takes a *nested* map
   /// (`{"form_updates": {"fault_code": "E-102"}}`) rather than a flat scalar. It is
   /// here rather than in that tool for [requiredString]'s reason — the rule about
   /// what a badly typed argument means belongs to the reader every tool shares, or
@@ -246,7 +245,8 @@ class ToolArguments {
   ///
   /// Deliberately untyped: it exists for an argument whose *own* parser decides
   /// what to do with a malformed value, rather than one where a wrong type should
-  /// fail the call. Task 2.3's `clarification` is that case — it is an optional
+  /// fail the call. `record_work_order_fields`'s `clarification` is that case — an
+  /// optional
   /// extra sent alongside the field updates, and failing the whole call over it
   /// would discard updates that were perfectly good.
   Object? optional(String name) => _raw[name];
@@ -256,7 +256,7 @@ class ToolArguments {
 ///
 /// The wire names are what the model sees, so they are stable strings rather than
 /// `Enum.name` — renaming a Dart enum value must not silently change the transcript
-/// the golden suite (Task 1.10) snapshots.
+/// the golden suite snapshots.
 enum ToolFailureCode {
   /// The model asked for a tool that is not registered — a hallucinated name, or a
   /// tool this build does not ship.

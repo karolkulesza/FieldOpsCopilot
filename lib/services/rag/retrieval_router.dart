@@ -101,8 +101,8 @@ class RetrievalResult {
 /// Routes raw technician text to the two retrieval mechanisms the database
 /// offers, and merges the results.
 ///
-/// The decision this class owns, which Task 1.2 built the seams for but nothing
-/// made:
+/// The decision this class owns — the database layer built the seams for it,
+/// but nothing had made it:
 ///
 /// 1. **Extract fault codes** from the free text and look each one up on the
 ///    structured, indexed `manual_entries.code` column — exact match, never
@@ -142,15 +142,14 @@ class RetrievalRouter {
   /// Matches one or two letters, an optional separator (space, ASCII hyphen or
   /// a Unicode dash), then two to four digits: `E-102`, `E102`, `e 102`,
   /// `E–102`. Deliberately looser than the corpus's own `E-\d{3}` convention,
-  /// because the text arriving here is typed with one thumb or (from Tier 2)
+  /// because the text arriving here is typed with one thumb or
   /// dictated, and a code written `E 102` must still reach the structured
   /// column.
   ///
   /// Looseness is affordable **only** because every candidate is verified by
   /// lookup before it changes anything — see the class doc. Two exclusions are
-  /// load-bearing, and they exclude different things. An earlier version of this
-  /// comment credited the second with work the first already does, which review
-  /// refuted:
+  /// load-bearing, and they exclude different things — it is easy to credit the
+  /// second with work the first already does:
   ///
   /// * **The leading `\b` plus the mandatory one-or-two-letter prefix** keeps
   ///   out a digit run with no short letter in front of it: `10mm`, `0.5mm`,

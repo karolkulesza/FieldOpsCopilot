@@ -1,7 +1,8 @@
 /// The work-order form the agent fills in, and the rules for reading what the
 /// model sent.
 ///
-/// The spec's §2.3 asks for three things, and this file owns the first and the
+/// The voice work-order feature is three things, and this file owns the first
+/// and the
 /// third: structured JSON conversion of spoken observations, real-time population
 /// of the form fields, and an interactive clarification when a value is ambiguous.
 /// The *screen* is `views/components/`; the *source* of the JSON is
@@ -11,8 +12,8 @@
 ///
 /// **Three decisions are worth reading before changing anything.**
 ///
-/// 1. **A field update the model got wrong is a value, not a throw.** This is Task
-///    1.5's rule ("a bad call is data, not an exception") applied one layer along,
+/// 1. **A field update the model got wrong is a value, not a throw.** This is
+///    the tool layer's rule ("a bad call is data, not an exception") applied one layer along,
 ///    and for the same reason: the caller is a language model, so an unknown field
 ///    name or a number where a string was declared is an ordinary outcome, and the
 ///    agent loop's whole recovery mechanism is feeding the payload back. So
@@ -40,8 +41,8 @@ import 'package:flutter/foundation.dart';
 
 /// A field of the work order the agent may fill in.
 ///
-/// Exactly the four the spec's §2.3 names ("fault code, replacement parts,
-/// technician hours, safety checkpoints"). The [wireName] is what the model sees
+/// Exactly four: fault code, replacement parts,
+/// technician hours, safety checkpoints. The [wireName] is what the model sees
 /// and what a transcript records, so it is a declared string rather than
 /// `Enum.name` — renaming a Dart enum value must not silently change the JSON the
 /// golden suite snapshots, which is `ToolFailureCode`'s reasoning one file along.
@@ -81,10 +82,10 @@ enum WorkOrderField {
   /// because it is a property of the four names and a fifth field could break it.
   ///
   /// There is deliberately **no early return for an empty normalised key**. One
-  /// was here and mutation testing found it dead (M01: replacing it with `false`
+  /// was here and mutation testing found it dead (replacing it with `false`
   /// left the suite green): no [wireName] normalises to the empty string, so an
   /// unmatchable key already falls out of the loop below as `null`. It is deleted
-  /// rather than kept as a comment claiming a guard, which is Task 1.4's rule.
+  /// rather than kept as a comment claiming a guard — decoration rots.
   static WorkOrderField? byKey(String rawKey) {
     final key = normalizeKey(rawKey);
     for (final field in values) {
@@ -197,8 +198,8 @@ class FormUpdateParse {
 /// **Takes a map rather than `Object?`, and the asymmetry with
 /// [parseClarification] is deliberate.** `form_updates` not being an object at all
 /// is a failure of the whole call — there is nothing left to record — so it is
-/// caught one layer up by `ToolArguments.requiredMap`, where Task 1.5 already
-/// decided what a wrongly typed argument means. Putting a `raw is! Map` branch here
+/// caught one layer up by `ToolArguments.requiredMap`, which already
+/// decides what a wrongly typed argument means. Putting a `raw is! Map` branch here
 /// as well would be a second rule for one question, and it would be unreachable
 /// from the only production caller. `clarification` gets the opposite treatment for
 /// the opposite reason: it is an optional extra, so a malformed one must not take
@@ -278,7 +279,7 @@ const String clarificationArgument = 'clarification';
 
 /// A question the agent needs answered before a field can be filled.
 ///
-/// The spec's §2.3 example: a technician says "I replaced the filter" and the
+/// The canonical example: a technician says "I replaced the filter" and the
 /// inventory carries several, so the agent asks which. Rendered by
 /// `views/components/clarification_dialog.dart`.
 @immutable
@@ -431,7 +432,7 @@ enum FormFieldOrigin {
   ///
   /// Distinct from [technician] because the two answer different questions about
   /// a field: both mean "a human decided this", but only this one means "the agent
-  /// asked and got an answer", which is the interaction §2.3 is about.
+  /// asked and got an answer", which is the interaction clarifications exist for.
   clarification,
 }
 
@@ -512,7 +513,7 @@ class WorkOrderFormState {
   /// On the state rather than only in the tool payload because the tool's copy goes
   /// to the *model*: `WorkOrderFormViewModel.applyPayload` reads the payload's
   /// `refused` list into this, and the work-order panel draws a counted line from
-  /// it. **That wiring is review finding R0-F4** — until it, this field was
+  /// it. **That wiring was missing at first** — until it, this field was
   /// populated only by unit tests and its docstring named a reader that did not
   /// exist, which is precisely the shape this project keeps finding.
   final List<RejectedFieldUpdate> rejected;
@@ -658,7 +659,7 @@ class WorkOrderFormState {
   /// one inquiry; feeding an answer back mid-run would mean a second input channel
   /// into a loop whose whole design is "the conversation is the prompt". The answer
   /// fills the field and is offered as the seed of a follow-up inquiry, which is
-  /// the interaction §2.3 describes minus the round trip.
+  /// the ask-and-answer interaction minus the round trip.
   WorkOrderFormState answerClarification(String choice) {
     final request = clarification;
     if (request == null) return this;

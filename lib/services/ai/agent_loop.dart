@@ -1,18 +1,18 @@
 /// The agentic workflow: grounded prompt → model → tool call → tool result →
 /// re-prompt → grounded answer.
 ///
-/// Everything this loop needs already exists. Task 1.4 compiles the grounded
-/// prompt, Task 1.5 declares the tools and dispatches what comes back, Task 1.6
-/// guards the degraded path, and Task 1.8 proved the runtime emits structured
-/// tool calls. What is left — and what this file owns — is the four decisions
-/// none of them could make:
+/// Everything this loop needs already exists. `PromptCompiler` compiles the
+/// grounded prompt, `ToolRegistry` declares the tools and dispatches what comes
+/// back, `ToolCallGuard` guards the degraded path, and the runtime emits
+/// structured tool calls (verified on the device). What is left — and what this
+/// file owns — is the four decisions none of them could make:
 ///
-/// 1. **How a turn ends.** `LlmEngine.generate` is a *stateless single turn*
-///    (Task 1.8): a fresh conversation per call, closed after. There is no
+/// 1. **How a turn ends.** `LlmEngine.generate` is a *stateless single turn*:
+///    a fresh conversation per call, closed after. There is no
 ///    accumulated history to inherit, so the loop carries the conversation
 ///    itself, as text, by appending to the prompt it was given.
-/// 2. **What a `GuardFailure` means.** Task 1.6 built [GuardFailureReason] "for
-///    the loop to branch on" and deliberately did not decide the branch. It is
+/// 2. **What a `GuardFailure` means.** [GuardFailureReason] exists "for
+///    the loop to branch on" and deliberately does not decide the branch. It is
 ///    decided here, and the split is not the obvious one — see
 ///    [AgentLoop.run].
 /// 3. **What bounds the loop.** Two bounds, doing different work: a hard turn
@@ -84,7 +84,7 @@ class AgentToolInvocation {
 
 /// Everything one model turn produced.
 ///
-/// Kept as data rather than folded into the final answer because Task 1.10's
+/// Kept as data rather than folded into the final answer because the
 /// golden suite snapshots "prompt built, tools called, args, final-state
 /// shape", and because the interesting failures of an agent loop are about
 /// *which turn* did what.
@@ -123,8 +123,8 @@ class AgentTurn {
   /// Whether the guard was asked to read this turn's **text** for a call —
   /// true exactly when the turn emitted no native tool-call event.
   ///
-  /// Recorded rather than derived, and that distinction is review finding
-  /// R1-F1. [AgentLoop.continuationOf] needs to know whether the turn's text
+  /// Recorded rather than derived, and the distinction is load-bearing.
+  /// [AgentLoop.continuationOf] needs to know whether the turn's text
   /// was a *call attempt* or *commentary*, and the obvious proxy — "does any
   /// invocation have `GuardSource.text`" — is silently wrong for the turn where
   /// every text-path attempt was **refused**: [invocations] is then empty, so
@@ -180,10 +180,10 @@ class AgentRunResult {
 
 /// A single observable step of a run.
 ///
-/// The stream exists for Task 1.11, which needs live tokens and a
+/// The stream exists for the demo screen, which needs live tokens and a
 /// "checking inventory…" indicator *while* the loop is still running, and for
-/// Task 1.10, which snapshots the sequence. [AgentLoop.runToCompletion] is the
-/// same thing drained.
+/// the golden suite, which snapshots the sequence. [AgentLoop.runToCompletion]
+/// is the same thing drained.
 sealed class AgentEvent {
   const AgentEvent();
 }
@@ -251,13 +251,14 @@ final class AgentCompleted extends AgentEvent {
 /// The loop does **not** retrieve or compile. It is handed a finished prompt,
 /// because the two halves fail differently and are worth being able to test
 /// apart: retrieval is a database question with exact answers, and this is a
-/// conversation-shaped question with fuzzy ones. Task 1.11 composes them.
+/// conversation-shaped question with fuzzy ones. `FieldJobViewModel` composes
+/// them.
 class AgentLoop {
   /// Builds a loop over [engine] and [registry].
   ///
-  /// **The guard is built from the registry and cannot be supplied.** Task 1.5
-  /// deleted `AgentTool.name` because a second source for a tool's name is a
-  /// second thing that can disagree with the first; the same argument applies
+  /// **The guard is built from the registry and cannot be supplied.**
+  /// `AgentTool.name` was deleted because a second source for a tool's name is
+  /// a second thing that can disagree with the first; the same argument applies
   /// one layer up. A guard constructed from some other list would canonicalise
   /// a near-miss to a name `dispatch` cannot route, turning a recoverable
   /// `unknown_tool` into a call to nothing. Exposed as [guard] so tests can
@@ -272,10 +273,8 @@ class AgentLoop {
   /// Turn cap when none is given.
   ///
   /// Two turns is the shortest complete run — call a tool, then answer with the
-  /// result — and a correction round costs one turn each, so four leaves room
-  /// for **two** of them on top of the happy path. The first version of this
-  /// sentence said "one", in three documents (review finding R0-F7); the
-  /// arithmetic, not the number, was wrong.
+  /// result — and a correction costs one turn each, so four leaves room
+  /// for **two** of them on top of the happy path.
   static const int defaultMaxTurns = 4;
 
   final LlmEngine engine;
@@ -286,10 +285,10 @@ class AgentLoop {
 
   /// Hard upper bound on calls to `LlmEngine.generate` in one run.
   ///
-  /// **Clamped to at least one, not asserted.** Task 1.4 paid for that lesson:
-  /// an `assert` is compiled out in release, so it crashes the build where the
-  /// mistake is cheap and permits it where it is expensive — and it makes the
-  /// clamp unreachable from any debug test.
+  /// **Clamped to at least one, not asserted.** An `assert` is compiled out in
+  /// release, so it crashes the build where the
+  /// mistake is cheap and permits it where it is expensive — and it would make
+  /// the clamp unreachable from any debug test.
   final int maxTurns;
 
   /// Opening line of the echoed model turn.
@@ -354,8 +353,8 @@ class AgentLoop {
   ///   it would let a model that both called a tool and quoted a JSON example
   ///   run the example.
   /// * **Otherwise the text is scanned** with `ToolCallGuard.inspectText`.
-  /// * **A `GuardFailure` branches on its reason**, which is what Task 1.6
-  ///   built [GuardFailureReason] for and deliberately left undecided:
+  /// * **A `GuardFailure` branches on its reason**, which is what
+  ///   [GuardFailureReason] exists for, with the branch deliberately left here:
   ///   [GuardFailureReason.noToolCallFound] means *there was no call here*, so
   ///   the turn is a plain answer and the run ends. Every other reason means
   ///   the model tried to call something and got it wrong, which is
@@ -502,7 +501,7 @@ class AgentLoop {
 
   /// Builds the next turn's prompt: [previous], then a transcript of [turn].
   ///
-  /// `LlmEngine.generate` is stateless (Task 1.8), so the conversation *is*
+  /// `LlmEngine.generate` is stateless, so the conversation *is*
   /// this string. It grows by one transcript block per turn and is bounded by
   /// [maxTurns].
   ///
@@ -521,15 +520,14 @@ class AgentLoop {
   /// embedded value can start one**:
   ///
   /// * The call and result blocks are single lines, written by
-  ///   [encodeOneLine]. `jsonEncode` alone is **not** enough for that, and the
-  ///   first version of this comment claimed it was: it escapes every code unit
+  ///   [encodeOneLine]. `jsonEncode` alone is **not** enough for that: it
+  ///   escapes every code unit
   ///   below `0x20` plus `"` and `\`, and passes **U+0085 NEL, U+2028 LINE
   ///   SEPARATOR, U+2029 PARAGRAPH SEPARATOR and U+007F through raw**. U+2028
   ///   and U+2029 are Unicode *mandatory* line breaks, and `normalizeSku` is
   ///   `trim().toUpperCase()`, so an interior one in a model-supplied SKU
   ///   reached the echoed payload verbatim and opened a real second
-  ///   `[TOOL RESULT]` at column 0 — the exact attack this paragraph said was
-  ///   closed (review finding R0-F1, reproduced against the loop before this
+  ///   `[TOOL RESULT]` at column 0 (reproduced against the loop before the
   ///   fix). [encodeOneLine] re-escapes the survivors as `\uXXXX`.
   /// * The echoed turn text *can* contain line breaks, so it gets the other
   ///   rule instead: [PromptCompiler.neutralizeMarkers] rewrites every Unicode
@@ -542,8 +540,8 @@ class AgentLoop {
   /// whenever no native event arrived — see [AgentTurn.textScannedForCall].
   /// `neutralizeMarkers` rewrites every brace, so echoing that text showed the
   /// next turn a syntactically corrupted copy of the very JSON shape the guard
-  /// needs it to keep producing (R0-F5). The refused case is the worse one and
-  /// the first fix missed it (R1-F1): there is no `[TOOL CALL]` block beside
+  /// needs it to keep producing. The refused case is the worse one:
+  /// there is no `[TOOL CALL]` block beside
   /// the mangled line, so it is the *only* rendering the model sees, directly
   /// above an instruction to send well-formed JSON.
   ///
@@ -553,9 +551,7 @@ class AgentLoop {
   /// first sentence is dropped with the rest. The loop cannot separate the
   /// prose from the call without re-deriving the guard's extent scan, and
   /// showing mangled JSON is worse than losing a sentence of preamble. The
-  /// canonical `[TOOL CALL]` block carries what the next turn needs. (The
-  /// earlier claim here — "on that path the turn text *is* the call" — was
-  /// wider than `inspectText`'s own contract: R1-F2.)
+  /// canonical `[TOOL CALL]` block carries what the next turn needs.
   ///
   /// On the native path the echo is kept, because there it really is the
   /// reasoning that led to the call and the next turn is being asked to finish
@@ -566,7 +562,7 @@ class AgentLoop {
       ..writeln();
 
     // See [AgentTurn.textScannedForCall]. Deriving this from the invocations'
-    // `source` was R1-F1: it reads "native" for a turn whose only text-path
+    // `source` would read "native" for a turn whose only text-path
     // attempt was refused, which is the turn that can least afford it.
     final echo = turn.textScannedForCall
         ? ''
@@ -628,7 +624,7 @@ class AgentLoop {
   /// assertion through [continuationOf] would test the caller instead.
   ///
   /// The guarantee `jsonEncode` gives is narrower than "no line breaks", and
-  /// the gap is the whole of review finding R0-F1. Measured on this toolchain
+  /// the gap is real and exploitable. Measured on this toolchain
   /// (`jsonEncode({'k': 'a<c>b'})`): LF, CR, VT, FF and every other code unit
   /// below `0x20` come out escaped, while **U+0085, U+2028, U+2029 and U+007F
   /// come out raw**. Two of those are Unicode mandatory line breaks.
@@ -673,7 +669,7 @@ class AgentLoop {
   /// persists between runs.
   ///
   /// **It caches failures too, including `execution_failed`**, and that is
-  /// worth saying out loud because Task 1.5's `dispatch` describes the loop's
+  /// worth saying out loud because `ToolRegistry.dispatch` describes the loop's
   /// recovery as feeding the payload back "so the model can correct itself".
   /// For an identical call there is nothing left to correct: the same arguments
   /// against the same local database produce the same error, so a retry would
@@ -681,7 +677,7 @@ class AgentLoop {
   /// model *can* still do is call with different arguments, or answer without
   /// the tool — both of which stay open, because a different call is a
   /// different key. Recorded rather than left implicit by this method's own
-  /// standard, and pinned by a test (review finding R0-F6).
+  /// standard, and pinned by a test.
   ///
   /// Top-level argument keys are sorted so the same call written in a different
   /// key order is one call. Nested maps are left as they are: a nested map
@@ -693,7 +689,7 @@ class AgentLoop {
   /// `jsonEncode` cannot throw here: only a `GuardedCall` reaches this method,
   /// and the guard runs a structural encodability probe on the arguments of
   /// **both** its paths before returning one (`tool_call_guard.dart`'s
-  /// `_isJsonEncodable`, which is the fix for its R0-F1).
+  /// `_isJsonEncodable`).
   static String _callKey(LlmToolCall call) => jsonEncode({
     'tool': call.name,
     'arguments': SplayTreeMap<String, Object?>.of(call.arguments),
