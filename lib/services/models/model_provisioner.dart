@@ -241,7 +241,7 @@ final class ModelAbsent extends ModelProvisionResult {
 /// provision re-hashes in place — and if any file fails that hash, re-fetches
 /// the **whole set**, not just the hole. No per-file download skip exists;
 /// deliberate at this artifact size (43.65MB), and recorded here so the doc
-/// matches the code rather than a nicer design (R0-F4).
+/// matches the code rather than a nicer design.
 ///
 /// It is also the client half of the OTA-model-delivery design in the README:
 /// the server half (bucket layout, device-capability-based selection, staged
@@ -601,7 +601,7 @@ class ModelProvisioner {
           // Only where the descriptor says the token belongs — it was supplied
           // as a pair with the *configured* model's URI, and sending it to a
           // committed source's host would hand the credential to a third
-          // party. See [ModelDescriptor.sendsAuthToken] (R0-F3).
+          // party. See [ModelDescriptor.sendsAuthToken].
           authToken: descriptor.sendsAuthToken ? _authToken : null,
         );
       } on ModelDownloadException catch (error) {

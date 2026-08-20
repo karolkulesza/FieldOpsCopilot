@@ -478,7 +478,7 @@ void main() {
       tester,
     ) async {
       // Clearing **is** an edit, so it takes the field on the same terms typing
-      // does (R0-F1). A clear that left the microphone open would go on filling
+      // does. A clear that left the microphone open would go on filling
       // a field the technician had just emptied; one that left the mirror
       // attached would be undone by the next partial.
       final c = await pumpScreen(tester);
@@ -723,8 +723,8 @@ void main() {
       );
     });
 
-    // **Review finding R0-F4.** `WorkOrderFormState.rejected` was dead on every
-    // production path while its docstring named a reader. It now reaches the state
+    // `WorkOrderFormState.rejected` was dead on every production path while its
+    // docstring named a reader. It now reaches the state
     // and this line, so what the model got wrong is visible beside the form.
     testWidgets('a refused field is reported on the panel', (tester) async {
       final container = await pumpScreen(tester);
