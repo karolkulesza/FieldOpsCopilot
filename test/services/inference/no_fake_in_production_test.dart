@@ -72,7 +72,7 @@ class _OverrideCollector extends RecursiveAstVisitor<void> {
 /// **So the boundary is now computed, not listed.** Two passes over one walk:
 ///
 /// * **Pass 1** finds every file *inside* the exemption that mentions a fake. Those
-///   are the fake-bearing files. Today that is the four fakes and
+///   are the fake-bearing files. Today that is the two fakes and
 ///   `engines/providers.dart`; nothing names them.
 /// * **Pass 2** flags any file *outside* the exemption that either mentions a fake
 ///   itself, or has an `import`/`export`/`part` directive resolving to one of pass
@@ -85,8 +85,7 @@ class _OverrideCollector extends RecursiveAstVisitor<void> {
 /// barrel does not launder the reference, it becomes the offender.
 ///
 /// What the exemption still buys is only what it always did: `lib/engines/` may name
-/// fakes, because the Tier 0 DI seam legitimately binds them for `SttEngine`,
-/// `SttEngine`, none of which had a real backend when the seam was written. The
+/// fakes, because the DI seam legitimately binds them as the host-side default. The
 /// *exemption* never acquired a hole — both of the misses above came from the other
 /// side of the boundary, which is the sentence the earlier version of this doc got
 /// wrong.
@@ -99,9 +98,9 @@ void main() {
   ///
   /// This inverts the seed the same way the scanned set was inverted one level up.
   /// Pass 1 used to ask *"does this exempt file name a fake?"* — two string literals
-  /// matched against line text. That found **2 of the 11 files** in `lib/engines/`,
-  /// missed three of the four fakes outright, and worked at all only because the seam
-  /// happens to contain the literal `FakeLlmEngine`. A fifth fake under any other
+  /// matched against line text. That found **2 of the files** in `lib/engines/`,
+  /// missed most of the fakes outright, and worked at all only because the seam
+  /// happens to contain the literal `FakeLlmEngine`. A further fake under any other
   /// name — `ScriptedLlmEngine`, say — was invisible, and a `main.dart` binding it
   /// into `agentEngineProvider` passed the whole suite with a scripted engine
   /// answering every inquiry.
@@ -755,7 +754,7 @@ void main() {
     });
 
     // The real tree's classification, asserted rather than assumed — the old seed
-    // found 2 of 11 and missed three of the four fakes, and nothing said so.
+    // found two files and missed most of the fakes, and nothing said so.
     test('every fake in the real tree is restricted', () {
       final fakes = Directory('lib/engines/fakes')
           .listSync()
@@ -764,7 +763,7 @@ void main() {
           .where((path) => path.endsWith('.dart'))
           .toList();
 
-      expect(fakes, hasLength(4), reason: 'four fakes ship today');
+      expect(fakes, hasLength(2), reason: 'two fakes ship today');
       for (final fake in fakes) {
         expect(openFiles, isNot(contains(fake)), reason: fake);
       }
@@ -1031,9 +1030,9 @@ void main() {
     // and a different one. `AudioInput` is the closest call and stays out: it is the
     // *microphone*, and a scripted one feeding the real recogniser produces whatever
     // that audio really says — the transcript is still the model's own work on
-    // supplied sound, which is the same category as a supplied corpus. `VisionEngine`,
-    // `PlatformTelemetry`, `ModelDownloader` and `BackupExclusion` are not on the
-    // answer path at all. If a future feature puts one of them there, it belongs here.
+    // supplied sound, which is the same category as a supplied corpus.
+    // `ModelDownloader` and `BackupExclusion` are not on the answer path at all. If
+    // a future feature puts one of them there, it belongs here.
     const scriptableContracts = {
       'LlmEngine',
       'InferenceHost',
@@ -1176,7 +1175,7 @@ void main() {
       );
     });
 
-    // Two of the four fakes now implement a *guarded* contract, so confinement by
+    // Both fakes implement a *guarded* contract, so confinement by
     // the scan is no longer their only protection — the sink has to know about
     // them too, or the resolved detector reports them as unapproved.
     test(
