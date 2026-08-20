@@ -20,11 +20,12 @@ import 'package:integration_test/integration_test.dart';
 ///
 /// Unlike TC-PROV-E2E-01 this needs **no** `--dart-define`: the STT source and
 /// its per-file pins are committed on the catalog entry, which is itself half of
-/// what Task 2.0 claims (TC-PROV-CFG-01 pins the other half on the host).
+/// multi-model provisioning claims (TC-PROV-CFG-01 pins the other half on the
+/// host).
 ///
 /// The LLM's side of "coexist" is asserted against whatever is actually on the
 /// device: if the demo iPad's 2.59GB Gemma install is present (in either the
-/// flat Task 1.7 layout — which the first status check migrates by rename — or
+/// flat single-model layout — which the first status check migrates by rename — or
 /// the per-model layout), the test proves the STT install left it alone. On a
 /// device with no LLM installed it still proves the two models' paths are
 /// disjoint, just against an absent LLM; the stronger run is the one the demo
