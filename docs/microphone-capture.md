@@ -3,7 +3,7 @@
 Voice is the demo's differentiator, and it starts with bytes off the microphone.
 `MicCapture` (`lib/services/audio/mic_capture.dart`) opens the mic and delivers
 **16-bit little-endian mono PCM at 16 kHz** — the format `SttEngine.transcribe`
-is declared over, and the rate the streaming zipformer of Task 2.2 wants.
+is declared over, and the rate the streaming STT zipformer wants.
 
 `package:record` does the recording. It sits behind an `AudioInput` interface, the
 same seam shape `ModelDownloader` uses, and for the same two reasons: the plugin
@@ -24,7 +24,7 @@ this component is about audio hardware:
 
 Every one of these is a claim about `record` 7.1.1 / `record_ios` 2.1.1 /
 `record_android` 2.1.2, arrived at by reading those packages rather than their
-READMEs — Task 1.8's rule, which cost that task six review findings to learn.
+READMEs — a rule this project learned the expensive way on the inference layer.
 
 **The stream has no backpressure, and drops what arrives before you listen.**
 `AudioRecorder.startStream` returns a `StreamController.broadcast()` fed from a
@@ -75,27 +75,27 @@ The order is now: release first, wait for the plugin to close its own stream
 (releasing is what closes it), *then* cancel. Which needed one more piece of
 state: the window between "stop was asked for" and "no more audio will be
 accepted" is precisely where those buffers arrive, so a stream `done` inside it is
-the expected end rather than a fault. The wait is bounded (`drainGrace`, 250ms) on Task 1.11's
+the expected end rather than a fault. The wait is bounded (`drainGrace`, 250ms) on the
 principle that a seam which hangs reports nothing and a frozen UI reads as a
 crash; a test drives a plugin that never closes its stream and asserts both halves
 — the audio still arrives, and the wait is a bound.
 
 ## What is deliberately not here
 
-**Noise suppression**, even though the spec asks for it. `record_ios` 2.1.1 parses
+**Noise suppression**, even though the original design asks for it. `record_ios` 2.1.1 parses
 `noiseSuppress` into its `RecordConfig` and never reads it again: the stream
 delegate applies only `echoCancel` and `autoGain`, through
 `setVoiceProcessingEnabled`. (`record_android` 2.1.2 *does* honour it, via
 `AudioEffectsManager`.) Setting it would therefore be decoration on the device
 this project is demoed from — a flag that looks like a feature. Ambient-noise
-filtering stays in the narrated appendix where the sprint plan puts it.
+filtering stays a designed-but-deliberately-unbuilt feature.
 
-**A Riverpod provider.** Nothing consumes microphone audio yet; the STT engine is
-Task 2.2 and the form is 2.3, and both own UI this task does not. A provider added
-now would construct an `AudioRecorder` — which calls a platform channel in its
-constructor — for no reader, and could not be host-tested. Tasks 1.3 through 1.10
-all shipped unwired for the same reason; the wiring belongs to the task that has
-something to wire it to.
+**A Riverpod provider.** Nothing consumes microphone audio yet; the STT engine
+and the work-order form are the consumers, and both own UI this layer does not. A
+provider added now would construct an `AudioRecorder` — which calls a platform
+channel in its constructor — for no reader, and could not be host-tested. Every
+layer below the UI shipped unwired for the same reason; the wiring belongs with
+whatever has something to wire it to.
 
 ## The format-coercion tripwire, live on Android
 
@@ -113,8 +113,8 @@ not watching at all. The *wiring* is host-tested too, by impersonating the platf
 on `com.llfbandit.record/configChanged/<recorderId>`.
 
 An earlier version of this section said the callback should never fire at all, on
-the reasoning that neither stream path mutates the format. **Review finding R0-F3
-refuted the Android half.** `FormatCodecSelector.findCodec` calls
+the reasoning that neither stream path mutates the format. **The plugin's own
+source refuted the Android half.** `FormatCodecSelector.findCodec` calls
 `adjustToDeviceCapabilities(config)` *before* its `MIMETYPE_AUDIO_RAW` early
 return, and that assigns `config.numChannels` from the routed input's advertised
 channel counts — so on an Android device whose default input does not advertise
@@ -125,19 +125,19 @@ app does not downmix. Downmixing is the obvious alternative and belongs with
 whoever owns the recogniser. iOS genuinely does not coerce — its stream delegate
 resamples through `AVAudioConverter` and throws if it cannot.
 
-## Two spec requirements this seam meets by not doing something
+## Two design requirements this seam meets by not doing something
 
-§3.2 asks for recorded audio at rest to be encrypted. Capture here is
+The design asks for recorded audio at rest to be encrypted. Capture here is
 **stream-only** — no file is ever written, no path is ever handed to the plugin —
 so there is no audio at rest to encrypt. That is a requirement satisfied by a
 design choice rather than by a mechanism, which is exactly the kind of thing that
 looks unimplemented later, so it is written down here.
 
-§3.1 names transcription as isolate work. `MicCapture`'s own per-buffer work runs
+It also names transcription as isolate work. `MicCapture`'s own per-buffer work runs
 on the UI isolate and is O(1) at roughly sixteen buffers a second — a merge, a
-remainder and a queue push — so it does not need one. The isolate boundary the spec
-asks for belongs to the recogniser, which is Task 2.2, and it consumes the stream
-this produces.
+remainder and a queue push — so it does not need one. The isolate boundary belongs
+to the recogniser (see [docs/speech-to-text.md](speech-to-text.md)), which consumes
+the stream this produces.
 
 ## What actually goes wrong, and what does not
 

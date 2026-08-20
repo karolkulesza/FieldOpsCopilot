@@ -38,9 +38,9 @@ Tests are split into two tiers:
   `model_provisioning_test.dart` and `llm_inference_test.dart` **skip** with an
   actionable message unless the model defines above are supplied, because CI has no
   artifact to fetch and must not pull gigabytes over the network to try. (This
-  sentence read "Both suites" until Task 2.1, which was already loose with four
-  files in this directory and became wrong with the fifth: `mic_capture_test.dart`
-  needs no defines at all. Task 2.2 adds a sixth, `stt_test.dart`, which also needs
+  sentence read "Both suites" while the directory held four files, which was
+  already loose, and became wrong with the fifth: `mic_capture_test.dart`
+  needs no defines at all. The sixth, `stt_test.dart`, also needs
   none — its model's source and pins are committed. The sentence is now written as
   the two file names it actually means, so a seventh file cannot make it wrong
   again.)
@@ -84,14 +84,14 @@ Tests are split into two tiers:
     **Passed on the demo device** (iPad Air M4, iOS 26.5) against the real 2.59GB
     artifact: 2 turns, 11332ms, `stop=answered`, and an answer quoting *2 units in
     Aisle 4, Shelf B* — database facts, not elevator facts, so the weights could not
-    have supplied them. (This paragraph said "Not yet run" until Task 1.11 corrected
-    it: the run happened in commit `9afeb5b`, which updated the sprint plan and the
-    ledger and left the README behind.) The companion `-01b` **failed on its
+    have supplied them. (This paragraph said "Not yet run" until it was corrected:
+    the run had already happened, in commit `9afeb5b`, which recorded the result
+    elsewhere and left this document behind.) The companion `-01b` **failed on its
     premise**, which is the more valuable half — see _The no-match path_ above.
   - `demo_flow_test.dart` (TC-UI-DEMO-01) — the same slice again, but through the
     **UI**, and it is the only test in the repo that pumps `FieldOpsApp` with no
     overrides at all. That is the whole reason it exists on top of the suite above:
-    it is the only place Task 1.11's three wirings run as the app performs them —
+    it is the only place the startup's three real wirings run as the app performs them —
     `DatabaseService.openDefault` in the real application-support directory with the
     real key, `ensureSeeded()` through `rootBundle` and a real `AssetBundle`, and
     `deviceLlmEngineProvider` loading the real artifact via the screen's own
@@ -109,7 +109,7 @@ Tests are split into two tiers:
     bytes per second of wall clock, an end-to-end sanity check on the whole
     request-to-bytes path — that at least one sample is non-zero, because a dead
     input can hand back correctly shaped silence that passes every structural
-    check, and that the stream closes cleanly, which Task 2.2's `transcribe` needs
+    check, and that the stream closes cleanly, which the STT engine's `transcribe` needs
     in order to ever emit a final transcript. (The cadence assertion used to be
     described as the only place a substituted rate is observable. It is not: a
     *silent* substitution is not a state either platform reaches, and the one
