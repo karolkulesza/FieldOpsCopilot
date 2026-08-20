@@ -212,15 +212,12 @@ it did not provide**, which is the same species as the envelope-recursion commen
 and it belongs here rather than above.
 
 The suite now stands at **438 tests and 33 mutations, 0 survivors**. Six of those
-mutations were added to bind the review-driven fixes — the text-path encodability
+mutations were added to bind the fixes review produced — the text-path encodability
 probe, string-mode entry in the brace scan, each alias list's preference order,
 text-path `renamedFrom`, and the probe's *subject* — and one more to bind the
-resolution-ordering defect self-caught earlier. An earlier version said seven
-by counting one twice, since a later fix *replaced* a
-duplicated slot rather than adding one — "a list is not a set", one paragraph after
-coining the phrase. (Described rather than cited by mutation id: the harness lives
-outside the repo, and this project has already been caught once citing an id
-the reader could not follow.)
+resolution-ordering defect caught earlier. They are described rather than cited by
+id, because the harness lives outside this repo and an id is a reference a reader
+cannot follow.
 
 The corrections in this section are themselves worth keeping, because it exists to
 be accurate about measurement and each version of it was not. It claimed "six of
@@ -243,17 +240,11 @@ replacement)` pair, and that refusal was verified by re-inserting the duplicate 
 watching it fire — because a guard nobody has watched fail is the thing this whole
 section is about.
 
-And the first version of *that* guard had a hole of its own, found the same way. It
-keyed uniqueness on the mutations' **labels** differing, so it caught a duplicate
-edit under a new label but waved through a whole-row copy-paste — label included,
-which is precisely how an unnoticed duplicate arises. Its reassuring `no duplicates`
-was a literal string rather than a derivation, so it would have printed alongside its
-own contradicting numbers. The check now compares the edit itself and then
-asserts `len(distinct) == len(MUTATIONS)`, and **both** duplicate shapes were
-falsified against throwaway copies: differently-labelled and identically-labelled
-each exit 1, the clean list exits 0. A guard written to enforce "watch it fail" is
-the last place to skip watching it fail — with two shapes to try, trying one is the
-same partial-enumeration move the rest of this section documents.
+The first version of that guard keyed uniqueness on the mutations' **labels**, so
+it caught a duplicate edit under a new label but waved through a whole-row
+copy-paste — which is precisely how an unnoticed duplicate arises. It now compares
+the edit itself, and both shapes were falsified against throwaway copies before it
+was trusted.
 
 The harness also refuses two mutations that share a **label** with different edits,
 which is a distinct hazard surfaced in review as a non-blocking note: run-over-run

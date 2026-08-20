@@ -368,14 +368,12 @@ review caught this paragraph claiming it while the harness had
 none — the check had only ever run in a shell — which is the same shape as the prose
 findings above, aimed at the instrument instead of the code.
 
-Two further tightenings came out of review. A row whose `expect` names several
-tests now needs **all** of them in the failure list rather than any one, and each row
-records *which* failing tests confirmed it, so a reader can see whether the confirming
-test covers the mutated file at all. What string matching cannot settle is whether a
-confirming test failed *because of* the mutation or merely as collateral — a row
-was demonstrated reaching CONFIRMED off pure collateral — so the confirming names are
-recorded rather than asserted, which is what let that audit be done by hand across all
-forty rows.
+Two further tightenings. A row whose `expect` names several tests needs **all** of
+them in the failure list rather than any one, and each row records *which* failing
+tests confirmed it. String matching cannot settle whether a confirming test failed
+*because of* the mutation or merely as collateral — a row was demonstrated reaching
+CONFIRMED off pure collateral — so the confirming names are recorded rather than
+asserted, which is what let that audit be done by hand across all forty rows.
 
 Its collateral detector printed **eleven** `mtime changed` notes on the 40-row pass, and
 they are an artifact of the harness rather than damage. Reverting a row rewrites the
@@ -384,13 +382,11 @@ file — so the first row to use a different file reports its predecessor's. Sai
 rather than left as an unexplained line in a log, because an unexplained note is
 indistinguishable from a real one.
 
-**Eleven, and deriving it needs one more line of the mechanism than an earlier version
-of this paragraph gave.** A note fires on a transition to a different mutated file, *and
-the detector rebases its reference when it fires* (`baseline_stamps = stamps_now`) — so
-a file used by exactly **one** row has its post-revert mtime captured in that new
-reference and leaves nothing stale for the next transition to report. The 40-row set has
-**twelve** file transitions and exactly one single-row group, so the transition
-out of it is silent: twelve minus one is eleven.
+**Eleven and not twelve, because the detector rebases its reference each time it
+fires** (`baseline_stamps = stamps_now`): a file used by exactly one row has its
+post-revert mtime captured in that new reference and leaves nothing stale for the
+next transition to report. The 40-row set has twelve file transitions and one
+single-row group, so the transition out of it is silent.
 
 That clause is worth more than the arithmetic. The
 count itself had said "six" since the 24-row pass — exact then, carried unchanged

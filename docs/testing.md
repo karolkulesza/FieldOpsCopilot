@@ -212,9 +212,7 @@ a local pass proves nothing. Delete `.dart_tool/build`, or use a fresh clone.
     **Passed on the demo device** (iPad Air M4, iOS 26.5) against the real 2.59GB
     artifact: 2 turns, 11332ms, `stop=answered`, and an answer quoting *2 units in
     Aisle 4, Shelf B* — database facts, not elevator facts, so the weights could not
-    have supplied them. (This paragraph said "Not yet run" until it was corrected:
-    the run had already happened, in commit `9afeb5b`, which recorded the result
-    elsewhere and left this document behind.) The companion `-01b` **failed on its
+    have supplied them. The companion `-01b` **failed on its
     premise**, which is the more valuable half — see *The no-match path* in
     [the demo screen](demo-screen.md).
   - `demo_flow_test.dart` (TC-UI-DEMO-01) — the same slice again, but through the
