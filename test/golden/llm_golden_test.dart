@@ -27,18 +27,18 @@
 ///   `transcript_snapshot.dart` lists what is deliberately left out.
 ///
 ///   **And that guard is not uniform**, which the first version of this sentence
-///   glossed as "breaks all six goldens at once". It holds
+///   glossed as "breaks all the goldens at once". It holds
 ///   for the top-level and per-turn keys, which every golden has. Below them it
-///   thins out with coverage: invocations per golden are 1, 1, 4, **0**, 2, 2, so
-///   the invocation and outcome keys are guarded by five of six; rejections are
-///   0, 0, 0, 0, **1**, 0, so `_rejection`'s two keys are guarded by
+///   thins out with coverage: invocations per golden are 1, 1, **0**, 4, 2, 2, 1,
+///   so the invocation and outcome keys are guarded by six of seven; rejections
+///   are 0, 0, 0, 0, **1**, 0, 0, so `_rejection`'s two keys are guarded by
 ///   `recovery_ladder` **alone**. That is the thin spot, and it is named rather
 ///   than averaged away.
 /// * **It cannot tell a good transcript from a bad one.** A golden says "this is
 ///   what the code does", never "this is what the code should do" — which is why
 ///   each scenario below carries a handful of semantic assertions *beside* the
 ///   byte comparison. Without them a serializer that emitted `{}` for every run
-///   would keep all six goldens green forever.
+///   would keep all seven goldens green forever.
 /// * **It is not a model evaluation.** Nothing here says the answer is good.
 library;
 
@@ -276,8 +276,8 @@ void main() {
       // — though **not the widest**, which the first version of this comment
       // claimed while calling it "the context ceiling".
       // Measured over the committed goldens, widest prompt in characters: e102
-      // 1485, e305 1363, iteration_cap **2347**, no_manual_match 620,
-      // recovery_ladder **2363**, unknown_tool_repeated 2012.
+      // 1835, e305 1713, iteration_cap **2697**, no_manual_match 1055,
+      // recovery_ladder **2713**, unknown_tool_repeated 2414, form_autofill 2334.
       //
       // The two leaders are 16 characters apart — 0.7% — so they are effectively
       // tied, and **no causal account of the margin is offered here**, because the
@@ -285,7 +285,7 @@ void main() {
       // block plus three tool blocks outweigh four tool blocks" when the widest
       // prompts (turn 3 in both) carry *one rejection plus two* tool blocks against
       // *three*, and the direction does not follow from block composition anyway —
-      // `iteration_cap`'s is 47 lines against 45 and has the extra tool block while
+      // `iteration_cap`'s is 48 lines against 46 and has the extra tool block while
       // being the shorter of the two. The transcripts differ in several dimensions
       // at once (block counts, which `[CONTINUE]` instruction each turn earns,
       // scripted assistant text), and attributing 16 characters to one of them

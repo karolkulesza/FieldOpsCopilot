@@ -190,9 +190,15 @@ Four fields is not a list worth virtualising.
 
 ## Owed on a device
 
-⚠️ **TC-VOICE-FILL-01 has never run on hardware.**
-`integration_test/voice_inquiry_test.dart` is written and needs no defines; it
-provisions the 43.65MB STT set first if it is absent.
+⚠️ **TC-VOICE-FILL-01 has run on hardware once, failed on a defect in its own
+fixture, and has not been re-run since the fix.** So it has never been observed to
+pass on a device. The first run asserted that the screen had reached
+`DictationPhase.listening` before the fixture delivered its first frame — and that
+phase means *audio is arriving*, so the app was right and the double was wrong. The
+fixture now starts playback when the pipeline subscribes, and the waits are
+conditions rather than fixed durations; what is not yet on the record is a green
+run. `integration_test/voice_inquiry_test.dart` needs no defines; it provisions the
+43.65MB STT set first if it is absent.
 
 ```bash
 flutter test integration_test/voice_inquiry_test.dart -d <device>
@@ -213,8 +219,8 @@ so the suite proved only that the form fills when a call arrives, never how ofte
 one arrives. That is a property of the weights and the tool description together,
 and only hardware could answer it.
 
-Two manual runs on an iPad, both in airplane mode, against the real 2.59GB
-artifact:
+Two manual runs on an iPad Pro 11 (iOS 17.5), both in airplane mode, against the
+real 2.59GB artifact:
 
 - **Scenario 1** (technician reports finished work) — 4 of 4 fields, including
   `1.5` derived from *"an hour and a half"*, which nothing in the schema asks for.

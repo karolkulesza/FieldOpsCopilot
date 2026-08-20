@@ -170,15 +170,11 @@ Each outcome panel carries a key derived from the enum
 (`diagnose-outcome-<name>`), and there is one test per ending asserting that
 exactly its own panel is on screen and the other two are not.
 
-**The golden suite left a gap here and it is only half closed.** `emptyResponse`
-has no golden — two of the three stop reasons do — and adding the third scenario
-here was not possible: `test/golden/` existed only on the golden suite's branch (PR #11),
-so there was no file in this tree to add a scenario to. Stacking this work on that
-branch to reach it would have dragged the suite's whole diff into this PR or forced a
-rebase of an open PR, which costs a re-run of its 47 mutations. Instead the third
-ending is bound where it is actually needed — the viewmodel suite asserts the state
-and the widget suite asserts the rendering — and the golden is a one-line follow-up
-on top of PR #11. Recorded as unfinished rather than quietly dropped.
+**The golden suite still leaves a gap here.** `emptyResponse` has no golden — the
+other two stop reasons do. The third ending is bound where it is actually needed —
+the viewmodel suite asserts the state and the widget suite asserts the rendering —
+so nothing is unguarded, but the transcript-level record is incomplete. Recorded as
+unfinished rather than quietly dropped.
 
 ## What the screen shows besides the answer
 
@@ -252,8 +248,8 @@ code that has to be true for it. It is the same rule
 digest: "a retry moves the same gigabytes and fails the same way."
 
 **How much of that is bound by a test, measured site by site.** Every one of the
-eleven `retry: noRetry` sites was mutated individually — the policy deleted, the
-whole relevant suite run — at the tree this paragraph ships with. Six die, five
+fourteen `retry: noRetry` sites was mutated individually — the policy deleted, the
+whole host suite run — at the tree this paragraph ships with. Six die, eight
 survive:
 
 | bound (deleting `noRetry` fails a test) | unbound (deleting it leaves the suite green) |
@@ -263,7 +259,14 @@ survive:
 | `modelStorageProvider` (1) | `toolRegistryProvider` |
 | `modelProvisionerProvider` (1) | `inferenceConfigProvider` |
 | `modelInstallStatusProvider` (1) | `deviceLlmEngineProvider` |
-| `agentEngineProvider` (2) | |
+| `agentEngineProvider` (2) | `sttConfigProvider` |
+| | `deviceSttEngineProvider` |
+| | `dictationEngineProvider` |
+
+The last three are the speech path, and they were measured after the first eleven
+rather than with them: they did not exist when this table was first built, and the
+count in this paragraph said "eleven" for as long as it took to notice. All three
+survive, which is the expected result and not a happy one — see below.
 
 The two that matter most are bound deliberately, by build counters:
 `seedOutcomeProvider` over a malformed asset, and `modelInstallStatusProvider` over
@@ -274,15 +277,15 @@ before reporting a status it says must be distinguishable from ready and absent)
 The other four die as a side effect of those two counters and of tests that would
 time out without the policy.
 
-The five survivors are recorded rather than engineered around: each is upstream or
+The eight survivors are recorded rather than engineered around: each is upstream or
 downstream of a bound site, and no test reaches its own failure path. They are not
 *wrong* — the policy is right at every site, for the reason above — they are
 **unguarded**, which is a different and smaller claim than the one this paragraph
 first made. The first version said "bound by a test that counts provider builds"
-with no qualifier, which was true of exactly one site out of eleven.
+with no qualifier, which was true of exactly one site.
 
-One methodological note, because it nearly produced a false table. Seven of these
-eleven mutations initially came back **`NO_OP`** — a bug in the script that
+One methodological note, because it nearly produced a false table. Seven of the
+first eleven mutations initially came back **`NO_OP`** — a bug in the script that
 generated them meant the edit did not change the file at all. The harness reports
 that as its own status rather than as `SURVIVED`, which is the distinction it was
 built to make: *a survivor is evidence about the tests only once the edit is

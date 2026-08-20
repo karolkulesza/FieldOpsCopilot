@@ -5,10 +5,10 @@
 /// of noise and get deleted. Four rules make that true, and each one is a
 /// decision rather than a formatting preference:
 ///
-/// 1. **Multi-line strings are stored as arrays of lines.** Measured over the six
-///    committed goldens, a one-document grounded prompt is **933 characters over
-///    14 lines** (620 over 10 for the no-match block), and the widest prompt in
-///    the suite — `recovery_ladder`'s fourth turn — is **2363 characters**. As a
+/// 1. **Multi-line strings are stored as arrays of lines.** Measured over the seven
+///    committed goldens, a one-document grounded prompt is **1283 characters over
+///    15 lines** (1055 over 11 for the no-match block), and the widest prompt in
+///    the suite — `recovery_ladder`'s fourth turn — is **2713 characters**. As a
 ///    single JSON string any of those is one enormous escaped line, and a
 ///    one-word change to the preamble produces a diff nobody can read — which
 ///    would fail TC-GOLD-02's actual requirement ("a readable diff"), not just
@@ -21,7 +21,7 @@
 ///    "~1600 characters over ~15 lines", which is the agent-loop suite's
 ///    measurement for a **two**-document prompt — and no scenario here retrieves
 ///    two documents, so it described nothing in this suite. The argument
-///    survives at 933 characters; the number had to be the measured one.
+///    survives at 1283 characters; the number had to be the measured one.
 /// 2. **The file is 7-bit ASCII.** `jsonEncode` passes U+0085, U+2028, U+2029 and
 ///    U+007F through raw (measured, not assumed), and U+2028/U+2029 are
 ///    Unicode *mandatory* line breaks — so a golden could contain a character

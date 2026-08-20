@@ -29,7 +29,7 @@ reason about, and none of them fails a single other test in this repo.
 | `e305_degraded_text_call` | The guard's text path, a name the model misspelled and the guard canonicalised, a zero-stock payload, and `escapeQuotes` over a hostile inquiry. |
 | `no_manual_match` | Retrieval empty → the no-match notice → no tool called. |
 | `iteration_cap` | Four turns with a *different* SKU each time, so the cap is what stops it rather than the repeat short circuit. |
-| `recovery_ladder` | A guard refusal, then a `missing_parameter` from the registry, then a good call, then the answer — exactly `maxTurns` turns *and* an answer. Holds the suite's widest prompt at 2363 characters — effectively tied with `iteration_cap`'s 2347. |
+| `recovery_ladder` | A guard refusal, then a `missing_parameter` from the registry, then a good call, then the answer — exactly `maxTurns` turns *and* an answer. Holds the suite's widest prompt at 2713 characters — effectively tied with `iteration_cap`'s 2697. |
 | `unknown_tool_repeated` | An unresolvable name reaching `dispatch` as `unknown_tool` (not a guard failure), then the same call replayed rather than re-executed. |
 | `form_autofill` | The work-order path: the work order recorded, one field refused *beside* the recorded ones, a clarification asked on the same call, and the payload carried back into turn 2's prompt. |
 
@@ -44,8 +44,8 @@ Adding the second tool was not inert, and the diff is the evidence: the
 Four rules, each a decision rather than a formatting preference:
 
 1. **Multi-line strings are stored as arrays of lines.** A one-document grounded
-   prompt is 933 characters over 14 lines, and the widest prompt in the suite is
-   2363; as one JSON string a one-word change to the preamble produces a diff
+   prompt is 1283 characters over 15 lines, and the widest prompt in the suite is
+   2713; as one JSON string a one-word change to the preamble produces a diff
    nobody can read. Splitting on `\n` is lossless and makes the diff
    line-precise.
 2. **The files are 7-bit ASCII.** `jsonEncode` passes U+0085, U+2028, U+2029 and
@@ -166,7 +166,7 @@ while designing the mutation set, and one the review found afterwards:
 * **`verifyGolden`'s `fail()`.** TC-GOLD-02 deliberately goes through
   `reconcileGolden` (it needs a *value*, since a test cannot assert that a
   failure was readable if the failure aborts it), which left the abort itself
-  unbound: deleting it made all six scenario tests pass unconditionally.
+  unbound: deleting it made all seven scenario tests pass unconditionally.
 * **The update-flag predicate.** Inline, it could only ever be exercised with
   whatever the ambient environment held, so widening it to `value != null` stayed
   green in a normal run. Extracted as `updateRequested(String?)` and tested
@@ -195,8 +195,9 @@ like anything else.
 
   **That guard is not uniform, either.** It is total for the top-level and
   per-turn keys, which every golden has; below them it thins out with coverage.
-  Invocations per golden are 1, 1, 4, 0, 2, 2, so the invocation and outcome keys
-  are guarded by five of six. Rejections are 0, 0, 0, 0, 1, 0 — so the two keys
+  Invocations per golden are 1, 1, 0, 4, 2, 2, 1, so the invocation and outcome
+  keys are guarded by six of seven. Rejections are 0, 0, 0, 0, 1, 0, 0 — so the
+  two keys
   under `_rejection` are guarded by `recovery_ladder` **alone**. That is the thin
   spot, and naming it is better than averaging it away.
 * **It cannot tell a good transcript from a bad one.** A golden says "this is what

@@ -3,9 +3,9 @@
 /// Split from `llm_golden_test.dart` because the two answer different
 /// questions. That file asks "does the loop still produce this transcript"; this
 /// one asks "is the machinery that answers that question trustworthy" — and the
-/// answer matters more, because every claim the six goldens make is routed
+/// answer matters more, because every claim the seven goldens make is routed
 /// through it. A harness whose comparator returned `match` unconditionally would
-/// leave all six green forever.
+/// leave all seven green forever.
 ///
 /// Four properties, in the order they can fail:
 ///
@@ -101,13 +101,14 @@ void main() {
       // cannot see in a source file.
       //
       // The em dash is the one that also occurs in real data:
-      // `AgentLoop.continueAfterResults` contains one, so **five of the six**
-      // committed goldens carry a `\u2014` (counted: 1, 1, 6, 0, 7, 3). The
-      // exception is `no_manual_match`, which is a single turn with no tool call
-      // — the loop never appends a `[CONTINUE]` block, so that golden has no
-      // escape of any kind in it. The first version of this comment said "every
-      // committed golden exercises this case", which was one `grep -c` from being
-      // checked — and wrong.
+      // `AgentLoop.continueAfterResults` contains one, so **every** committed
+      // golden carries a `\u2014` (counted: 5, 5, 2, 14, 15, 9, 5). That was not
+      // always true: `no_manual_match` is a single turn with no tool call, so the
+      // loop never appends a `[CONTINUE]` block and it used to hold no escape of
+      // any kind — until the work-order tool's own instruction, which contains an
+      // em dash, joined the system preamble every prompt carries. Counted rather
+      // than assumed, because the first version of this comment asserted the
+      // opposite of what `grep -c` said.
       final raw = [
         'nel:${String.fromCharCode(0x0085)}',
         'ls:${String.fromCharCode(0x2028)}',
@@ -458,7 +459,7 @@ void main() {
     test(
       'verifyGolden fails the test when a committed golden disagrees',
       () {
-        // The `fail()` in `verifyGolden` is what makes all six scenario tests mean
+        // The `fail()` in `verifyGolden` is what makes all seven scenario tests mean
         // anything, and nothing else in this repo exercises it: TC-GOLD-02 goes
         // through `reconcileGolden` directly, precisely because it needs a value
         // rather than an abort. Delete the `fail` and every golden passes forever.
