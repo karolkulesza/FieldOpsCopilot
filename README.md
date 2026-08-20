@@ -283,6 +283,16 @@ have to answer.
 Requires the Flutter SDK (stable, Dart 3.12+). iOS 16.0+ or a 64-bit Android
 device to run the on-device model.
 
+⚠️ **Verified on iOS only.** Every measured figure in this repo came from an iPad.
+The Android side is configured but **has never been run on hardware**: the
+`RECORD_AUDIO` permission and the test that asserts it is declared, both
+backup-exclusion rule files (`fullBackupContent` for API 30 and below,
+`dataExtractionRules` for 31 and above), and all four `sherpa_onnx` ABIs are in
+place, and [microphone capture](docs/microphone-capture.md) reasons about
+`record_android`'s format coercion from the plugin's own source. But reasoning
+about a platform is not running on it, and that is the distinction the rest of
+this README is built on.
+
 ```bash
 flutter pub get
 flutter run
