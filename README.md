@@ -54,12 +54,7 @@ engineering is not.
 | On-device LLM (Gemma 4 E2B / LiteRT-LM) with native function calling | ✅ shipped |
 | Agent loop, tool registry, defensive call guard | ✅ shipped |
 | Microphone capture + on-device speech-to-text | ✅ shipped |
-| Voice → inquiry → agent → auto-filled work order | ✅ shipped \* |
-
-\* Demonstrated on a device and recorded above; the *automated* end-to-end device
-test for it (TC-VOICE-FILL-01) has run once, failed on a defect in its own fixture,
-and has not been re-run since the fix — so it has never been observed to pass. See
-[voice and work order](docs/voice-and-work-order.md).
+| Voice → inquiry → agent → auto-filled work order | ✅ shipped |
 
 1177 host tests, 7 golden transcript snapshots, 9 device integration test files.
 

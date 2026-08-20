@@ -414,7 +414,7 @@ feature puts one of them there, it belongs here."*
 
 See [Voice input and the work order](voice-and-work-order.md).
 
-## Owed on a device
+## On a device
 
 ✅ **Both ACs passed on the demo iPad (Air M4 / iOS 26.5), 3/3, on 2026-07-12** — load 430ms (worker 249ms) from an `absent` install, then 101 frames → 25 transcripts in 391ms with a transcript **byte-identical to the host run**.
 

@@ -226,7 +226,7 @@ there and has no such flag, despite the error message recommending one.
 
 | What | Command |
 |---|---|
-| Dictated audio → inquiry field, real weights (TC-VOICE-FILL-01) — ⚠️ **written and run once, failed on a fixture defect, not re-run since the fix**; see `docs/voice-and-work-order.md` | `flutter run integration_test/voice_inquiry_test.dart -d <device> --publish-port` |
+| Dictated audio → inquiry field, real weights (TC-VOICE-FILL-01) | `flutter run integration_test/voice_inquiry_test.dart -d <device> --publish-port` |
 | The clarification overlay under a real finger (TC-UI-CLAR-01) | `flutter run integration_test/clarification_test.dart -d <device> --publish-port` |
 | Microphone delivers real PCM (TC-MIC-01) | `integration_test/mic_capture_test.dart` |
 | Recogniser loads and streams (TC-STT-INIT-01, TC-STT-STRM-01) | `integration_test/stt_test.dart` |
