@@ -1,5 +1,5 @@
 /// Identity, provenance and integrity fingerprint of an on-device model
-/// artifact — which, since Task 2.0, may be a *set of files* rather than one.
+/// artifact — which may be a *set of files* rather than one.
 ///
 /// Gemma weights cannot live in the repository: they are 0.6–2.6GB, well past what
 /// belongs in git or an app-store binary, and their use is governed by Google's
@@ -8,7 +8,7 @@
 /// runtime.
 ///
 /// **Download gating is a per-repository fact, not a property of a model.** The
-/// task this came from assumed every source needs an access token; measured
+/// easy assumption is that every source needs an access token; measured
 /// against the live hosts, the LiteRT-LM rebuilds differ from the base models. As
 /// of 2026-07-30: `litert-community/gemma-4-E2B-it-litert-lm` reports
 /// `gated: false` and its `resolve` URL answers an anonymous request with a 302 to
@@ -43,7 +43,7 @@ enum ModelConfigurationIssue {
 
 /// One file of a provisionable model artifact, with its own source and pin.
 ///
-/// Task 1.7's descriptor *was* its single file; Task 2.0 splits the file out so a
+/// Originally the descriptor *was* its single file; the file is split out so a
 /// model can be a set (the streaming-zipformer STT model is four files served
 /// individually, not an archive). Integrity stays per file: each one carries its
 /// own SHA-256, because a set-level digest could not say *which* file is wrong,
@@ -89,8 +89,8 @@ class ModelArtifactFile {
 class ModelDescriptor {
   /// Describes a single-file artifact.
   ///
-  /// This is Task 1.7's original shape, kept as the constructor because every
-  /// LLM this app can provision is one file — and because the build-time
+  /// This is the descriptor's original shape, kept as the constructor because
+  /// every LLM this app can provision is one file — and because the build-time
   /// `--dart-define` overlay ([withSource], [ModelCatalog.resolve]) supplies
   /// exactly one URI and one hash, which is only coherent against exactly one
   /// file.
@@ -112,7 +112,7 @@ class ModelDescriptor {
          ),
        ]);
 
-  /// Describes a multi-file artifact — the whole of Task 2.0's new capability.
+  /// Describes a multi-file artifact.
   ///
   /// The set is provisioned all-or-nothing: it is `ready` only when *every* file
   /// is present and vouched for, and an install that fails partway installs
@@ -163,8 +163,8 @@ class ModelDescriptor {
   /// wherever the bytes come from. For the STT model the repository *is* the
   /// stable fact — its config is committed — so its own page serves.
   ///
-  /// A correction to an earlier version of this comment, since it was wrong in a
-  /// way worth not repeating: it claimed a repository URL "could not be checked
+  /// One claim that is wrong in a way worth not repeating: that a repository
+  /// URL "could not be checked
   /// even in principle" because hosts answer `401` for gated *and* non-existent
   /// repositories alike. That is true of the **web** URL only. HuggingFace's API
   /// does distinguish them — `GET /api/models/<repo>` returns the repo with a
@@ -180,14 +180,15 @@ class ModelDescriptor {
   ///
   /// The token and `FIELDOPS_MODEL_URI` arrive as a pair, supplied by one
   /// operator action for one source — so the credential goes only where the
-  /// operator pointed it (review finding R0-F3). Under Task 1.7 that pairing
+  /// operator pointed it. While the catalog was single-model that pairing
   /// was structural (one model, one URI, one token); with committed-source
   /// models in the catalog it has to be stated: the STT entry sets this
   /// `false`, because attaching a token meant for, say, a private LLM mirror
   /// to `huggingface.co` requests would hand a third party the credential —
   /// the same leak the downloader's cross-origin redirect scoping exists to
   /// prevent. `true` remains the default so the define-configured Gemma
-  /// entries (including the gated 3 1B fallback) keep 1.7's behavior exactly.
+  /// entries (including the gated 3 1B fallback) keep the original behavior
+  /// exactly.
   final bool sendsAuthToken;
 
   /// The single file of a single-file model.
@@ -214,7 +215,7 @@ class ModelDescriptor {
   ///
   /// Checked across the whole set — one unconfigured file makes the model
   /// unprovisionable, because a "ready" model with a missing file is not ready.
-  /// A missing source is reported ahead of an unpinned hash so a reviewer who
+  /// A missing source is reported ahead of an unpinned hash so an operator who
   /// has configured neither is pointed at the first step, not the second.
   ModelConfigurationIssue? get configurationIssue {
     if (files.any((f) => f.downloadUri == null)) {
@@ -317,12 +318,11 @@ abstract final class ModelCatalog {
   /// so nothing above the provisioner changes when the choice does.
   static const gemma31bId = 'gemma-3-1b-it-int4';
 
-  /// Streaming STT for Task 2.2, provisioned ahead of it by Task 2.0: a
-  /// sherpa-onnx streaming zipformer (en, 20M params, int8), four files served
-  /// individually from an ungated `apache-2.0` repository.
+  /// Streaming STT: a sherpa-onnx streaming zipformer (en, 20M params, int8),
+  /// four files served individually from an ungated `apache-2.0` repository.
   static const sttZipformerId = 'stt-zipformer-en-20m';
 
-  /// The Gemma terms, which is what a reviewer actually has to accept. Verified to
+  /// The Gemma terms, which is what an operator actually has to accept. Verified to
   /// resolve; a specific model-repository URL is not written down here because it
   /// cannot be (see [ModelDescriptor.licensePage]).
   static const gemmaTermsUrl = 'https://ai.google.dev/gemma/terms';
@@ -433,11 +433,11 @@ abstract final class ModelCatalog {
   /// time.
   ///
   /// A **multi-file** catalog id falls back exactly like an unknown one, and
-  /// this is a rule rather than an accident (review finding R0-F1): the active
+  /// this is a rule rather than an accident: the active
   /// model is the *LLM*, its source and hash arrive as the one-URI/one-hash
   /// `--dart-define` triple, and [resolve] → [ModelDescriptor.withSource] is
-  /// only coherent against exactly one file. Before Task 2.0 every entry was
-  /// single-file so any known id was safe; the STT set made
+  /// only coherent against exactly one file. While every entry was
+  /// single-file any known id was safe; the STT set made
   /// `FIELDOPS_MODEL_ID=stt-zipformer-en-20m` a value an operator can
   /// plausibly pass, and without this rule it threw a `StateError` out of
   /// `soleFile` in every reader of [active] — a crash before the first frame,

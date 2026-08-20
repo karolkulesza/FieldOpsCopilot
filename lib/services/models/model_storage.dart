@@ -34,10 +34,10 @@ enum ModelInstallStatus {
 /// `ModelProvisioner.verifyInstalled` still re-hashes on demand, and the receipt
 /// is invalidated automatically whenever the pinned hash or the file size moves.
 ///
-/// One receipt describes one **file** (Task 2.0: a model may be several). Which
+/// One receipt describes one **file** (a model may be several). Which
 /// file is identified by where the receipt sits — the sidecar next to it — so the
-/// JSON shape is unchanged from Task 1.7 and every receipt already on a device
-/// stays valid.
+/// JSON shape is unchanged from the single-file layout and every receipt already
+/// on a device stays valid.
 ///
 /// **Not a security control.** The receipt sits in the same app-writable directory
 /// as the weights, and its only link to the build is that its digest and size
@@ -92,7 +92,7 @@ class ModelInstallReceipt {
 /// never pollute an iCloud or Android auto-backup — they are reproducible from
 /// the source URL, which is exactly what a backup should not carry.
 ///
-/// **Layout (Task 2.0).** Each model owns a subdirectory named by its id:
+/// **Layout.** Each model owns a subdirectory named by its id:
 ///
 /// ```text
 /// <root>/<model id>/<file>                    installed artifact file
@@ -100,7 +100,7 @@ class ModelInstallReceipt {
 /// <root>/<model id>.part.<nonce>/             an in-flight staged download
 /// ```
 ///
-/// Task 1.7 installed a model's single file flat in `<root>`; the demo device
+/// Earlier builds installed a model's single file flat in `<root>`; the demo device
 /// carries a 2.59GB Gemma install in that layout, and re-downloading it because
 /// the path moved is exactly the regression `ModelArtifactFile.fileName`'s doc
 /// warned about. So [statusOf] migrates the legacy layout by `rename` — same
@@ -175,8 +175,8 @@ class ModelStorage {
   static const String stagingSuffix = '.part';
 
   /// Deletes every staging directory for [descriptor], whatever its nonce,
-  /// except [keep] — plus any staging *files* a Task 1.7 build left at the
-  /// root, which nothing writes any more and nothing else would ever clean.
+  /// except [keep] — plus any staging *files* an earlier flat-layout build left
+  /// at the root, which nothing writes any more and nothing else would ever clean.
   ///
   /// A process killed mid-transfer leaves its `.part.<nonce>` behind with nothing
   /// to resume it, so those bytes are swept rather than accumulated — a
@@ -199,9 +199,9 @@ class ModelStorage {
     final prefix = '${descriptor.id}$stagingSuffix';
     await for (final entry in root.list(followLinks: false)) {
       final name = p.basename(entry.path);
-      // Task 1.7 staged as root-level *files* named `<fileName>.part[.<nonce>]`
-      // — a shape this build no longer writes but an upgraded device can still
-      // carry, at up to 2.6GB per abandoned transfer (review finding R0-F2).
+      // Earlier builds staged as root-level *files* named
+      // `<fileName>.part[.<nonce>]` — a shape this build no longer writes but an
+      // upgraded device can still carry, at up to 2.6GB per abandoned transfer.
       // They match neither the directory check nor the id-based prefix below,
       // so they get their own sweep; `keep` never applies, because no current
       // transfer stages as a file.
@@ -368,14 +368,14 @@ class ModelStorage {
     }
   }
 
-  /// Task 1.7's flat layout: the artifact file directly in [root].
+  /// The legacy flat layout: the artifact file directly in [root].
   File _legacyInstalledFile(ModelArtifactFile file) =>
       File(p.join(root.path, file.fileName));
 
   File _legacyReceiptFile(ModelArtifactFile file) =>
       File(p.join(root.path, '${file.fileName}.receipt.json'));
 
-  /// Moves a Task 1.7 flat-layout install into the model's subdirectory.
+  /// Moves a legacy flat-layout install into the model's subdirectory.
   ///
   /// `rename` within one volume is a metadata operation, so migrating the demo
   /// device's 2.59GB Gemma install costs milliseconds and no disk — where
@@ -422,7 +422,7 @@ class ModelStorage {
           // A legacy sidecar with nothing to migrate against — its artifact is
           // gone, or the new layout already carries a receipt. Either way no
           // code path reads the root location again, so leaving it would be
-          // permanent clutter (raised as a non-blocking Round 0 review note).
+          // permanent clutter.
           try {
             await legacyReceipt.delete();
           } on FileSystemException catch (error) {

@@ -15,8 +15,8 @@ import 'pcm_audio_format.dart';
 /// Paths to the four files the streaming zipformer is made of.
 ///
 /// A record rather than four loose strings because they are only ever meaningful
-/// together: Task 2.0 provisions them as a set and reports `ready` only when every
-/// one of them verifies, so a config holding three of them describes nothing.
+/// together: the provisioner installs them as a set and reports `ready` only when
+/// every one of them verifies, so a config holding three of them describes nothing.
 class SttModelFiles {
   const SttModelFiles({
     required this.encoder,
@@ -25,15 +25,15 @@ class SttModelFiles {
     required this.tokens,
   });
 
-  /// Absolute paths, always to files Task 2.0's provisioner has already hashed
-  /// against its committed pins and installed by atomic rename. This task never
+  /// Absolute paths, always to files the provisioner has already hashed
+  /// against its committed pins and installed by atomic rename. Nothing here
   /// fetches weights.
   final String encoder;
   final String decoder;
   final String joiner;
   final String tokens;
 
-  /// File names as Task 2.0's catalog entry installs them.
+  /// File names as the model's catalog entry installs them.
   ///
   /// Written here so `SttConfig.forInstallDirectory` can compose a config from a
   /// directory, and deliberately **not** imported from `ModelCatalog`: this file
@@ -85,7 +85,7 @@ class SttConfig {
     this.primer,
   });
 
-  /// Builds a config for a Task 2.0 install directory (`…/models/<id>/`).
+  /// Builds a config for a model install directory (`…/models/<id>/`).
   ///
   /// The joining is `'$directory/$name'` rather than `package:path`'s `join`
   /// because the string crosses an isolate port and is handed to a C API that
@@ -103,7 +103,7 @@ class SttConfig {
   final SttModelFiles files;
 
   /// The audio the recogniser is fed. 16 kHz mono, matching both the model's own
-  /// `FeatureConfig` default and what Task 2.1 captures.
+  /// `FeatureConfig` default and what the microphone capture delivers.
   final PcmAudioFormat format;
 
   /// Threads the ONNX runtime may use for one decode step.
@@ -165,16 +165,14 @@ class SttConfig {
   /// metadata reports `decode_chunk_len=32`, `T=39`), and `inputFinished()` does
   /// *not* synthesise the frames the encoder is still waiting for — it only stops the
   /// stream accepting more. So without this the last word of an utterance is dropped
-  /// silently, which is the same defect Task 2.1 found in its own `stop()` and for a
-  /// completely different reason.
+  /// silently, which is the same defect `MicCaptureSession.stop()` had to solve, for
+  /// a completely different reason.
   ///
-  /// **Measured — and measured at a narrower width than an earlier version of this
-  /// comment claimed, which is why the claim is stated with its scope attached.** That
-  /// version said the padding was worth 0.8s because an unpadded run "produced
-  /// `IS VIBRATING EWAIN O` and stopped". Review finding **R0-F4** re-ran both
-  /// configurations over the committed fixture and got **identical** transcripts, with
-  /// neither quoted string reproducible in either — the fixture ends in 0.8s of
-  /// silence of its own, so this padding had nothing left to add to it.
+  /// **Measured — and at a narrower width than first believed, which is why the
+  /// claim is stated with its scope attached.** Re-running padded and unpadded
+  /// configurations over the committed fixture gives **identical** transcripts —
+  /// the fixture ends in 0.8s of
+  /// silence of its own, so this padding has nothing left to add to it.
   ///
   /// What holds is the live-microphone case: audio that ends **at** the last word,
   /// which is what `MicCapture.stop()` produces when the technician releases the
@@ -192,10 +190,10 @@ class SttConfig {
 
   /// Most silence that will be inserted to stand in for dropped audio.
   ///
-  /// Task 2.1's capture backlog is bounded and drops oldest, reporting what it
+  /// The capture backlog is bounded and drops oldest, reporting what it
   /// lost as `MicFrame.precedingGapBytes`. Feeding the recogniser a splice would
-  /// make it transcribe two non-adjacent moments as one phrase — 2.1's stated
-  /// reason for carrying the gap at all. Substituting silence of the gap's own
+  /// make it transcribe two non-adjacent moments as one phrase — the stated
+  /// reason `MicFrame` carries the gap at all. Substituting silence of the gap's own
   /// duration keeps the timeline honest instead.
   ///
   /// It is capped because past the endpoint rule, more silence changes nothing: the
@@ -210,7 +208,7 @@ class SttConfig {
   /// Root the plugin composes its per-platform library path **under**, or `null` for
   /// the platform default.
   ///
-  /// **Not "the directory the library is in" — review finding R0-F8.** Read in
+  /// **Not "the directory the library is in".** Read in
   /// `sherpa_onnx-1.13.5/lib/src/init_native.dart`, the plugin appends a different
   /// suffix per platform, so on macOS the library sits five directories below the
   /// value passed:
@@ -224,9 +222,7 @@ class SttConfig {
   /// **Production always leaves this null.** On Android that is the only value that
   /// works (the bare `libsherpa-onnx-c-api.so` resolves from the app's lib
   /// directory); on iOS it is the only value that *means* anything, since the
-  /// parameter is discarded there. An earlier version of this comment said "on iOS and
-  /// Android that is the only value that works", which was true of Android and false
-  /// of iOS for that second reason.
+  /// parameter is discarded there.
   ///
   /// It is on the config — rather than only on `SherpaRecognizerRuntime`, where it
   /// started — because the worker builds its own runtime after the isolate hop, so a

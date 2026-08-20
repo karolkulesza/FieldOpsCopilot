@@ -1,11 +1,11 @@
 /// The smallest formatter that makes the model's answer readable on screen.
 ///
-/// **Why this exists.** Task 1.11's deliverable is a screen recording, and the
+/// **Why this exists.** The deliverable is a screen recording, and the
 /// answer was being rendered with a plain `Text`. Gemma 4 E2B emits Markdown
 /// unprompted — the two device runs of TC-UI-DEMO-01 both returned an answer built
 /// out of `**Diagnosis based on Manual:**`, `1.  **Isolate Power:**` and
-/// `*   Torx T20 driver` — so the artefact showed the raw syntax. Review finding
-/// R0-F5, and the acceptance test could not have caught it: it compares the
+/// `*   Torx T20 driver` — so the artefact showed the raw syntax. The
+/// acceptance test could not have caught it: it compares the
 /// rendered `Text` against the same raw string, so it confirmed the asterisks
 /// rather than noticing them.
 ///
@@ -16,8 +16,8 @@
 ///   dependency and a parser far larger than the input.
 /// * *Telling the model to write plain prose.* That means editing
 ///   `PromptCompiler`'s preamble, which changes the prompt — and the prompt is what
-///   Task 1.10's six committed goldens snapshot. Regenerating them needs
-///   `test/golden/`, which exists only on that task's unmerged branch. So this fix
+///   the six committed goldens snapshot. Regenerating them needs
+///   `test/golden/`, which lives on an unmerged branch. So this fix
 ///   is deliberately in the **view** layer: it changes nothing any golden can see.
 ///
 /// **The scope is deliberately narrow, and it was chosen by counting rather than
@@ -39,7 +39,7 @@
 /// the dropped text is invisible.
 ///
 /// The invariant that makes this safe, **stated at the width the test actually
-/// asserts it** — review finding R1-F5: *no non-marker character is lost.* The test
+/// asserts it**: *no non-marker character is lost.* The test
 /// deletes every `*`, `-` and `•` from both the input and the rendered output and
 /// requires equality, so it is blind to *which* delimiters were consumed or
 /// rewritten and sensitive only to text going missing.

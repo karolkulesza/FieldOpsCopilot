@@ -8,14 +8,14 @@
 /// saying "E one oh two" is transcribed `E ONE OH TWO`, and it is not possible to
 /// tune, prompt or configure that into `E-102`.
 ///
-/// That is not a cosmetic problem. Task 1.4's [RetrievalRouter] is the reason this
+/// That is not a cosmetic problem. [RetrievalRouter] is the reason this
 /// app can answer about a fault code at all: it extracts codes from free text with
 /// `faultCodePattern`, resolves each against the manual's indexed `code` column,
 /// and puts those hits ahead of the full-text results. The pattern requires
 /// **digits** (`\d{2,4}`). So without this step, every dictated inquiry would skip
 /// the structured lookup entirely and fall through to full-text search — and it
 /// would do so *silently*, returning a plausible answer grounded in whatever bm25
-/// ranked first. Task 1.9's device run already recorded how reachable that failure
+/// ranked first. A device run already recorded how reachable that failure
 /// is: stop words match, so almost any English sentence is a full-text hit.
 ///
 /// The scope is deliberately one job. Casing is left exactly as the recogniser
@@ -50,10 +50,10 @@ const Map<String, String> spokenDigitWords = {
 
 /// Shortest run of digit words that is treated as a number **on its own**.
 ///
-/// **Three, raised from two by review finding R0-F3, and the earlier value came with
-/// a false justification.** The comment here used to end "A run of two or more is not
-/// prose. English says 'one oh two' only when spelling something out." The reviewer
-/// ran the shipped function and refuted it in four inputs:
+/// **Three, raised from two, and the earlier value came with
+/// a false justification** — that "a run of two or more is not
+/// prose. English says 'one oh two' only when spelling something out." Running
+/// the shipped function refuted that in four inputs:
 ///
 /// ```
 /// OH TWO OF THEM ARE LOOSE   →  02 OF THEM ARE LOOSE
@@ -87,8 +87,8 @@ const int minimumDigitRun = 3;
 /// `OF` are all two-letter English words, and it was a two-letter word in front of a
 /// two-word run that produced `NO-12` and `IS-01`.
 ///
-/// **What remains, stated at the width it has — review finding R1-F2.** An earlier
-/// version of this paragraph described the residue as one artificial input ("the
+/// **What remains, stated at the width it has.** It would be easy to
+/// describe the residue as one artificial input ("the
 /// counter-example is the article 'a', which is why `A ONE TWO` still becomes
 /// `A 12`"). Measured, it is a *class*, and it is the approximation idiom of the
 /// measurement register this app is actually used in — every one of these
@@ -101,7 +101,7 @@ const int minimumDigitRun = 3;
 /// I FOUR TWO                          →  I 42                   → I-42
 /// ```
 ///
-/// **`I` is a single-letter English word too**, and the earlier write-up named only
+/// **`I` is a single-letter English word too**, not just
 /// `A`. And the two-letter hazard above is closed only at run length **2** — raising
 /// the floor did not close it at 3:
 ///
@@ -113,7 +113,7 @@ const int minimumDigitRun = 3;
 /// This is kept rather than chased, and the reason is a bound rather than a hope:
 /// `RetrievalRouter` verifies every candidate by lookup, so one that resolves to no
 /// row lands in `unresolved` and the text survives in the residual — the cost is a
-/// wasted lookup, not a wrong answer. R0-F3's actual harm (a *silent* skip of the
+/// wasted lookup, not a wrong answer. The actual harm (a *silent* skip of the
 /// structured lookup, and codes fabricated from bare `OH TWO`) is gone. What is not
 /// acceptable is describing this as one funny input, so the cases above are pinned in
 /// `spoken_digits_test.dart`'s residue group and a future narrowing cannot widen it
@@ -129,7 +129,7 @@ const int minimumPrefixedDigitRun = 2;
 /// Everything **outside an accepted run** is preserved verbatim, whitespace included,
 /// so the result is the recogniser's transcript with substitutions applied rather than
 /// a re-rendering of it. Inside an accepted run only whitespace separates the digit
-/// words — a run stops at any other separator (review finding R0-F7), so there is
+/// words — a run stops at any other separator, so there is
 /// nothing else in it to lose.
 ///
 /// ```
@@ -184,7 +184,7 @@ String normalizeSpokenDigits(String transcript) {
         if (run.isEmpty) break;
         if (scan + 1 >= tokens.length) break;
         if (!_isDigitWord(tokens[scan + 1])) break;
-        // **Whitespace only** — review finding R0-F7. A separator carrying anything
+        // **Whitespace only.** A separator carrying anything
         // else is not whitespace between the digits of one number, and swallowing it
         // deleted content the doc promised to preserve: `ONE 5 TWO` became `12` and
         // `TWO. OH.` became `20.`. Ending the run here keeps "everything outside an

@@ -1,17 +1,18 @@
 /// Loads the model weights before the UI needs to be interactive.
 ///
-/// Task 1.8 shipped [deviceLlmEngineProvider] returning an engine that has *not*
+/// [deviceLlmEngineProvider] returns an engine that has *not*
 /// been initialised, deliberately: loading is seconds of work and gigabytes of
 /// memory, so it should be a decision rather than a side effect of reading a
-/// provider. This is the decision, and Task 1.11's brief is explicit about when it
-/// has to happen — "load the weights before the UI needs to be interactive, behind
-/// the readiness banner … design for it rather than discover it".
+/// provider. This is the decision, and when it happens is a design rule rather
+/// than an accident: load the weights before the UI needs to be interactive,
+/// behind the readiness banner — design for the stall rather than discover it.
 ///
 /// **The measurement that shapes this file.** On the demo device (iPad Air M4,
-/// iOS 26.5, Metal) Task 1.8 measured the *UI isolate* stalling **1445–1728ms**
-/// during the load, across two runs — roughly 90 dropped frames at a 16.7ms
+/// iOS 26.5, Metal) the *UI isolate* stalls **1445–1728ms**
+/// during the load, across two measured runs — roughly 90 dropped frames at a
+/// 16.7ms
 /// budget. The inference isolate is real and the app owns it; the stall is not the
-/// inference, it is the load. Cause unsettled (Task 1.8-F): Metal pipeline
+/// inference, it is the load. Cause unsettled: Metal pipeline
 /// compilation is eliminated by a forced-CPU run that stalled *worse* while
 /// loading faster, and the live hypotheses are memory traffic during the `mmap`
 /// walk and a major GC pause from the worker's shared isolate group.
@@ -122,11 +123,10 @@ class EngineWarmupController extends Notifier<EngineWarmupState> {
   /// would keep that reference, so the screen would sit on a disposed engine and fail
   /// at the next `generate`. It cannot happen now: `_ProvisioningSection` renders
   /// nothing at all when the status is `ready` (`model_readiness_banner.dart`), so
-  /// the only invalidation is on a path that starts from [EngineUnavailable]. Raised
-  /// as a non-blocking review note, and traced to unreachable there rather than here.
+  /// the only invalidation is on a path that starts from [EngineUnavailable].
   ///
   /// Deliberately **not** guarded. A guard against an unreachable state cannot be
-  /// tested, so it would be exactly the unbound claim this task keeps removing. What
+  /// tested, so it would be exactly the unbound claim this file refuses. What
   /// would make it reachable is a "re-verify weights" action offered while the model
   /// is already ready; whoever adds one owns this paragraph.
   Future<void> warmUp() async {
@@ -136,8 +136,8 @@ class EngineWarmupController extends Notifier<EngineWarmupState> {
     // before the load that stalls the UI isolate begins. See the library doc.
     state = const EngineLoading();
 
-    // **The outer `on Object` does not swallow anything — it rethrows.** Raised as
-    // a non-blocking review note: an `Error` escaping this method left `state` at
+    // **The outer `on Object` does not swallow anything — it rethrows.** Without
+    // it, an `Error` escaping this method left `state` at
     // [EngineLoading] forever, and because `warmUp` returns early on that state,
     // every later call was a no-op. The screen then read "Loading model weights —
     // this takes a few seconds" indefinitely, which is the one place this file told

@@ -1,6 +1,6 @@
 /// The only file in this app that talks to `flutter_gemma`.
 ///
-/// Everything above it speaks `LlmEngine` / `LlmEvent` (Task 0.2) and this file is
+/// Everything above it speaks `LlmEngine` / `LlmEvent` and this file is
 /// where those meet the plugin's `InferenceModel` / `InferenceChat` / `ModelResponse`
 /// vocabulary. Concentrating the dependency in one place is what makes the low-RAM
 /// model swap, and any future runtime swap, a change to this file only.
@@ -72,8 +72,8 @@ class GemmaRuntime implements InferenceRuntime {
   /// Guards `FlutterGemma.initialize`, which is per-isolate global state.
   ///
   /// Not `static`: this object's whole lifetime is one isolate, and a static flag
-  /// would be the same per-isolate-versus-process confusion that bit Task 1.7's
-  /// staging nonce. An instance field says what it means — this runtime initialised
+  /// would be the same per-isolate-versus-process confusion that once bit the
+  /// provisioner's staging nonce. An instance field says what it means — this runtime initialised
   /// the plugin it is using.
   bool _pluginInitialized = false;
 
@@ -89,7 +89,7 @@ class GemmaRuntime implements InferenceRuntime {
     if (!_pluginInitialized) {
       // Release builds are silent regardless; in debug this keeps prompts and model
       // output out of the log unless someone deliberately turns them up. The
-      // grounded prompt carries customer-site text, and §3.2 of the spec is
+      // grounded prompt carries customer-site text, and the design is
       // explicit that it must not leak off-device — a log line is a leak.
       FlutterGemma.logLevel = GemmaLogLevel.info;
       await FlutterGemma.initialize(inferenceEngines: const [LiteRtLmEngine()]);
@@ -97,7 +97,7 @@ class GemmaRuntime implements InferenceRuntime {
     }
 
     // `fromFile` *registers* the path — it copies nothing. That matters: the
-    // artifact is 2.6GB and Task 1.7 already placed it in no-backup application
+    // artifact is 2.6GB and the provisioner already placed it in no-backup application
     // support after verifying its SHA-256, so a copy would double the footprint and
     // create a second file nothing has hashed. The plugin marks it protected so its
     // own cleanup never deletes weights it did not download.
@@ -157,8 +157,8 @@ class GemmaRuntime implements InferenceRuntime {
     //     doc), so a per-turn tool set needs a per-turn session; and
     //   * `LlmEngine.generate` is a *stateless* turn — the fake behaves that way and
     //     the golden suite depends on it — so history from turn N must not leak into
-    //     N+1. Task 1.9 owns multi-turn tool round-trips and will extend the
-    //     interface rather than quietly inherit a chat's accumulated history.
+    //     N+1. Multi-turn tool round-trips belong to the agent loop, which extends
+    //     the interface rather than quietly inheriting a chat's accumulated history.
     // The cost is one conversation create, not a model load: the weights stay
     // resident in `_model` across turns.
     final chat = await model.createChat(
