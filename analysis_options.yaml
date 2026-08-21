@@ -33,6 +33,15 @@ analyzer:
   exclude:
     - "**/*.g.dart"
     - "**/*.freezed.dart"
+    # Gitignored scratch: per-task review ledgers and the one-off `dart` and
+    # `python` harnesses written to answer a single question and kept only as a
+    # record of how it was answered. They are not tracked, so CI never sees them
+    # and a clone has none — but locally they contributed 40 `avoid_print`
+    # findings to a report that is otherwise empty, which is the same
+    # noise-trains-you-to-ignore-it problem the generated-file exclusion above
+    # exists to prevent. A report worth reading has to be a report that is
+    # normally silent.
+    - "ledgers/**"
 
 linter:
   rules:
