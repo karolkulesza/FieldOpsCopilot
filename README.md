@@ -198,118 +198,6 @@ cause, and it is the most useful thing in this repo:
 
 → [Speech to text](docs/speech-to-text.md) · [Microphone capture](docs/microphone-capture.md)
 
-## Designed, not built
-
-Everything above this line is code with tests behind it. This section is the
-opposite and says so: these are the decisions a real fleet deployment forces, and
-what the answer would be. They are here because the gap between a working demo and
-a deployable product is mostly *these*, and a README that quietly omits them is
-claiming to have closed it.
-
-**Key management — the one that matters most.** The database cipher is real
-(ChaCha20-Poly1305, KDF iterations pinned explicitly, verified in CI). The key
-management is not: the passphrase is a `--dart-define`, and it falls back to a
-constant literally named `demoDatabaseKey = 'fieldops-demo-key-not-a-secret'`.
-That protects a stolen **file**; it does not protect a stolen **device**, because
-anyone who can read the app bundle can read the key. The fleet answer is a random
-key generated on first launch, held in the iOS Keychain or the Android Keystore
-behind device-passcode protection, and never present in the binary — and it slots
-in behind `databaseEncryptionKeyProvider` without touching a line above it. That
-provider exists at that seam for this reason. The constant is named the way it is
-for the same reason: hiding it behind something innocuous would satisfy the letter
-and invert the intent.
-
-**Credential delivery for model downloads.** Same shape, one layer out. The
-provisioner takes its access token from a `--dart-define`, which means the token
-is in the binary. The fleet answer is a short-lived signed URL issued per device
-by a fetch service, which slots in behind `modelAccessTokenProvider` — again
-without touching the provisioner, which already strips `Authorization` on a
-cross-origin redirect so a signed URL to a CDN cannot leak the credential that
-minted it.
-
-**Thermal and battery governor.** A 2.59GB model generating tokens is the hottest
-thing on the device, and a rugged handset in a machine room has no airflow. The
-design is a telemetry interface over iOS `ProcessInfo.thermalState` and Android
-`PowerManager.getThermalHeadroom()`, feeding a policy that enters a `throttled`
-state and reduces the generation rate. The testable version asserts the *state
-transition and its effect on rate*, never a magic millisecond constant — the same
-rule the rest of this suite follows. This is where the measured 1.67GB RSS and the
-frame-budget numbers stop being trivia and start being inputs.
-
-**Offline sync queue and conflict resolution.** Work orders are written offline by
-definition. The design is a write-ahead transaction log, a network-aware
-background worker, and an explicit conflict policy — server-authoritative,
-technician-priority, or a CRDT merge — chosen per field rather than per record,
-because a technician's own labour hours and a dispatcher's assignment do not want
-the same rule. Deliberately not built: it needs a server, and a server would be
-the least interesting half of it.
-
-**A second vertical, without a second app.** Elevators are one domain; the same
-shape is HVAC, medical-device servicing, rail rolling stock. What retargeting would
-actually cost is a property of where the domain lives, so it is worth being precise
-rather than optimistic. The mechanism is clean: `engines/`, `services/inference/`,
-`services/models/`, the agent loop, the tool-call guard, the tool registry and the
-prompt compiler mention `E-102` and `BRK-990-XP` only in comments, as examples.
-They would move to a new vertical unchanged. The domain itself sits in three
-declared places — the seed asset, the tools registered with `ToolRegistry`, and the
-preamble's description of the job.
-
-Then there are the two places it leaked into code, which are the ones a second
-vertical would actually find. `RetrievalRouter.faultCodePattern` is
-`\b([A-Za-z]{1,2})[\s‐-―-]?(\d{2,4})\b` — one or two letters, an optional dash,
-two to four digits. That is not "an identifier", it is *this* domain's identifier,
-and a vertical numbering its faults `AC-7712-B` gets no code lookup at all while
-every test still passes. And `WorkOrderField` is a Dart enum of four values, so a
-different work order is a code change rather than configuration.
-
-The enum has a sharper edge than the regex. The tool's JSON schema is generated
-from it, which is right — but **the preamble spells the same four fields out in
-prose**, and nothing asserts the two agree. Add a fifth field and it reaches the
-model's tool schema automatically and its instructions not at all: design decision
-6 over again, in the one place I had not thought to look for it. *A schema tells a
-model what a tool is; the preamble tells it what the job requires.* The fleet
-answer to all three is one vertical descriptor owning the field set, the identifier
-pattern, the tool registrations and that preamble fragment together, bound by the
-same agreement test the tool *names* already have. Written down rather than built
-because one vertical cannot show whether the abstraction is the right one — two
-can, and the second one is not free.
-
-**Signed, append-only audit ledger.** "Which manual entry grounded this answer,
-and when" is an OpenTelemetry span model over `FTS_Search` and `LLM_Inference`,
-written to a signed append-only log and exported on reconnect. The observability
-design is the transferable part; the signing is ordinary cryptography.
-
-**Full OTA model pipeline.** The client half is built and proven on device —
-download with progress, streaming SHA-256, atomic install, `doNotBackup`, and an
-install receipt so readiness costs no re-hash. The rest is design: bucket layout,
-device-capability-based model selection (a 4GB Android device gets Gemma 3 1B,
-not E2B), staged rollout, and the App Store size constraints that decide whether
-weights ship in the bundle at all.
-
-**Wake-word activation.** Hands-free matters when both hands are inside a
-controller cabinet. `sherpa_onnx` ships keyword spotting, so the model is not the
-question; the power budget of always-on listening is, and on a shift-long battery
-a hardware-button trigger may simply win.
-
-**Ambient noise suppression.** A speech-enhancement pre-pass (GTCRN or DPDFNet,
-both available in `sherpa_onnx`) between the microphone and the recogniser, traded
-off against added latency — in a machine room the noise floor is the dominant
-error source, well ahead of the model's own accuracy.
-
-**One thing deliberately not designed away: FTS5 instead of embeddings.** The easy
-vector path was one dependency away — `flutter_gemma` ships an embeddings package
-and two RAG stores. SQLite FTS5 with a porter tokenizer plus a structured
-exact-match column for fault codes was chosen anyway, because field-service
-retrieval is dominated by deterministic identifiers (`E-102`, `BELT-330-DRV`) and
-short symptom phrases, where lexical matching with stemming is near-perfect, fully
-deterministic, testable with exact-match assertions, and adds no second model to
-the memory and battery budget. The embedding path stays a documented extension
-point behind the retrieval interface. The honest caveat is recorded in
-[offline retrieval](docs/offline-retrieval.md): stop words match, so the
-seed corpus would retrieve on almost any English sentence — a property of a
-three-entry manual, and one that a real corpus and a real ranking threshold would
-have to answer.
-
 ## Getting started
 
 Requires **Flutter 3.44.9** (Dart 3.12+). iOS 16.0+ or a 64-bit Android device to
@@ -387,6 +275,114 @@ Three things this project does that are worth stealing:
   how the first-word defect was finally reproduced without a device.
 
 → [Testing](docs/testing.md)
+
+## Designed, not built
+
+Everything this README has claimed so far is code with tests behind it. This
+section is the opposite and says so: these are the decisions a real fleet
+deployment forces, and what the answer would be. They are here because the gap
+between a working demo and a deployable product is mostly *these*, and a README
+that quietly omits them is claiming to have closed it.
+
+**Key management — the one that matters most.** The database cipher is real
+(ChaCha20-Poly1305, KDF iterations pinned explicitly, verified in CI). The key
+management is not: the passphrase is a `--dart-define`, and it falls back to a
+constant literally named `demoDatabaseKey = 'fieldops-demo-key-not-a-secret'`.
+That protects a stolen **file**; it does not protect a stolen **device**, because
+anyone who can read the app bundle can read the key. The fleet answer is a random
+key generated on first launch, held in the iOS Keychain or the Android Keystore
+behind device-passcode protection, and never present in the binary — and it slots
+in behind `databaseEncryptionKeyProvider` without touching a line above it. That
+provider exists at that seam for this reason. The constant is named the way it is
+for the same reason: hiding it behind something innocuous would satisfy the letter
+and invert the intent.
+
+**Credential delivery for model downloads.** Same shape, one layer out. The
+provisioner takes its access token from a `--dart-define`, which means the token
+is in the binary. The fleet answer is a short-lived signed URL issued per device
+by a fetch service, which slots in behind `modelAccessTokenProvider` — again
+without touching the provisioner, which already strips `Authorization` on a
+cross-origin redirect so a signed URL to a CDN cannot leak the credential that
+minted it.
+
+**Thermal and battery governor.** A 2.59GB model generating tokens is the hottest
+thing on the device, and a rugged handset in a machine room has no airflow. The
+design is a telemetry interface over iOS `ProcessInfo.thermalState` and Android
+`PowerManager.getThermalHeadroom()`, feeding a policy that enters a `throttled`
+state and reduces the generation rate. The testable version asserts the *state
+transition and its effect on rate*, never a magic millisecond constant — the same
+rule the rest of this suite follows. This is where the measured 1.67GB RSS and the
+frame-budget numbers stop being trivia and start being inputs.
+
+**Offline sync queue and conflict resolution.** Work orders are written offline by
+definition. The design is a write-ahead transaction log, a network-aware
+background worker, and an explicit conflict policy — server-authoritative,
+technician-priority, or a CRDT merge — chosen per field rather than per record,
+because a technician's own labour hours and a dispatcher's assignment do not want
+the same rule. Deliberately not built: it needs a server, and a server would be
+the least interesting half of it.
+
+**A second vertical, without a second app — and the leak that found.**
+Retargeting to HVAC, medical-device servicing or rail rolling stock is cheap
+wherever the domain is *declared*: the seed asset, the tools registered with
+`ToolRegistry`, the preamble's description of the job. `engines/`,
+`services/inference/`, `services/models/`, the agent loop, the guard, the registry
+and the prompt compiler would all move unchanged — they name `E-102` and
+`BRK-990-XP` only in comments.
+
+It is not cheap in the two places the domain leaked into code, and **the sharper
+one is design decision 6 over again.** `WorkOrderField` is a Dart enum of four
+values; the tool's JSON schema is generated from it, which is right — but the
+preamble spells those same four fields out in prose, and **nothing asserts the two
+agree**. Add a fifth field and it reaches the model's tool schema automatically and
+its instructions not at all. *A schema tells a model what a tool is; the preamble
+tells it what the job requires* — found here in the one place I had not thought to
+look for it. The milder leak: `RetrievalRouter.faultCodePattern`
+(`\b([A-Za-z]{1,2})[\s‐-―-]?(\d{2,4})\b`) is not "an identifier" but *this*
+domain's, so a vertical numbering its faults `AC-7712-B` gets no code lookup while
+every test still passes.
+
+The fleet answer to both is one vertical descriptor owning the field set, the
+identifier pattern, the tool registrations and that preamble fragment together,
+bound by the same agreement test the tool *names* already have. Written down rather
+than built because one vertical cannot show whether the abstraction is the right
+one — two can, and the second one is not free.
+
+**Signed, append-only audit ledger.** "Which manual entry grounded this answer,
+and when" is an OpenTelemetry span model over `FTS_Search` and `LLM_Inference`,
+written to a signed append-only log and exported on reconnect. The observability
+design is the transferable part; the signing is ordinary cryptography.
+
+**Full OTA model pipeline.** The client half is built and proven on device —
+download with progress, streaming SHA-256, atomic install, `doNotBackup`, and an
+install receipt so readiness costs no re-hash. The rest is design: bucket layout,
+device-capability-based model selection (a 4GB Android device gets Gemma 3 1B,
+not E2B), staged rollout, and the App Store size constraints that decide whether
+weights ship in the bundle at all.
+
+**Wake-word activation.** Hands-free matters when both hands are inside a
+controller cabinet. `sherpa_onnx` ships keyword spotting, so the model is not the
+question; the power budget of always-on listening is, and on a shift-long battery
+a hardware-button trigger may simply win.
+
+**Ambient noise suppression.** A speech-enhancement pre-pass (GTCRN or DPDFNet,
+both available in `sherpa_onnx`) between the microphone and the recogniser, traded
+off against added latency — in a machine room the noise floor is the dominant
+error source, well ahead of the model's own accuracy.
+
+**One thing deliberately not designed away: FTS5 instead of embeddings.** The easy
+vector path was one dependency away — `flutter_gemma` ships an embeddings package
+and two RAG stores. SQLite FTS5 with a porter tokenizer plus a structured
+exact-match column for fault codes was chosen anyway, because field-service
+retrieval is dominated by deterministic identifiers (`E-102`, `BELT-330-DRV`) and
+short symptom phrases, where lexical matching with stemming is near-perfect, fully
+deterministic, testable with exact-match assertions, and adds no second model to
+the memory and battery budget. The embedding path stays a documented extension
+point behind the retrieval interface. The honest caveat is recorded in
+[offline retrieval](docs/offline-retrieval.md): stop words match, so the
+seed corpus would retrieve on almost any English sentence — a property of a
+three-entry manual, and one that a real corpus and a real ranking threshold would
+have to answer.
 
 ## How this was built
 
