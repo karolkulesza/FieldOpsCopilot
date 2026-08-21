@@ -1,5 +1,7 @@
 # FieldOps Copilot
 
+[![CI](https://github.com/karolkulesza/FieldOpsCopilot/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/karolkulesza/FieldOpsCopilot/actions/workflows/ci.yaml)
+
 An offline-first Flutter app for elevator field-service technicians. A technician
 describes a fault - by voice or by typing - and an **on-device** language model
 retrieves the relevant manual entry, checks the local warehouse, and fills in a
