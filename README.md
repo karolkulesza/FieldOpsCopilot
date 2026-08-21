@@ -361,6 +361,18 @@ which is where most of the findings on this page came from.
 
 ## Deep dives
 
+Sixteen of them, which is more than anyone reads. **If you read two, read
+[on-device inference](docs/on-device-inference.md) and [speech to
+text](docs/speech-to-text.md).** The first is where the measured numbers miss this
+project's own stated targets and say so — TTFT, resident memory, dropped frames.
+The second is where a test double kinder than the hardware cost four defects, two
+fixes reasoned from the code that both failed, and one revert. Everything else
+here is reference, and the table says what each one answers.
+
+Identifiers like `TC-STT-STRM-01` appear throughout these documents. They are this
+project's own labels for the checks each task owed before it could be called done,
+and [testing](docs/testing.md) maps every one to the file that owns it.
+
 | | |
 |---|---|
 | [On-device inference](docs/on-device-inference.md) | Gemma 4 E2B over LiteRT-LM, isolates, native function calling, measured frame budgets |

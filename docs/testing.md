@@ -130,6 +130,17 @@ One note for reproducing it locally: with a warm `.dart_tool/build` cache,
 `build_runner` writes zero outputs and will not restore a stale in-source file, so
 a local pass proves nothing. Delete `.dart_tool/build`, or use a fresh clone.
 
+## A note on `TC-…` identifiers
+
+Test cases are referred to throughout these documents by identifiers of the form
+`TC-STT-STRM-01` — the slice, the property, the ordinal. They exist because a
+check had to be nameable *before* it was written: each one was an acceptance
+condition a task owed, and several are recorded in these docs as **unrun on
+hardware** for weeks before the device session that closed them. A name is what
+made that possible to say out loud. The tables in this document map every
+identifier to the file that owns it, and that mapping is the glossary — there is
+no separate register.
+
 ## The tiers in detail
 
 - **Unit tier** (`test/`) — pure Dart, deterministic, runs in CI on every commit
