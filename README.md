@@ -327,13 +327,20 @@ flutter run integration_test/<file>.dart -d <device> --publish-port
 Three things this project does that are worth stealing:
 
 - **Golden transcripts** over the whole agent loop, not just unit assertions.
-- **Targeted mutation testing.** Every mutation is a concrete defect someone
-  proposed; a fix whose own mutation survives has not been demonstrated, however
-  good the argument. One "fix" in this repo was reverted on exactly that basis.
-  **The harness that applies them is not in this repo** — it is a local script,
-  and the survivor counts quoted throughout these docs are therefore reported
-  rather than reproducible from a clone. The individual mutations are described in
-  the docs precisely enough to re-apply by hand, which is how they were checked.
+- **Targeted mutation testing**, in [`tools/mutation/`](tools/mutation). Every
+  mutation is a concrete defect someone proposed; a fix whose own mutation survives
+  has not been demonstrated, however good the argument. One "fix" in this repo was
+  reverted on exactly that basis. Two sets ship, 59 rows, and they run from a
+  clone: **57 killed, each by the specific test its row predicted, and the two
+  survivors are the two the sets say up front will survive** — each for a reason
+  written at the row rather than in a summary. `--verify` re-checks a set against
+  the current tree in seconds, which is how a row keyed to a line a later fix had
+  rewritten got caught instead of aborting an hour into a sweep. The guards are the
+  part worth reading: every one exists because an earlier version of the harness
+  reported a number that was wrong in a way its own output could not show. Six
+  further slices were mutated with per-task scripts that are not published, and
+  [that README](tools/mutation/README.md) says which counts are reproducible from a
+  clone and which are still only reported.
 - **A live-model suite on the host.** `sherpa_onnx` ships a macOS framework, so
   the real recogniser runs against real weights in CI-free opt-in tests - which is
   how the first-word defect was finally reproduced without a device.
