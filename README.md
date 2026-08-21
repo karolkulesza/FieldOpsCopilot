@@ -242,6 +242,36 @@ because a technician's own labour hours and a dispatcher's assignment do not wan
 the same rule. Deliberately not built: it needs a server, and a server would be
 the least interesting half of it.
 
+**A second vertical, without a second app.** Elevators are one domain; the same
+shape is HVAC, medical-device servicing, rail rolling stock. What retargeting would
+actually cost is a property of where the domain lives, so it is worth being precise
+rather than optimistic. The mechanism is clean: `engines/`, `services/inference/`,
+`services/models/`, the agent loop, the tool-call guard, the tool registry and the
+prompt compiler mention `E-102` and `BRK-990-XP` only in comments, as examples.
+They would move to a new vertical unchanged. The domain itself sits in three
+declared places — the seed asset, the tools registered with `ToolRegistry`, and the
+preamble's description of the job.
+
+Then there are the two places it leaked into code, which are the ones a second
+vertical would actually find. `RetrievalRouter.faultCodePattern` is
+`\b([A-Za-z]{1,2})[\s‐-―-]?(\d{2,4})\b` — one or two letters, an optional dash,
+two to four digits. That is not "an identifier", it is *this* domain's identifier,
+and a vertical numbering its faults `AC-7712-B` gets no code lookup at all while
+every test still passes. And `WorkOrderField` is a Dart enum of four values, so a
+different work order is a code change rather than configuration.
+
+The enum has a sharper edge than the regex. The tool's JSON schema is generated
+from it, which is right — but **the preamble spells the same four fields out in
+prose**, and nothing asserts the two agree. Add a fifth field and it reaches the
+model's tool schema automatically and its instructions not at all: design decision
+6 over again, in the one place I had not thought to look for it. *A schema tells a
+model what a tool is; the preamble tells it what the job requires.* The fleet
+answer to all three is one vertical descriptor owning the field set, the identifier
+pattern, the tool registrations and that preamble fragment together, bound by the
+same agreement test the tool *names* already have. Written down rather than built
+because one vertical cannot show whether the abstraction is the right one — two
+can, and the second one is not free.
+
 **Signed, append-only audit ledger.** "Which manual entry grounded this answer,
 and when" is an OpenTelemetry span model over `FTS_Search` and `LLM_Inference`,
 written to a signed append-only log and exported on reconnect. The observability
