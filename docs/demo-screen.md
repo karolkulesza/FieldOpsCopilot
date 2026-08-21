@@ -129,10 +129,13 @@ load freezes with it. A frozen progress indicator reads as a crashed app, which 
 strictly worse than a static label that says what is happening. So:
 
 - there is no `CircularProgressIndicator` and no `LinearProgressIndicator` anywhere
-  in `diagnose_screen.dart`, and `test/views/diagnose_screen_test.dart` asserts that
+  in the screen's tree — `diagnose_screen.dart` or any of the components it
+  composes — and `test/views/diagnose_screen_test.dart` asserts that
   **structurally** — it walks the tree for any `ProgressIndicator` in the loading
   state, the generating state and the tool-running state, rather than trusting this
-  paragraph;
+  paragraph. The wider wording is deliberate: the widgets this rule is about now
+  live under `components/`, and a claim scoped to one file would have quietly
+  stopped covering them;
 - `EngineWarmupController` sets `EngineLoading` *before* awaiting the load, so the
   frame carrying the static row is painted on the other side of an await boundary,
   i.e. before the work that blocks the isolate begins;

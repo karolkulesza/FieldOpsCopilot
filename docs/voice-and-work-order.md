@@ -54,7 +54,7 @@ not be read at all* — no `form_updates`, or one that is not an object — whic
 Those refusals reach the screen as a counted line under the work-order header
 ("The assistant sent 1 value this form has no field for"), not as their messages:
 `RejectedFieldUpdate.message` is written *for the model* ("send the value as text"),
-which is `_ResultPanel`'s decision about refused tool calls applied to refused
+which is `ResultPanel`'s decision about refused tool calls applied to refused
 fields. That wiring was itself a correction — before it the list reached
 nothing at all, under a docstring naming a reader that did not exist.
 

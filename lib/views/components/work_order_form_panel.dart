@@ -1,7 +1,7 @@
 /// The work order on screen: four fields the agent fills and the technician owns.
 ///
 /// **It is deliberately outside the answer panel**, and that is a layout decision
-/// with a mechanism behind it rather than a matter of taste. `_ResultPanel`
+/// with a mechanism behind it rather than a matter of taste. `ResultPanel`
 /// auto-scrolls to its own bottom on every token, and its `_readerIsDragging` doc
 /// records what putting an interactive surface inside that is worth:
 /// `jumpTo` opens with `goIdle()`, which **disposes the active drag**, so a
@@ -117,7 +117,7 @@ class WorkOrderFormPanel extends ConsumerWidget {
                     ),
                     const SizedBox(width: 8),
                     Expanded(
-                      // Counted rather than listed, which is `_ResultPanel`'s
+                      // Counted rather than listed, which is `ResultPanel`'s
                       // decision about refused *tool calls* applied to refused
                       // *fields*: `RejectedFieldUpdate.message` is written for the
                       // model ("send the value as text"), so it is not a sentence

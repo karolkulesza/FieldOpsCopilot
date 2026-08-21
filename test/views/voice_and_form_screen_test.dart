@@ -747,7 +747,7 @@ void main() {
         findsOneWidget,
       );
       // The message is written for the model, so it does not reach the screen —
-      // `_ResultPanel`'s decision about refused tool calls, applied to fields.
+      // `ResultPanel`'s decision about refused tool calls, applied to fields.
       expect(
         find.textContaining('not a field of the work order'),
         findsNothing,
