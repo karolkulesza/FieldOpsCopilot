@@ -310,8 +310,17 @@ have to answer.
 
 ## Getting started
 
-Requires the Flutter SDK (stable, Dart 3.12+). iOS 16.0+ or a 64-bit Android
-device to run the on-device model.
+Requires **Flutter 3.44.9** (Dart 3.12+). iOS 16.0+ or a 64-bit Android device to
+run the on-device model.
+
+That version is a pin, not a floor, and `stable` is not a substitute for it: on
+2026-08-13 the same commits that had been green for weeks went red on `stable`
+because Flutter 3.47.0 shipped and `drift_dev` regenerated `*.g.dart` differently,
+which the CI freshness gate correctly reported as a dirty tree. The reasoning is in
+[`.github/workflows/ci.yaml`](.github/workflows/ci.yaml) beside the pin. A newer
+toolchain will very likely still pass `flutter test` — but it can hand you a
+`build_runner` diff that is Google's release rather than anything in this
+repository, so if you clone and see one, check your Flutter version first.
 
 ⚠️ **Verified on iOS only.** Every measured figure in this repo came from an iPad.
 The Android side is configured but **has never been run on hardware**: the
