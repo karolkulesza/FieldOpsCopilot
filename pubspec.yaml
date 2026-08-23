@@ -17,7 +17,7 @@ dependencies:
   path_provider: ^2.1.6
   path: ^1.9.1
 
-  # Streaming SHA-256 for model-weight verification: a 2.4GB artifact is hashed
+  # Streaming SHA-256 for model-weight verification: a 2.59GB artifact is hashed
   # chunk-by-chunk as it is written, never buffered in memory.
   crypto: ^3.0.7
   flutter_gemma: ^1.4.1

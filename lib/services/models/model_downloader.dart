@@ -5,7 +5,7 @@ import 'dart:io';
 class ModelByteStream {
   const ModelByteStream({required this.bytes, this.contentLength});
 
-  /// The body, chunk by chunk. Never buffered whole: a 2.4GB artifact must not
+  /// The body, chunk by chunk. Never buffered whole: a 2.59GB artifact must not
   /// pass through memory on its way to disk.
   final Stream<List<int>> bytes;
 

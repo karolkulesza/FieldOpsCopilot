@@ -3,7 +3,7 @@
   Backup and transfer rules for Android 12+ (android:dataExtractionRules).
 
   Both destinations exclude the provisioned model weights, for different reasons:
-  cloud backup because 0.5-2.4GB of re-downloadable weights would consume the
+  cloud backup because 0.58-2.59GB of re-downloadable weights would consume the
   user's backup quota for no recovery value, and device-to-device transfer
   because the new device can fetch the artifact itself — and must re-verify its
   SHA-256 rather than inherit a receipt written on another machine.
