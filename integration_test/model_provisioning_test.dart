@@ -128,7 +128,7 @@ void main() {
         ModelVerificationSource.existingFile,
       );
     },
-    // A 2.4GB artifact over a real link; generous, and still bounded.
+    // A 2.59GB artifact over a real link; generous, and still bounded.
     timeout: const Timeout(Duration(minutes: 45)),
   );
 }

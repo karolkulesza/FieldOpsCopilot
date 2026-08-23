@@ -2,7 +2,7 @@
 <!--
   Auto-backup rules for Android 11 and below (android:fullBackupContent).
 
-  Provisioned model weights (0.5-2.4GB) are excluded: they are re-downloadable
+  Provisioned model weights (0.58-2.59GB) are excluded: they are re-downloadable
   from their pinned source URL, so backing them up buys no recovery value while
   consuming the user's backup quota — multiplied by device count on a managed
   fleet. `domain="file"` is the app's files directory, which is what
