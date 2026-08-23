@@ -1,7 +1,7 @@
 # Device test scenarios
 
 Manual end-to-end checks for FieldOps Copilot on a real device. Everything here
-runs **offline** — the manual, the warehouse and both models are on the device.
+runs **offline** - the manual, the warehouse and both models are on the device.
 
 These complement the automated device tests rather than replacing them. Where an
 `integration_test` file already owns a property, this document says so and does
@@ -15,7 +15,7 @@ flutter run -d <device> \
   --dart-define=FIELDOPS_MODEL_TOKEN=<token, gated sources only>
 ```
 
-The STT model needs **no defines** — its source and four SHA-256 pins are
+The STT model needs **no defines** - its source and four SHA-256 pins are
 committed in the model catalog (see
 [docs/model-provisioning.md](model-provisioning.md)). Wait for both rows of the readiness banner
 to read **Model ready** before starting.
@@ -45,7 +45,7 @@ disagreement is the finding.
 | `SNS-770-OPT` | Optical Door Curtain Sensor | 1 | Aisle 3, Shelf D |
 
 `BELT-330-DRV` at zero is the interesting one, and it is seeded that way on
-purpose — see scenario 2.
+purpose - see scenario 2.
 
 ---
 
@@ -63,13 +63,13 @@ English well and mangles anything alphanumeric. Measured on device:
 | "the cabin is vibrating badly" | verbatim ✅ |
 | "fault code" | `FOLD COLD` / `FALK CODE` |
 | "BRK-990-XP" | `R K 99 YEARS B` |
-| "E-102 on car three" | `E 10 ON CAR THREE` — the digit is lost |
+| "E-102 on car three" | `E 10 ON CAR THREE` - the digit is lost |
 
 Two consequences for how you speak to it:
 
 - **Do not dictate SKUs.** Describe the symptom and let retrieval find the part.
   That is the design: the SKU comes from the manual, not from your voice.
-- **Say a fault code digit by digit** — "E one oh two", not "E one hundred and
+- **Say a fault code digit by digit** - "E one oh two", not "E one hundred and
   two". `spoken_digits.dart` turns `ONE OH TWO` into `102`; it cannot rescue a
   digit the recogniser never emitted. In the run above, "two on" collapsed into
   "on".
@@ -85,7 +85,7 @@ heard, not whether the digits were.
 
 Ordered so each builds on the last. 1, 2 and 6 are the ones worth recording.
 
-### 1 · Typed, four fields — the baseline
+### 1 · Typed, four fields - the baseline
 
 > Fault code E-102 on car three. Brake pads are worn, I replaced BRK-990-XP.
 > Took me an hour and a half, lockout/tagout verified.
@@ -104,7 +104,7 @@ Ordered so each builds on the last. 1, 2 and 6 are the ones worth recording.
 | Safety checkpoints | `lockout/tagout verified` |
 
 `1.5` is the one to look at. Nothing asked the model to convert "an hour and a
-half" — the tool schema only says the field exists.
+half" - the tool schema only says the field exists.
 
 ### 2 · The empty shelf
 
@@ -133,7 +133,7 @@ Tap the microphone and say:
 
 **Expect**
 
-- A near-verbatim transcript — this is the register the model is good at
+- A near-verbatim transcript - this is the register the model is good at
 - **E-102 retrieved from the symptoms alone**, with no fault code spoken
 - `BRK-990-XP` in the answer, which came from the manual rather than from your voice
 
@@ -149,7 +149,7 @@ the primer and not in the microphone.
 
 **Expect** `E-102` to reach the fault code field.
 
-Say it **digit by digit**. The raw transcript will contain no numeral anywhere —
+Say it **digit by digit**. The raw transcript will contain no numeral anywhere -
 watch the inquiry field fill with words and the form field fill with `E-102`, and
 that gap is `normalizeSpokenDigits` doing visible work.
 
@@ -167,7 +167,7 @@ that gap is `normalizeSpokenDigits` doing visible work.
 - Taking it replaces the field; keeping yours drops the offer
 
 This rule is invisible unless provoked, and it is the one the form model is built
-around. A related check: start dictating, then type into the inquiry field — the
+around. A related check: start dictating, then type into the inquiry field - the
 capture **stops**, because a microphone that stays open while its words stop
 arriving reads as broken.
 
@@ -175,7 +175,7 @@ arriving reads as broken.
 
 Run scenario 1, then run scenario 2 **without restarting the app**.
 
-**Expect** technician hours and safety checkpoints to be **empty** — not carried
+**Expect** technician hours and safety checkpoints to be **empty** - not carried
 over from the brake job.
 
 A new inquiry drops the agent's fields and keeps anything you typed by hand
@@ -193,7 +193,7 @@ exactly what made it convincing.
 - No procedure, no part number, no invented fault code
 - A statement that the offline manual has no entry, and a request for the exact
   code on the controller
-- It **may still record what you told it**, and that is deliberate — recording a
+- It **may still record what you told it**, and that is deliberate - recording a
   technician's own words is not invention, and the no-match notice was narrowed
   to say so
 
@@ -206,14 +206,14 @@ answer panel upward while tokens are still arriving**.
 
 Two distinct things, and the first is the one that was broken: the panel was
 **unscrollable during generation**, because the auto-scroll's `jumpTo` disposes
-the active drag on every token — so a reader trying to look back at step 2 was
+the active drag on every token - so a reader trying to look back at step 2 was
 simply refused. Found by driving the app by hand, after a device run that could
 not exercise it. The fix is bound on the host under both platforms' scroll
 physics, but **it has never run on hardware**, which is why this scenario is here
 and not in the automated table.
 
 If the drag works but the panel snaps back to the bottom on the next token, that
-is the *other* half — auto-scroll failing to release — and worth reporting
+is the *other* half - auto-scroll failing to release - and worth reporting
 separately, because they have different causes.
 
 ---
@@ -221,7 +221,7 @@ separately, because they have different causes.
 ## Covered by automated device tests
 
 Do not re-check these by hand; run the file instead. On a **wirelessly** tethered
-iOS device use `flutter run … --publish-port` — `flutter test` cannot launch
+iOS device use `flutter run … --publish-port` - `flutter test` cannot launch
 there and has no such flag, despite the error message recommending one.
 
 | What | Command |
@@ -242,7 +242,7 @@ a modal. **Gemma 4 E2B does not use it.**
 
 Two prompts built to force an ambiguity were run on the demo device and both
 produced prose instead. The second is the sharper result: given a genuinely
-ambiguous door fault it *both* guessed — recording `E-305` and `BELT-330-DRV` —
+ambiguous door fault it *both* guessed - recording `E-305` and `BELT-330-DRV` -
 *and* then asked which part had been fitted, in the answer text. Those are the two
 things the argument exists to prevent, in one turn.
 
@@ -254,7 +254,7 @@ spontaneously, that is worth recording as a finding.
 ## When something disagrees with this document
 
 Prefer the device. Four defects in this app were found by running it and none of
-them were reachable from the host suite — three because a test double was kinder
+them were reachable from the host suite - three because a test double was kinder
 than the hardware, one because a tool description is not an instruction. A run
 that contradicts an expectation here is either a regression or a stale document,
 and both are worth chasing.

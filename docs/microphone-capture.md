@@ -2,7 +2,7 @@
 
 Voice is the demo's differentiator, and it starts with bytes off the microphone.
 `MicCapture` (`lib/services/audio/mic_capture.dart`) opens the mic and delivers
-**16-bit little-endian mono PCM at 16 kHz** — the format `SttEngine.transcribe`
+**16-bit little-endian mono PCM at 16 kHz** - the format `SttEngine.transcribe`
 is declared over, and the rate the streaming STT zipformer wants.
 
 `package:record` does the recording. It sits behind an `AudioInput` interface, the
@@ -24,7 +24,7 @@ this component is about audio hardware:
 
 Every one of these is a claim about `record` 7.1.1 / `record_ios` 2.1.1 /
 `record_android` 2.1.2, arrived at by reading those packages rather than their
-READMEs — a rule this project learned the expensive way on the inference layer.
+READMEs - a rule this project learned the expensive way on the inference layer.
 
 **The stream has no backpressure, and drops what arrives before you listen.**
 `AudioRecorder.startStream` returns a `StreamController.broadcast()` fed from a
@@ -34,9 +34,9 @@ and a subscriber that pauses buffers audio in its subscription with no ceiling.
 Both are the session's problem to solve: it subscribes immediately and holds a
 **bounded** backlog, two seconds by default.
 
-When that bound is hit the *oldest* audio goes, never the newest — a live
+When that bound is hit the *oldest* audio goes, never the newest - a live
 recogniser that falls behind should come back at the present moment with a gap
-behind it rather than accumulate lag it can never pay off — and the newest buffer
+behind it rather than accumulate lag it can never pay off - and the newest buffer
 is always kept, so a bound smaller than one platform buffer degrades to
 latest-only instead of to nothing.
 
@@ -50,7 +50,7 @@ read; a field on the frame is in their hands at the moment it matters.
 
 **A second `startStream` closes the first one silently.** `AudioRecorder.startStream`
 calls `_stopRecordStream()` before opening (`record` 7.1.1), which closes the
-previous controller — so the first consumer's stream *ends with no error*, a
+previous controller - so the first consumer's stream *ends with no error*, a
 transcript that just stops mid-sentence. `MicCapture.start` therefore answers
 `MicCaptureBusy` rather than restarting, and a start after a stop waits on
 `MicCaptureSession.released`, because `isCapturing` goes false when the stop is
@@ -58,7 +58,7 @@ transcript that just stops mid-sentence. `MicCapture.start` therefore answers
 
 **`streamBufferSize` means different things on the two platforms, so it is left
 unset.** `record_ios` passes it to `AVAudioNode.installTap` as an
-`AVAudioFrameCount` — sample *frames*, defaulting to 1024. `record_android` passes
+`AVAudioFrameCount` - sample *frames*, defaulting to 1024. `record_android` passes
 it to `AudioRecord` as `bufferSizeInBytes`. One number cannot mean both, so each
 platform keeps its own default rather than this app picking a figure that is right
 on one of them.
@@ -67,7 +67,7 @@ on one of them.
 
 `stop()` originally cancelled the raw subscription and *then* released the input.
 Buffers the plugin has already handed to its stream but not yet dispatched die
-with the subscription, so every capture lost its tail — the last word of "…and the
+with the subscription, so every capture lost its tail - the last word of "…and the
 brake is dragging", every time, with nothing to indicate it had happened. Six
 tests failed on it at once.
 
@@ -78,7 +78,7 @@ accepted" is precisely where those buffers arrive, so a stream `done` inside it 
 the expected end rather than a fault. The wait is bounded (`drainGrace`, 250ms) on the
 principle that a seam which hangs reports nothing and a frozen UI reads as a
 crash; a test drives a plugin that never closes its stream and asserts both halves
-— the audio still arrives, and the wait is a bound.
+- the audio still arrives, and the wait is a bound.
 
 ## What is deliberately not here
 
@@ -87,13 +87,13 @@ crash; a test drives a plugin that never closes its stream and asserts both halv
 delegate applies only `echoCancel` and `autoGain`, through
 `setVoiceProcessingEnabled`. (`record_android` 2.1.2 *does* honour it, via
 `AudioEffectsManager`.) Setting it would therefore be decoration on the device
-this project is demoed from — a flag that looks like a feature. Ambient-noise
+this project is demoed from - a flag that looks like a feature. Ambient-noise
 filtering stays a designed-but-deliberately-unbuilt feature.
 
 **A Riverpod provider.** Nothing consumes microphone audio yet; the STT engine
 and the work-order form are the consumers, and both own UI this layer does not. A
-provider added now would construct an `AudioRecorder` — which calls a platform
-channel in its constructor — for no reader, and could not be host-tested. Every
+provider added now would construct an `AudioRecorder` - which calls a platform
+channel in its constructor - for no reader, and could not be host-tested. Every
 layer below the UI shipped unwired for the same reason; the wiring belongs with
 whatever has something to wire it to.
 
@@ -102,12 +102,12 @@ whatever has something to wire it to.
 `RecordAudioInput` registers
 `setOnConfigChanged` and faults the capture if the delivered sample rate, channel
 count or encoder differs from what was asked for, because 16-bit PCM at the wrong
-rate does not error — it transcribes as nonsense, and a capture that cannot be
+rate does not error - it transcribes as nonsense, and a capture that cannot be
 trusted is worse than no capture. The *decision* is a pure function and is
 host-tested, including the case that matters most: the plugin fires that callback
 whenever **any** of bit rate, sample rate or channel count was adjusted
 (`RecordConfig.isModified`, both platforms), and bit rate does not exist for a raw
-PCM stream — neither platform's PCM encoder reads it. Faulting a good capture
+PCM stream - neither platform's PCM encoder reads it. Faulting a good capture
 because the platform normalised an unused field would make the tripwire worse than
 not watching at all. The *wiring* is host-tested too, by impersonating the platform
 on `com.llfbandit.record/configChanged/<recorderId>`.
@@ -117,25 +117,25 @@ the reasoning that neither stream path mutates the format. **The plugin's own
 source refuted the Android half.** `FormatCodecSelector.findCodec` calls
 `adjustToDeviceCapabilities(config)` *before* its `MIMETYPE_AUDIO_RAW` early
 return, and that assigns `config.numChannels` from the routed input's advertised
-channel counts — so on an Android device whose default input does not advertise
+channel counts - so on an Android device whose default input does not advertise
 mono, a mono request is silently coerced to stereo and the tripwire is **live**.
 Such a capture is faulted rather than degraded, deliberately: interleaved stereo
 handed to a mono recogniser is every second sample from the wrong channel, and this
 app does not downmix. Downmixing is the obvious alternative and belongs with
-whoever owns the recogniser. iOS genuinely does not coerce — its stream delegate
+whoever owns the recogniser. iOS genuinely does not coerce - its stream delegate
 resamples through `AVAudioConverter` and throws if it cannot.
 
 ## Two design requirements this seam meets by not doing something
 
 The design asks for recorded audio at rest to be encrypted. Capture here is
-**stream-only** — no file is ever written, no path is ever handed to the plugin —
+**stream-only** - no file is ever written, no path is ever handed to the plugin -
 so there is no audio at rest to encrypt. That is a requirement satisfied by a
 design choice rather than by a mechanism, which is exactly the kind of thing that
 looks unimplemented later, so it is written down here.
 
 It also names transcription as isolate work. `MicCapture`'s own per-buffer work runs
-on the UI isolate and is O(1) at roughly sixteen buffers a second — a merge, a
-remainder and a queue push — so it does not need one. The isolate boundary belongs
+on the UI isolate and is O(1) at roughly sixteen buffers a second - a merge, a
+remainder and a queue push - so it does not need one. The isolate boundary belongs
 to the recogniser (see [docs/speech-to-text.md](speech-to-text.md)), which consumes
 the stream this produces.
 
@@ -149,26 +149,26 @@ intuitive one, and because the comment that got it wrong was confident.
 `onData` and `onError` and **no `onDone`**, and neither native side ever ends its
 event channel (`endOfStream` and `FlutterEndOfEventStream` appear nowhere in
 `record_ios` 2.1.1 or `record_android` 2.1.2). So the broadcast controller the
-session listens to closes only when `_stopRecordStream` closes it — from `stop`,
+session listens to closes only when `_stopRecordStream` closes it - from `stop`,
 `cancel`, `dispose`, or a second `startStream`. A stream that ends *by itself* is
-not a thing the plugin does, and the three causes the code once attributed to it —
-a revoked permission, a route change, another app claiming the input — all go
+not a thing the plugin does, and the three causes the code once attributed to it -
+a revoked permission, a route change, another app claiming the input - all go
 somewhere else:
 
 | What happens | What the app sees | Handled by |
 |---|---|---|
 | Android read failure | an **error** on the stream | `onError` → `MicCaptureFault` |
-| iOS audio-session interruption | **silence** — the engine pauses under `AudioInterruptionMode.pause` and never resumes, tap still installed | `stallTimeout` |
+| iOS audio-session interruption | **silence** - the engine pauses under `AudioInterruptionMode.pause` and never resumes, tap still installed | `stallTimeout` |
 | the plugin closing its stream | `done` **during** `stop` | the normal end, not a fault |
 | a stream ending by itself | cannot happen on either platform today | the `onDone` fault, kept as forward-defence for the seam's contract |
 
 The iOS row is the one that mattered, and it had no answer at all. Silence left the
-session `isCapturing` with `frames` open forever — and since `SttEngine.transcribe`
+session `isCapturing` with `frames` open forever - and since `SttEngine.transcribe`
 consumes `frames` to completion, a phone call mid-dictation meant a transcript that
 never arrived, on the device this project is demoed from. `MicCapture.stallTimeout`
 (five seconds, `null` to disable) now faults it. It is re-armed by *any* buffer,
 including an empty one, because a quiet room is a stream of near-zero samples
-rather than an absence of buffers — so what it measures is a dead input, not a
+rather than an absence of buffers - so what it measures is a dead input, not a
 pause in speech.
 
 ---

@@ -22,7 +22,7 @@ decide, and this file does, is four things.
 
 ## How a turn ends, and how the conversation survives it
 
-`LlmEngine.generate` is a **stateless single turn** — a fresh conversation per
+`LlmEngine.generate` is a **stateless single turn** - a fresh conversation per
 call, closed after. There is no accumulated history to inherit, so the loop
 carries the conversation itself, as text, by appending a transcript to the
 prompt it was given:
@@ -43,7 +43,7 @@ The tool results above are the authoritative local warehouse data …
 ```
 
 A turn ends when the engine's stream closes. `LlmDone` is consumed and carries
-no extra information at this layer — waiting for it would hang the loop on a
+no extra information at this layer - waiting for it would hang the loop on a
 runtime that closed without emitting one.
 
 ## What a `GuardFailure` means for a turn
@@ -53,8 +53,8 @@ left the branch open. It is decided here, and it is not a single rule:
 
 - **`noToolCallFound`** means *there was no call here*. The turn is a plain
   answer and the run ends.
-- **Every other reason** — `emptyToolName`, `argumentsUnreadable`,
-  `argumentsNotEncodable` — means the model tried to call something and got it
+- **Every other reason** - `emptyToolName`, `argumentsUnreadable`,
+  `argumentsNotEncodable` - means the model tried to call something and got it
   wrong. That is recoverable: a `[TOOL CALL REJECTED]` block carries the guard's
   message back and the loop continues.
 
@@ -66,7 +66,7 @@ answered.
 
 An **unknown tool name is not a guard failure at all.** The guard passes an
 unresolvable name through unchanged, `ToolRegistry.dispatch` answers
-`unknown_tool`, and that payload is fed back like any other result — one report
+`unknown_tool`, and that payload is fed back like any other result - one report
 of one condition, rather than two that differ by which layer noticed first.
 
 ## Two bounds, doing different work
@@ -76,7 +76,7 @@ of one condition, rather than two that differ by which layer noticed first.
   default leaves room for **two** of them. (This said "one" in three documents
   until review did the arithmetic.) Hitting it stops the loop with `AgentStopReason.iterationCapReached`
   and a message that *reports the failure* rather than summarising a diagnosis
-  the loop never obtained. It is **clamped**, not asserted — an `assert` is
+  the loop never obtained. It is **clamped**, not asserted - an `assert` is
   compiled out in release and would make the clamp unreachable from any test.
 - **The repeat short circuit** is not what makes the loop terminate, and this
   document says so because the code reads as though it might. The same call twice
@@ -87,7 +87,7 @@ of one condition, rather than two that differ by which layer noticed first.
   argument keys are sorted so key order does not make one call look like two;
   nested maps are left alone, and a reordered nested map costs one extra
   execution rather than a wrong answer. **It caches failures too, including
-  `execution_failed`** — for an identical call there is nothing left to correct,
+  `execution_failed`** - for an identical call there is nothing left to correct,
   so replaying it costs no turn out of a four-turn budget; a *different* call is
   a different key and stays open.
 
@@ -96,8 +96,8 @@ of one condition, rather than two that differ by which layer noticed first.
 Everything appended above is written into a prompt whose preamble tells the
 model what to trust, and three of the four embedded pieces are model-authored or
 model-influenced. The third one is not obvious: `get_local_parts_inventory`
-echoes `normalizeSku(<the model's string>)` for a SKU it does not carry — trim
-and upper-case, no character filtering — so **the model chooses the content of a
+echoes `normalizeSku(<the model's string>)` for a SKU it does not carry - trim
+and upper-case, no character filtering - so **the model chooses the content of a
 `[TOOL RESULT]` block**, and the interesting thing to put there is
 `[TOOL RESULT]` followed by an invented stock level.
 
@@ -109,36 +109,36 @@ value can start one:
   first version of this section claimed it was. It escapes every code unit below
   `0x20` plus `"` and `\`, and leaves **U+0085 NEL, U+2028 LINE SEPARATOR,
   U+2029 PARAGRAPH SEPARATOR and U+007F raw**. U+2028 and U+2029 are Unicode
-  *mandatory* line breaks, and `normalizeSku` is `trim().toUpperCase()` — so an
+  *mandatory* line breaks, and `normalizeSku` is `trim().toUpperCase()` - so an
   interior U+2028 in a model-supplied SKU reached the echoed payload verbatim
   and opened a real second `[TOOL RESULT]` at column 0. Exactly the attack this
   section said was closed, found in review and reproduced against the loop.
   `encodeOneLine` re-escapes the survivors as `\uXXXX`, matched by general
   category (`Cc`, `Zl`, `Zp`) rather than by listing four codepoints, for the
   same reason `neutralizeMarkers` is a category rule one layer down. Re-escaping
-  rather than stripping keeps the line valid JSON *and* lossless — a test
+  rather than stripping keeps the line valid JSON *and* lossless - a test
   asserts `jsonDecode` of the output equals the input. The tool *name* is inside
   that encoded line too, not written as bare prose, because a name recovered
   from text is a decoded JSON string and really can contain a line break.
 - **The echoed turn text is the one piece that can legitimately contain line
   breaks**, so it gets the other rule instead: `PromptCompiler.neutralizeMarkers`
   rewrites every Unicode `Ps`/`Pe` codepoint to a round bracket, so it cannot
-  spell a bracketed marker at all. Reused rather than reimplemented — a second
+  spell a bracketed marker at all. Reused rather than reimplemented - a second
   copy of that rule would be a second thing to keep true.
 
 Only the *prompt* copy is neutralised. `AgentTurn.text` keeps what the model
 actually said, because that is what the technician saw and what the golden suite
 snapshots.
 
-**The echo is dropped whenever the guard read the turn's text** — that is,
+**The echo is dropped whenever the guard read the turn's text** - that is,
 whenever no native event arrived. Neutralising that text brace-mangles it, so
 echoing it showed the next turn a corrupted copy of the very JSON shape the
 guard needs it to keep producing. Found in review; the justification for keeping
 the echo ("it is the reasoning that led to the call") is true on the native path
 and false on this one.
 
-The first version of that fix asked the wrong question — "does any *invocation*
-have a text source" — which is silently wrong for a turn whose only text-path
+The first version of that fix asked the wrong question - "does any *invocation*
+have a text source" - which is silently wrong for a turn whose only text-path
 attempt was **refused**, because then there are no invocations at all. That is
 the case that can least afford it: with nothing dispatched there is no
 `[TOOL CALL]` block beside the echo, so the mangled line is the only rendering
@@ -155,7 +155,7 @@ carries what the next turn actually needs.
 One change this forced upstream: the compiled prompt's `[USER INQUIRY]` block
 used to be wrapped in **unescaped** quotes, recorded at the time as safe
 "only while that block is last". It no longer is, so `PromptCompiler.escapeQuotes`
-now escapes the backslash and then the quote — that order, because escaping
+now escapes the backslash and then the quote - that order, because escaping
 quotes first doubles the backslash it just emitted and leaves a live quote
 behind. The invariant is checkable without enumerating hostile inputs: delete
 every escape pair from the inquiry block and exactly two quotes remain, which
@@ -163,7 +163,7 @@ are the delimiters the compiler wrote.
 
 ## What propagates rather than being fed back
 
-Two things, both for the rule the tool registry established — a value the model can
+Two things, both for the rule the tool registry established - a value the model can
 act on is data, and everything else is a defect:
 
 - **An error on the engine's stream.** A broken runtime is not something the
@@ -184,19 +184,19 @@ rather than inherited from the compiler's reasoning about it. Measured on the sh
 |---|---|
 | Two-document grounded prompt (turn 1) | 1581 |
 | After one tool round trip (turn 2) | 2064 (+483) |
-| **Ceiling — four turns, the shipped `maxTurns`** | **~2900** |
+| **Ceiling - four turns, the shipped `maxTurns`** | **~2900** |
 | A third document, if the cap allowed it | +619 |
 
 The ceiling row exists because the first version of this table stopped at 2064
 and the test producing it was named "the widest round-trip prompt the loop can
-build" — which it was not, since it drove two turns against a default of four.
+build" - which it was not, since it drove two turns against a default of four.
 The bound is `maxTurns`-scaled, and the number that matters is the last one.
 
 It is approximate for a reason worth naming: each turn appends an echo of what
 the model said, so the ceiling moves with the *script*, not just with the loop.
 This suite's script measures `[1581, 2038, 2469, 2900]`; an independent
-re-measurement with longer per-turn text gave `[1581, 2066, 2525, 2984]`. The shape — one
-grounded prompt plus three transcript blocks, monotonically growing — is the
+re-measurement with longer per-turn text gave `[1581, 2066, 2525, 2984]`. The shape - one
+grounded prompt plus three transcript blocks, monotonically growing - is the
 property the test pins; the last digit is not.
 
 **Characters, not tokens.** The tokenizer ships with the weights, so a token
@@ -210,19 +210,19 @@ failing if the turn does not complete.
 
 29 mutations across `agent_loop.dart` and the `escapeQuotes` change it forced
 into `prompt_compiler.dart`, each run against the **whole** suite under
-`--reporter expanded` — the default reporter truncates its failing list, which
+`--reporter expanded` - the default reporter truncates its failing list, which
 had already produced two wrong counts in an earlier mutation pass. The harness names a file per mutation
 because this change's behaviour spans two, and it refuses a dirty baseline,
 duplicate mutation *edits* and duplicate mutation *labels*.
 
 **27 killed on the first pass; 2 survived, and both were gaps in the tests
 rather than in the code.** (Review then found a third and fourth hole the set
-did not probe at all — see the later additions below.) Both are failure modes this repo had already
+did not probe at all - see the later additions below.) Both are failure modes this repo had already
 recorded, which is the interesting part:
 
 - **Deleting the loop's engine-readiness check killed nothing**, because
   `FakeLlmEngine.generate` *also* throws a `StateError` when it has not been
-  initialized — so `throwsA(isA<StateError>())` was green with the check gone.
+  initialized - so `throwsA(isA<StateError>())` was green with the check gone.
   A test passing for a reason unrelated to the criterion it was mapped to. It
   now asserts the loop's own message and that the engine was never handed a
   prompt at all.
@@ -233,13 +233,13 @@ recorded, which is the interesting part:
   flight, so the replacement test blocks a tool on a completer and requires
   Started to have arrived while Completed has not.
 
-**After both fixes, all 29 die** — re-measured by running the whole set again
+**After both fixes, all 29 die** - re-measured by running the whole set again
 against the tree at the last commit, not carried over from the first pass.
 
 Adversarial review then showed the set had a hole of its own: nothing in it touched
 `AgentToolCallRejected` or `AgentToolCallStarted.repeated`, and two probes written
 from outside the set survived with zero failing tests. **Five** mutations were
-added — two for the line-terminator re-escaping, two for the unbound stream
+added - two for the line-terminator re-escaping, two for the unbound stream
 signals, one for the dropped echo on the degraded path.
 
 One of the five was itself a bad mutation before it was a passing one, which is
@@ -248,13 +248,13 @@ section keeps describing. Its first form inserted a *no-op* `replaceAllMapped`
 before the real one, so the re-escaping still ran; it reported `SURVIVED`, which
 would have read as "the tests do not cover this" when what it actually showed
 was "this edit changes nothing". A mutation that does not mutate measures the
-mutation, not the suite. Rewritten as two edits that disable the rule for real —
+mutation, not the suite. Rewritten as two edits that disable the rule for real -
 one voiding the pattern, one narrowing the category class to `Cc` so only the
 separators slip through.
 
 A second review pass then found a defect in one of *those* fixes, and with it the
 second hole in the set. The dropped-echo fix asked "does any invocation have a text
-source", which is exact everywhere except when there are no invocations — the
+source", which is exact everywhere except when there are no invocations - the
 turn where every text-path attempt was refused, which is the case the fix
 was about. An `.any` → `.every` probe survived with zero failing
 tests, because the two formulations differ *only* on the empty list. Two more
@@ -263,8 +263,8 @@ them: promoted into the harness so it is re-run rather than remembered.
 
 **36 mutations, 0 survivors**, one run, whole suite, against the tree at the
 last commit. The count is stated here rather than left to the harness's own
-output because this section's standard — "a count of mutations is a claim like
-any other" — applies to itself, and it had gone stale once already: it read 34
+output because this section's standard - "a count of mutations is a claim like
+any other" - applies to itself, and it had gone stale once already: it read 34
 after the set grew to 36.
 
 ## Verified on the demo device (2026-08-05, iPad Air M4, iOS 26.5)
@@ -280,7 +280,7 @@ measurements rather than estimates:
 
 The answer named `BRK-990-XP`, quoted **2 units** in **Aisle 4, Shelf B**, and
 laid out the manual's six procedure steps and three required tools. Those stock
-figures come from the device's own database — they are not facts about
+figures come from the device's own database - they are not facts about
 elevators, so a model answering from its weights could not have produced them.
 That is the whole grounding claim, met end to end.
 
@@ -288,7 +288,7 @@ That is the whole grounding claim, met end to end.
 characters; this run puts a real prompt through a real 2048-token window and it
 completed. 1510 characters of prompt plus 1401 of generated answer is
 comfortably inside it, so `maxDocuments: 2` is not the binding constraint for a
-single-code inquiry. It is *not* a measurement of the ceiling — this retrieval
+single-code inquiry. It is *not* a measurement of the ceiling - this retrieval
 returned one document, not the two the cap allows.
 
 **Still not measured: throughput.** The run reported one total (11332 ms for two
@@ -297,8 +297,8 @@ per-turn elapsed and generated chars/s, so the next run closes it.
 
 ## What the device run found that the host could not
 
-TC-AGENT-E2E-01b — the companion asserting an out-of-scope inquiry retrieves
-nothing — **failed on its premise**, at `expect(retrieved.isEmpty, isTrue)`,
+TC-AGENT-E2E-01b - the companion asserting an out-of-scope inquiry retrieves
+nothing - **failed on its premise**, at `expect(retrieved.isEmpty, isTrue)`,
 before the model was asked anything. Two independent causes:
 
 1. Its fixture said "the hydraulic ram on the loading crane is leaking", and
@@ -306,14 +306,14 @@ before the model was asked anything. Two independent causes:
    and its symptoms name the hydraulic manifold. Choosing a hydraulic term as
    the out-of-domain word for an elevator manual was just wrong.
 2. **Stop words match, and this one is a property of the retrieval path rather
-   than of the fixture.** The sanitizer joins terms with `OR` (deliberately —
+   than of the fixture.** The sanitizer joins terms with `OR` (deliberately -
    see [Offline retrieval](offline-retrieval.md)) and FTS5's `porter` tokenizer removes no stop words,
    so `the`, `on` and `is` each retrieve entries on their own. The fixture would
    have matched with `hydraulic` removed, and so does *"the coffee machine in
    the lobby is broken"*, which contains no elevator word at all.
 
-**Consequence, recorded rather than fixed here.** The no-match block — the thing
-that tells the model there is no entry and forbids a tool call — is reachable
+**Consequence, recorded rather than fixed here.** The no-match block - the thing
+that tells the model there is no entry and forbids a tool call - is reachable
 far less often than the design assumes. A technician asking about something the
 manual does not cover will usually get two *irrelevant* entries and a preamble
 instructing the model to answer only from them. That is a plausible route to a
@@ -331,7 +331,7 @@ by accident.
 
 The fixture itself moved to the phrasing TC-RAG-COMP-01 already verified empty,
 and both device premises now live in `integration_test/e2e_fixtures.dart` with
-host tests asserting them in CI — none of that needed a device, and the run
+host tests asserting them in CI - none of that needed a device, and the run
 spent a build, a 2.6GB transfer and four minutes to learn it.
 
 ---

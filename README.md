@@ -97,7 +97,7 @@ blocking FFI, so a decode step on the UI isolate is a dropped frame, measured.
 ### 1 · A fake engine must be unreachable in production, not merely unused
 
 Every capability has a deterministic fake so the host suite can run without a
-model. The obvious wiring - fall back to the fake when no weights are installed —
+model. The obvious wiring - fall back to the fake when no weights are installed -
 produces something worse than a broken app: one that **answers fluently on a
 device where the model never ran**, indistinguishable from a working app in a
 screen recording.
@@ -208,7 +208,7 @@ That version is a pin, not a floor, and `stable` is not a substitute for it: on
 because Flutter 3.47.0 shipped and `drift_dev` regenerated `*.g.dart` differently,
 which the CI freshness gate correctly reported as a dirty tree. The reasoning is in
 [`.github/workflows/ci.yaml`](.github/workflows/ci.yaml) beside the pin. A newer
-toolchain will very likely still pass `flutter test` — but it can hand you a
+toolchain will very likely still pass `flutter test` - but it can hand you a
 `build_runner` diff that is Google's release rather than anything in this
 repository, so if you clone and see one, check your Flutter version first.
 
@@ -261,7 +261,7 @@ Three things this project does that are worth stealing:
   has not been demonstrated, however good the argument. One "fix" in this repo was
   reverted on exactly that basis. Two sets ship, 59 rows, and they run from a
   clone: **57 killed, each by the specific test its row predicted, and the two
-  survivors are the two the sets say up front will survive** — each for a reason
+  survivors are the two the sets say up front will survive** - each for a reason
   written at the row rather than in a summary. `--verify` re-checks a set against
   the current tree in seconds, which is how a row keyed to a line a later fix had
   rewritten got caught instead of aborting an hour into a sweep. The guards are the
@@ -284,14 +284,14 @@ deployment forces, and what the answer would be. They are here because the gap
 between a working demo and a deployable product is mostly *these*, and a README
 that quietly omits them is claiming to have closed it.
 
-**Key management — the one that matters most.** The database cipher is real
+**Key management - the one that matters most.** The database cipher is real
 (ChaCha20-Poly1305, KDF iterations pinned explicitly, verified in CI). The key
 management is not: the passphrase is a `--dart-define`, and it falls back to a
 constant literally named `demoDatabaseKey = 'fieldops-demo-key-not-a-secret'`.
 That protects a stolen **file**; it does not protect a stolen **device**, because
 anyone who can read the app bundle can read the key. The fleet answer is a random
 key generated on first launch, held in the iOS Keychain or the Android Keystore
-behind device-passcode protection, and never present in the binary — and it slots
+behind device-passcode protection, and never present in the binary - and it slots
 in behind `databaseEncryptionKeyProvider` without touching a line above it. That
 provider exists at that seam for this reason. The constant is named the way it is
 for the same reason: hiding it behind something innocuous would satisfy the letter
@@ -300,7 +300,7 @@ and invert the intent.
 **Credential delivery for model downloads.** Same shape, one layer out. The
 provisioner takes its access token from a `--dart-define`, which means the token
 is in the binary. The fleet answer is a short-lived signed URL issued per device
-by a fetch service, which slots in behind `modelAccessTokenProvider` — again
+by a fetch service, which slots in behind `modelAccessTokenProvider` - again
 without touching the provisioner, which already strips `Authorization` on a
 cross-origin redirect so a signed URL to a CDN cannot leak the credential that
 minted it.
@@ -310,33 +310,33 @@ thing on the device, and a rugged handset in a machine room has no airflow. The
 design is a telemetry interface over iOS `ProcessInfo.thermalState` and Android
 `PowerManager.getThermalHeadroom()`, feeding a policy that enters a `throttled`
 state and reduces the generation rate. The testable version asserts the *state
-transition and its effect on rate*, never a magic millisecond constant — the same
+transition and its effect on rate*, never a magic millisecond constant - the same
 rule the rest of this suite follows. This is where the measured 1.67GB RSS and the
 frame-budget numbers stop being trivia and start being inputs.
 
 **Offline sync queue and conflict resolution.** Work orders are written offline by
 definition. The design is a write-ahead transaction log, a network-aware
-background worker, and an explicit conflict policy — server-authoritative,
-technician-priority, or a CRDT merge — chosen per field rather than per record,
+background worker, and an explicit conflict policy - server-authoritative,
+technician-priority, or a CRDT merge - chosen per field rather than per record,
 because a technician's own labour hours and a dispatcher's assignment do not want
 the same rule. Deliberately not built: it needs a server, and a server would be
 the least interesting half of it.
 
-**A second vertical, without a second app — and the leak that found.**
+**A second vertical, without a second app - and the leak that found.**
 Retargeting to HVAC, medical-device servicing or rail rolling stock is cheap
 wherever the domain is *declared*: the seed asset, the tools registered with
 `ToolRegistry`, the preamble's description of the job. `engines/`,
 `services/inference/`, `services/models/`, the agent loop, the guard, the registry
-and the prompt compiler would all move unchanged — they name `E-102` and
+and the prompt compiler would all move unchanged - they name `E-102` and
 `BRK-990-XP` only in comments.
 
 It is not cheap in the two places the domain leaked into code, and **the sharper
 one is design decision 6 over again.** `WorkOrderField` is a Dart enum of four
-values; the tool's JSON schema is generated from it, which is right — but the
+values; the tool's JSON schema is generated from it, which is right - but the
 preamble spells those same four fields out in prose, and **nothing asserts the two
 agree**. Add a fifth field and it reaches the model's tool schema automatically and
 its instructions not at all. *A schema tells a model what a tool is; the preamble
-tells it what the job requires* — found here in the one place I had not thought to
+tells it what the job requires* - found here in the one place I had not thought to
 look for it. The milder leak: `RetrievalRouter.faultCodePattern`
 (`\b([A-Za-z]{1,2})[\s‐-―-]?(\d{2,4})\b`) is not "an identifier" but *this*
 domain's, so a vertical numbering its faults `AC-7712-B` gets no code lookup while
@@ -346,14 +346,14 @@ The fleet answer to both is one vertical descriptor owning the field set, the
 identifier pattern, the tool registrations and that preamble fragment together,
 bound by the same agreement test the tool *names* already have. Written down rather
 than built because one vertical cannot show whether the abstraction is the right
-one — two can, and the second one is not free.
+one - two can, and the second one is not free.
 
 **Signed, append-only audit ledger.** "Which manual entry grounded this answer,
 and when" is an OpenTelemetry span model over `FTS_Search` and `LLM_Inference`,
 written to a signed append-only log and exported on reconnect. The observability
 design is the transferable part; the signing is ordinary cryptography.
 
-**Full OTA model pipeline.** The client half is built and proven on device —
+**Full OTA model pipeline.** The client half is built and proven on device -
 download with progress, streaming SHA-256, atomic install, `doNotBackup`, and an
 install receipt so readiness costs no re-hash. The rest is design: bucket layout,
 device-capability-based model selection (a 4GB Android device gets Gemma 3 1B,
@@ -367,11 +367,11 @@ a hardware-button trigger may simply win.
 
 **Ambient noise suppression.** A speech-enhancement pre-pass (GTCRN or DPDFNet,
 both available in `sherpa_onnx`) between the microphone and the recogniser, traded
-off against added latency — in a machine room the noise floor is the dominant
+off against added latency - in a machine room the noise floor is the dominant
 error source, well ahead of the model's own accuracy.
 
 **One thing deliberately not designed away: FTS5 instead of embeddings.** The easy
-vector path was one dependency away — `flutter_gemma` ships an embeddings package
+vector path was one dependency away - `flutter_gemma` ships an embeddings package
 and two RAG stores. SQLite FTS5 with a porter tokenizer plus a structured
 exact-match column for fault codes was chosen anyway, because field-service
 retrieval is dominated by deterministic identifiers (`E-102`, `BELT-330-DRV`) and
@@ -380,7 +380,7 @@ deterministic, testable with exact-match assertions, and adds no second model to
 the memory and battery budget. The embedding path stays a documented extension
 point behind the retrieval interface. The honest caveat is recorded in
 [offline retrieval](docs/offline-retrieval.md): stop words match, so the
-seed corpus would retrieve on almost any English sentence — a property of a
+seed corpus would retrieve on almost any English sentence - a property of a
 three-entry manual, and one that a real corpus and a real ranking threshold would
 have to answer.
 
@@ -393,7 +393,7 @@ mine; the typing was assisted. Both facts are in the git history.
 
 The interesting part of working this way is not the speed. It is that a reviewer
 who proposes a concrete defect, and a harness that proves the suite would catch
-it, become cheap enough to apply to **every** task rather than the scary ones —
+it, become cheap enough to apply to **every** task rather than the scary ones -
 which is where most of the findings on this page came from.
 
 ## Deep dives
@@ -401,7 +401,7 @@ which is where most of the findings on this page came from.
 Sixteen of them, which is more than anyone reads. **If you read two, read
 [on-device inference](docs/on-device-inference.md) and [speech to
 text](docs/speech-to-text.md).** The first is where the measured numbers miss this
-project's own stated targets and say so — TTFT, resident memory, dropped frames.
+project's own stated targets and say so - TTFT, resident memory, dropped frames.
 The second is where a test double kinder than the hardware cost four defects, two
 fixes reasoned from the code that both failed, and one revert. Everything else
 here is reference, and the table says what each one answers.

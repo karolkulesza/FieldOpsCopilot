@@ -8,7 +8,7 @@ entries backing the FTS index, and a record of which seed dataset has been appli
 
 Encryption uses **SQLite3MultipleCiphers**, bundled through the `sqlite3`
 package's build hook (`hooks: user_defines: sqlite3: source: sqlite3mc` in
-`pubspec.yaml`) — the current replacement for the now-legacy
+`pubspec.yaml`) - the current replacement for the now-legacy
 `sqlcipher_flutter_libs`/`sqflite_sqlcipher` path. Because the hook bundles the
 encryption-capable library on every platform (including the host), the same
 cipher PRAGMAs run under `flutter test` as on device.
@@ -20,7 +20,7 @@ cipher PRAGMAs run under `flutter test` as on device.
 - **Keying:** the key is applied with `PRAGMA key` inside the `NativeDatabase`
   `setup` callback before any statement runs; a passphrase (KDF-derived) or a
   raw hex key (`x'…'`) is supported.
-- **At rest:** the file header and row contents are ciphertext — verified by
+- **At rest:** the file header and row contents are ciphertext - verified by
   unit tests that assert the raw bytes carry neither the `SQLite format 3`
   magic nor plaintext row data, and that reopening with a wrong key fails.
 

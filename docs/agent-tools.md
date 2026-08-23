@@ -1,11 +1,11 @@
 # Agent tools: the registry
 
 `lib/services/ai/` is the seam between a model that emits a **structured
-tool-call event** — a name plus a JSON-decoded argument map, produced by weights
-and therefore untrusted — and a Dart executor with a real signature.
+tool-call event** - a name plus a JSON-decoded argument map, produced by weights
+and therefore untrusted - and a Dart executor with a real signature.
 
 `ToolRegistry` owns both directions, and keeping them on one object is what keeps
-them from disagreeing — **so long as a tool's `definition` is stable**:
+them from disagreeing - **so long as a tool's `definition` is stable**:
 `registry.definitions` is what goes into `LlmEngine.generate(tools: …)`, and
 `registry.dispatch(call)` is what routes the result back. A tool the model was told
 about is a tool the registry can execute, because the declaration and the dispatch
@@ -13,7 +13,7 @@ key are the *same* string, `definition.name`.
 
 Both hedges were earned in review rather than written up front. This paragraph used
 to say the halves were "impossible to disagree, by construction" while the dispatch
-key came from a separate overridable getter — precisely how they *could* disagree.
+key came from a separate overridable getter - precisely how they *could* disagree.
 Deleting that getter fixed it; documenting the one hazard left then showed
 "impossible" was *still* too strong, because the dispatch map is snapshotted at
 construction while the declarations are recomputed per call. Both corrections
@@ -38,21 +38,21 @@ document that does not ship with this repo, so the reader could not follow it;
 the test name is the reference that survives.)
 
 The statement *order* in the constructor is **not** load-bearing, and an earlier
-version of this section said it was — claiming "a test restores that ordering and
+version of this section said it was - claiming "a test restores that ordering and
 fails" when no such test exists and swapping the two statements leaves all tests
 green. Caught in review, and it is this project's most-repeated failure
 mode: a claim asserting a regression guard that nothing implements. The mutation
-evidence was right; **four** prose descriptions of it were wrong — and the fourth,
+evidence was right; **four** prose descriptions of it were wrong - and the fourth,
 found only after the first correction, was the comment on the test the false claim had
 named as the guard. The count is stated as four rather than three because the first
 correction said three and missed one.
 
-The dispatch key is `definition.name` — the same string the declaration carries.
+The dispatch key is `definition.name` - the same string the declaration carries.
 That is also a correction: `AgentTool` used to expose an overridable `name` getter
 defaulting to `definition.name`, and the registry routed on *it*, so a subclass
 overriding one getter would be declared under one name and dispatched under
 another, permanently `unknown_tool`. Rather than assert the two agree, the second
-name was deleted — the registry now reads `definition.name` and nothing else.
+name was deleted - the registry now reads `definition.name` and nothing else.
 Precisely: a subclass can still define a `name` member of its own, but nothing in
 the registry consults one, so it cannot affect what is declared or what is
 dispatchable. That is narrower than "divergence is impossible", and it is what the
@@ -64,8 +64,8 @@ resolves and dispatches.
 Everything the *model* can get wrong comes back as a `ToolFailure` value with a
 JSON payload, never as a throw: a hallucinated tool name, a missing or mistyped
 argument, a SKU that does not exist. The agent loop's recovery for all of them is
-identical — feed the payload back so the model can correct itself on the next
-turn — and a loop that had to catch exceptions here would be one `on Object` away
+identical - feed the payload back so the model can correct itself on the next
+turn - and a loop that had to catch exceptions here would be one `on Object` away
 from swallowing real defects. The database layer had already applied the same reasoning one
 layer down: `inventoryPartBySku` returns `null` for an unknown SKU rather than
 throwing.
@@ -77,7 +77,7 @@ technician and try again. The split was measured rather than assumed, and the
 measurement corrected a guess:
 
 - `SqliteException` is declared `implements Exception`, so a genuine SQL failure
-  is **recoverable** — it becomes `execution_failed` and the loop survives it.
+  is **recoverable** - it becomes `execution_failed` and the loop survives it.
   Covered by a test that provokes a real one from the driver, not a synthetic
   stand-in.
 - drift's closed-database guard raises **`StateError`**, an `Error`, so it
@@ -89,7 +89,7 @@ measurement corrected a guess:
 
 `ToolFailure.cause` carries the underlying error for logs and tests and is
 deliberately **absent from `payload`**. An exception's `toString()` routinely
-quotes file paths, SQL and row values, and the payload is prompt text — the
+quotes file paths, SQL and row values, and the payload is prompt text - the
 design's device boundary includes the prompt. A test asserts the driver's message, which
 names the offending table, does not appear in the encoded payload.
 
@@ -114,15 +114,15 @@ and "we carry it and have none" are different sentences to a technician, and the
 model can only tell them apart if the payload does. `BELT-330-DRV` is seeded at
 zero stock precisely so a test can hold the two apart. `sku` echoes the **stored**
 row rather than the model's spelling, so the next turn quotes the canonical form.
-`aisle` is present-and-`null` when a row has no location — an omitted key is
+`aisle` is present-and-`null` when a row has no location - an omitted key is
 indistinguishable from a tool that does not report locations, and a placeholder
 string would be text the database does not contain.
 
 A blank `sku` is a **missing parameter**, not an empty warehouse. That could
 plausibly have gone the other way and been one line shorter:
 `inventoryPartBySku('  ')` already returns `null`, which would render as a normal
-"not carried" answer. It would also be a lie about what happened — nothing was
-looked up — and it invites the model to tell a technician a part is unavailable
+"not carried" answer. It would also be a lie about what happened - nothing was
+looked up - and it invites the model to tell a technician a part is unavailable
 when it never named one. Absent, `null` and blank all report
 `missing_parameter` with distinct messages.
 
@@ -135,9 +135,9 @@ by this very schema.
 **Scope note, because the design was two-minded about this tool's signature.** One
 description gives `get_local_parts_inventory(sku_or_name)`, but the only lookup that
 exists is exact-SKU. A name search needs a different query (full-text over
-`inventory_parts.name`, which is not indexed) and a different answer shape —
+`inventory_parts.name`, which is not indexed) and a different answer shape -
 several rows, or a disambiguation question. The tool declares
-`sku` only — the narrower reading, deliberately. Name search is a
+`sku` only - the narrower reading, deliberately. Name search is a
 separate tool, not a widened parameter.
 
 ---

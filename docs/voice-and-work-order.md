@@ -2,7 +2,7 @@
 
 This is two features that share a screen: *dynamic form auto-fill*, and the
 mic → STT → inquiry wiring.
-Both are here. They meet in one place — the agent's turn — and nowhere else: the
+Both are here. They meet in one place - the agent's turn - and nowhere else: the
 microphone writes the **question**, the tool fills the **form**, and neither ever
 writes into the other's field.
 
@@ -10,7 +10,7 @@ writes into the other's field.
 
 The design asks the agent to convert spoken observations into structured JSON.
 The obvious implementation is to look for a `{"form_updates": …}` blob in the
-answer and parse it out. This ships a tool instead — `record_work_order_fields` —
+answer and parse it out. This ships a tool instead - `record_work_order_fields` -
 and the argument is not tidiness:
 
 * **The schema is enforced at generation time.** On-device runs established that this
@@ -27,7 +27,7 @@ and the argument is not tidiness:
 
 The tool is **pure**. It writes nothing and holds no sink: `WorkOrderFormViewModel`
 reads the *payload* and applies it, which is `_CompletedTool._summarise`'s decision
-one layer up — **one parse feeds both readers**, so the screen and the model cannot
+one layer up - **one parse feeds both readers**, so the screen and the model cannot
 disagree about what the call meant.
 
 They can still show different *values*, and that is the next section rather than a
@@ -48,21 +48,21 @@ rejected when most of it landed, so the refusal travels in the payload:
 ```
 
 The failure codes are reserved for a call that recorded nothing *because it could
-not be read at all* — no `form_updates`, or one that is not an object — which
+not be read at all* - no `form_updates`, or one that is not an object - which
 `ToolArguments` already classifies, now including `requiredMap`.
 
 Those refusals reach the screen as a counted line under the work-order header
 ("The assistant sent 1 value this form has no field for"), not as their messages:
 `RejectedFieldUpdate.message` is written *for the model* ("send the value as text"),
 which is `ResultPanel`'s decision about refused tool calls applied to refused
-fields. That wiring was itself a correction — before it the list reached
+fields. That wiring was itself a correction - before it the list reached
 nothing at all, under a docstring naming a reader that did not exist.
 
 A non-string value is **refused rather than coerced**, quoting
 `ToolArguments.requiredString`: `{"technician_hours": 2}` is the model ignoring a
 schema that declares a string, and `2.toString()` would hide that behind a field
-that looks correctly filled. The alternative — declaring that one field a JSON
-`number` — is coherent and was rejected only because it splits four fields into two
+that looks correctly filled. The alternative - declaring that one field a JSON
+`number` - is coherent and was rejected only because it splits four fields into two
 type rules. If a device run shows the model fighting the string type, that is the
 change to make.
 
@@ -84,7 +84,7 @@ on it and offered:
 Both alternatives are worse in a way that shows up on a recording: overwriting
 means a value vanishing under a thumb mid-dictation, and dropping means the agent
 silently failing to record what it heard. An agent update that *agrees* with what
-is there clears the offer rather than raising one — a badge beside a field that
+is there clears the offer rather than raising one - a badge beside a field that
 already says `E-102` is noise that reads as a defect.
 
 Blank means "erase" from the technician and never from the agent, and that
@@ -96,7 +96,7 @@ not.
 
 `clarification` rides on the **same call** that records the fields, so it arrives
 while tokens are streaming into a panel the technician is watching. An inline card
-would be scrolled past — and a question nobody answers is worse than no question,
+would be scrolled past - and a question nobody answers is worse than no question,
 because the agent's next turn is written as though it had been asked. So it is a
 modal, and it is dismissible for exactly that reason.
 
@@ -109,7 +109,7 @@ coherent question.
 One more thing the second tool changed, and it changed a *sentence* rather than
 code: `PromptCompiler.noMatchNotice` told the model "do not call any tool", which
 meant "do not look up a part you have no SKU for" when there was one tool and
-silently became "and do not fill in the work order" when there were two — on the one
+silently became "and do not fill in the work order" when there were two - on the one
 path where the technician's own words are the only source of work-order data. It now
 names the lookup and permits the recording; the grounding
 rule is unchanged, because recording a fault code the technician said out loud is
@@ -130,7 +130,7 @@ follows a listenable instead.
 
 The other is worse: the host popped the **root
 navigator** whenever a presentation was pending, but the route is pushed one
-post-frame callback later — so a clarification cleared inside that window popped the
+post-frame callback later - so a clarification cleared inside that window popped the
 app's *home* route and left a blank screen. Whether a presentation is *pending* and
 whether a route is *up* are now separate questions, and clearing inside the window
 cancels the presentation instead of popping something else.
@@ -141,7 +141,7 @@ Tap the microphone beside the inquiry field, speak, tap again. Partials appear a
 they are heard and each completed utterance is committed by
 `SttTranscript.segment`, so the line grows the way speech does instead of being
 rewritten under the reader. Utterances are joined with a single space, because the
-recogniser emits none and concatenating raw gives `VIBRATINGTHE` — a word that is
+recogniser emits none and concatenating raw gives `VIBRATINGTHE` - a word that is
 in no manual, reaching the full-text query.
 
 **Dictation appends to what was typed** rather than replacing it: a technician who
@@ -150,11 +150,11 @@ they typed. The base is held on the screen rather than in `DictationState`, so t
 controller's line stays a pure transcript.
 
 **And typing takes the field.** The inquiry stays editable while the microphone is
-open, because a technician watching `FALK CODE` land has to be able to fix it —
+open, because a technician watching `FALK CODE` land has to be able to fix it -
 which was a claim the code refuted until it was fixed: the screen rebuilds
 the whole line from `base + transcript` on every state change, so a correction was
 wiped by the next partial, and by the capture merely ending. An edit during a
-capture now releases the mirror and *then* stops the capture, in that order —
+capture now releases the mirror and *then* stops the capture, in that order -
 stopping first flushes a final transcript through a mirror that is still attached,
 which loses the edit through the other door. Stopping rather than only releasing is
 what keeps the status line honest: a microphone that stays open while its words stop
@@ -165,7 +165,7 @@ inquiry a run would read, and a prompt compiled from a sentence that is still be
 spoken is a question nobody asked.
 
 Every refusal is a *state* rather than a throw, on `MicCaptureStart`'s own
-reasoning — no verified speech weights, a denied permission, a microphone that will
+reasoning - no verified speech weights, a denied permission, a microphone that will
 not open, a model that will not load. Each draws a sentence; none of them
 transcribes anything.
 
@@ -173,26 +173,26 @@ transcribes anything.
 
 * **A widget test's clock is faked, and advancing it is not the same as giving the
   event loop time.** `MicCaptureSession.stop` completes when the plugin's stream
-  delivers `done` — real asynchronous work. Measured with a matched control: eight
+  delivers `done` - real asynchronous work. Measured with a matched control: eight
   `pump(100ms)`s left the stop unresolved and `frames` still open; eight
   `runAsync(20ms)`s resolved both.
 * **The stall watchdog is disabled in the widget tests**, and the reason is
   recorded rather than hidden: it is a real `Timer(5s)` armed for the whole of a
-  capture, and `flutter_test` fails any test that ends with one pending — which
+  capture, and `flutter_test` fails any test that ends with one pending - which
   the capture code's own comments predicted in as many words. Its behaviour is bound at
   millisecond scale by `mic_capture_test.dart`, where it is the subject rather than
   a fixture.
 
 The work-order panel also **refuses to virtualise**: a `ListView` does not build
 children below the fold, so a field the agent filled would not exist in the tree
-until someone scrolled to it — unreachable by a test and by assistive technology.
+until someone scrolled to it - unreachable by a test and by assistive technology.
 Four fields is not a list worth virtualising.
 
 ## On a device
 
 ✅ **TC-VOICE-FILL-01 passes on hardware.** It did not on the first attempt, and
 that failure is the more useful half: the test asserted the screen had reached
-`DictationPhase.listening` before the fixture delivered its first frame — and that
+`DictationPhase.listening` before the fixture delivered its first frame - and that
 phase means *audio is arriving*, so the app was right and the double was wrong. The
 fixture had opened a stream and delivered nothing until a later call asked it to.
 It now starts playback when the pipeline subscribes, which is when a microphone
@@ -209,12 +209,12 @@ flutter test integration_test/voice_inquiry_test.dart -d <device>
 It substitutes the **microphone** (the `AudioInput` seam) and plays the
 committed fixture in real time at `MicCapture`'s own frame size, for the reason
 `stt_test.dart` gives: a live microphone makes the assertion depend on the room.
-Everything above that seam is real — frame normalisation, the bounded backlog, the
+Everything above that seam is real - frame normalisation, the bounded backlog, the
 recogniser on its own isolate with real weights, `DictationController`, and the
-screen — so what it proves is the **join**, which is the one thing neither TC-MIC-01
+screen - so what it proves is the **join**, which is the one thing neither TC-MIC-01
 nor TC-STT-STRM-01 covers.
 
-✅ **The model calls `record_work_order_fields` unprompted — observed on device,
+✅ **The model calls `record_work_order_fields` unprompted - observed on device,
 2026-08-19.** This paragraph carried the opposite warning until then, and the
 warning was the right thing to have written: every host test *scripts* the call,
 so the suite proved only that the form fills when a call arrives, never how often
@@ -224,9 +224,9 @@ and only hardware could answer it.
 Two manual runs on an iPad Pro 11 (iOS 17.5), both in airplane mode, against the
 real 2.59GB artifact:
 
-- **Scenario 1** (technician reports finished work) — 4 of 4 fields, including
+- **Scenario 1** (technician reports finished work) - 4 of 4 fields, including
   `1.5` derived from *"an hour and a half"*, which nothing in the schema asks for.
-- **Scenario 2** (technician asks what part they need) — 2 of 4, correctly: the
+- **Scenario 2** (technician asks what part they need) - 2 of 4, correctly: the
   inquiry never mentioned hours or safety checks. The same turn also called
   `get_local_parts_inventory` and reported the part out of stock **in its prose**,
   not merely on the tool card.
@@ -234,7 +234,7 @@ real 2.59GB artifact:
 ⚠️ **One defect the same runs exposed.** On scenario 2 the model sent two values
 under field names the form does not have, and the panel said so
 (*"The assistant sent 2 values this form has no fields for"*). Which two, and
-whether it recurs, is not yet established — the refusal path handled it correctly,
+whether it recurs, is not yet established - the refusal path handled it correctly,
 so this is a question about the tool's schema and description rather than about the
 form.
 
